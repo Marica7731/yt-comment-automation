@@ -10,6 +10,9 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from .rules import apply_song_cleanup as apply_unified_rules  # noqa: F401
+from .rules import has_protected_title as rules_has_protected_title  # noqa: F401
+
 # ---------- 基础文本规整 ----------
 
 
@@ -414,7 +417,13 @@ def strip_loose_edge_title_quotes(text: str) -> str:
 
 
 def clean_song_or_artist_part(text: str) -> str:
-    t = strip_transliteration_parens_from_line(text or "").strip()
+    raw = text or ""
+    # 受保护正式标题（R09）：任何清洗步骤都不删改符号，直接返回干净结果
+    if rules_has_protected_title(raw):
+        return raw.strip()
+    # 先套用 DS 提炼的统一规则（R06/R07/R13/R14/R15：表演备注、译文括号、注音、日期、序号）
+    t = apply_unified_rules(raw)
+    t = strip_transliteration_parens_from_line(t).strip()
     t = strip_timeline_tree_prefix(t)
     t = strip_trailing_latin_annotation_suffix(t)
     t = strip_leading_song_index_marker(t).strip()
