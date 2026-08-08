@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from . import config
@@ -16,6 +17,13 @@ from . import config
 TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 MESSAGE_URL = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
 UA = "yt-comment-automation/0.1"
+
+# 通知时间统一用北京时间（UTC+8）；B 站简介/YouTube 用日本时间（UTC+9）
+BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def beijing_now() -> str:
+    return datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _post_json(url: str, payload: dict, headers: Optional[dict] = None) -> dict:
@@ -60,15 +68,15 @@ def send_feishu_message(text: str, dry_run: bool = False) -> tuple[bool, str]:
     return True, f"飞书已发送 message_id={resp.get('data', {}).get('message_id', '')}"
 
 
-def build_success_brief(bvid: str, yt_link: str, posted_at: str, song_count: int) -> str:
-    """发送成功通知：B站链接、油管链接、评论时间、歌曲数量，中间都用回车。"""
+def build_success_brief(bvid: str, yt_link: str, posted_at: str = "", song_count: int = 0) -> str:
+    """发送成功通知：B站链接、油管链接、评论时间、歌曲数量，中间都用回车。时间用北京时间。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
     return "\n".join(
         [
             "✅评论发送成功",
             bili_link,
             yt_link,
-            posted_at,
+            posted_at or beijing_now(),
             f"歌曲数量：{song_count}",
         ]
     )
@@ -81,20 +89,6 @@ def build_failure_brief(bvid: str, reason: str) -> str:
             "❌评论发送失败",
             bili_link,
             f"原因：{reason}",
-            f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
-        ]
-    )
-
-
-def build_no_songs_brief(bvid: str, yt_link: str, title: str, reason: str) -> str:
-    """报告：该视频没有可用的歌名时间戳评论（无置信来源，未写评论）。"""
-    bili_link = f"https://www.bilibili.com/video/{bvid}"
-    return "\n".join(
-        [
-            "⚠️暂无歌名时间戳评论（未写）",
-            bili_link,
-            yt_link if yt_link else "",
-            f"视频：{title[:60]}",
-            f"原因：{reason}",
+            f"时间：{beijing_now()}",
         ]
     )

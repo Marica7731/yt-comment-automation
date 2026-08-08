@@ -291,30 +291,17 @@ def run_pipeline(
         if result.status in {"posted", "ignored"} and not dry_run:
             posted.add(result.bvid)
             if result.status == "posted":
-                # 飞书通知
-                posted_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                # 飞书通知（仅新投稿发布时；无新增/缺歌单不播报）
                 brief = notify.build_success_brief(
                     bvid=result.bvid,
                     yt_link=f"https://youtu.be/{result.yt_id}",
-                    posted_at=posted_at,
+                    posted_at=notify.beijing_now(),
                     song_count=result.song_count,
                 )
                 ok, note = notify.send_feishu_message(brief)
                 logger.info("  飞书通知: %s %s", ok, note)
         elif result.status == "error" and not dry_run:
             brief = notify.build_failure_brief(bvid=result.bvid, reason=result.error)
-            try:
-                notify.send_feishu_message(brief)
-            except Exception:  # noqa: BLE001
-                pass
-        elif result.status == "skipped_no_songs" and not dry_run:
-            # 报告真正没有歌名时间戳评论的视频（无置信来源）
-            brief = notify.build_no_songs_brief(
-                bvid=result.bvid,
-                yt_link=f"https://youtu.be/{result.yt_id}" if result.yt_id else "",
-                title=result.title,
-                reason=result.detail,
-            )
             try:
                 notify.send_feishu_message(brief)
             except Exception:  # noqa: BLE001
