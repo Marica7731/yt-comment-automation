@@ -52,12 +52,18 @@ def main() -> int:
 
     from . import pipeline
 
-    dry_run = args.command == "dry-run"
+    # dry-run 命令强制不发布；run 命令默认遵守 DRY_RUN 环境变量（未设置时默认 1=干跑，避免误发）
+    if args.command == "dry-run":
+        dry_run = True
+    else:
+        dry_run = config.dry_run()
+        if dry_run:
+            print("DRY_RUN=1：仅干跑不发布（如要真实发布请 export DRY_RUN=0）")
     bvids = args.bvid or None
     if bvids:
         mode = "specific"
     else:
-        mode = "incremental" if args.command == "run" else "incremental"
+        mode = "incremental"
 
     record = pipeline.run_pipeline(mode=mode, dry_run=dry_run, limit=args.limit, specific_bvids=bvids)
 
