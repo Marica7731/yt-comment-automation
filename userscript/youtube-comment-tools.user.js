@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube 评论纯文本复制 + AI整理（括号保护 + 曲目数量校正版）
 // @namespace    https://www.culua.com/
-// @version      2.9.0
+// @version      2.9.1
 // @description  在 YouTube 每条评论右上角添加“复制 / AI整理 / 设置”按钮，复制按钮改为复制评论 HTML 方便排查，带完整调试日志，兼容 Trusted Types，并保护正式名称括号；兼容开闭幕类章节时间轴；重复时间轴结果自动合并；兼容“时间戳 + ;”占位行、编号曲目后置起止时间；修复多条相同歌单但时间不同被误去重；仅对含时间戳评论显示 AI整理并高亮，含时间戳评论会按时间戳数量前置排序；本地代码清洗结果直接外显可复制，AI整理作为手动兜底
 // @author       ChatGPT
 // @match        https://www.youtube.com/*
@@ -924,9 +924,10 @@
     return (text || '').replace(/\s*[（(](?:少し|ちょっと|うろ覚え|練習|[0-9０-９]+番のみ|short\.?|ワンコーラス|途中まで)[）)]\s*(?=\/|$)/u, '');
   }
 
-  // RULES.md R06：删除歌名末尾含空格或 | 的罗马字/译文括号（保护 ryo(supercell)）
+  // RULES.md R06：删除歌名末尾含空格或 | 的罗马字/译文括号（保护 ryo(supercell)；
+  // 括号内含 Remix/Mix/Live/Ver/Edit/Instrumental 等版本词时保留）
   function stripParentheticalTransliteration(text) {
-    return (text || '').replace(/\s*[(（][^)）]*(?:\s|\|)[^)）]*[)）]\s*(?=\/|$)/u, '').trim();
+    return (text || '').replace(/\s*[(（](?!.*\b(?:remix|mix|live|ver\.?|edit|instrumental)\b)[^)）]*(?:\s|\|)[^)）]*[)）]\s*(?=\/|$)/iu, '').trim();
   }
 
   function cleanSongOrArtistPart(text) {
@@ -994,7 +995,7 @@
     let t = normalizeTimelineMarkerChars(text || '').trim();
 
     const patterns = [
-      /^Re\s*[:：]\s*/iu,
+      /^Re\s*[:：]\s*(?![A-Za-z])/iu,
       /^【\s*\d{1,3}\s*】\s*/u,
       /^[⟦〚]\s*\d{1,3}\s*[⟧〛]\s*/u,
       /^\[\s*\d{1,3}\s*\]\s*/u,

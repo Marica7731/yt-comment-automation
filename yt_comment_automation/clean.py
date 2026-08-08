@@ -326,7 +326,7 @@ def strip_leading_song_context_marker(text: str) -> str:
 def strip_leading_serial_marker(text: str) -> str:
     t = normalize_timeline_marker_chars(text or "").strip()
     patterns = [
-        re.compile(r"^Re\s*[:：]\s*", re.IGNORECASE),
+        re.compile(r"^Re\s*[:：]\s*(?![A-Za-z])", re.IGNORECASE),
         re.compile(r"^【\s*\d{1,3}\s*】\s*"),
         re.compile(r"^[⟦〚]\s*\d{1,3}\s*[⟧〛]\s*"),
         re.compile(r"^\[\s*\d{1,3}\s*\]\s*"),

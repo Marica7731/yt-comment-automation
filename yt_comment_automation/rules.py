@@ -25,8 +25,10 @@ LIST_DECORATION_PREFIX_RE = re.compile(r"^[└├│▸▪●○◆◇☆★➔�
 # --- R05 歌名最外层成对单引号 ---
 SURROUNDING_SINGLE_QUOTES_RE = re.compile(r"^'([^']*)'")
 
-# --- R06 末尾译文/罗马字括号（内含空格或 |）---
-TRANSLITERATION_PAREN_SUFFIX_RE = re.compile(r"\s*[(（][^)）]*(?:\s|\|)[^)）]*[)）]\s*(?=/|$)")
+# --- R06 末尾译文/罗马字括号（内含空格或 |；版本词 Remix/Mix/Live/Ver 保护，忽略大小写）---
+TRANSLITERATION_PAREN_SUFFIX_RE = re.compile(
+    r"(?i)\s*[(（](?!.*\b(?:remix|mix|live|ver\.?|edit|instrumental)\b)[^)）]*(?:\s|\|)[^)）]*[)）]\s*(?=/|$)"
+)
 
 # --- R07 末尾表演备注括号 ---
 PERFORMANCE_NOTE_PAREN_SUFFIX_RE = re.compile(

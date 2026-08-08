@@ -88,3 +88,29 @@ def test_apply_song_cleanup_integration():
     assert rules.apply_song_cleanup("Don't say \"lazy\" - 桜高軽音部") == "Don't say \"lazy\" - 桜高軽音部"
     # 发行日期删除
     assert rules.apply_song_cleanup("Aimer (2019/05/05)") == "Aimer"
+
+
+def test_ds_evolve_re_i_am_protected():
+    """R02/R13/SerialMarker：RE:I AM 的 RE: 是歌名一部分，不可剥离。"""
+    parsed = rules.apply_song_cleanup("01. RE:I AM // Aimer")
+    assert "RE:I AM" in parsed
+    assert "Aimer" in parsed
+
+
+def test_ds_evolve_remix_protected():
+    """R06：括号内含 Remix 是版本标注，不是译文注释，保留。"""
+    parsed = rules.apply_song_cleanup("モニタリング (Best Friend Remix) / DECO*27")
+    assert "モニタリング (Best Friend Remix)" in parsed
+    assert "DECO*27" in parsed
+
+
+def test_ds_evolve_performance_notes():
+    """R07：表演备注括号删除（含新 short. 变体）。"""
+    parsed = rules.apply_song_cleanup("メルティランドナイトメア(short.) // 初音ミク／はるまきごはん")
+    assert "メルティランドナイトメア" in parsed
+
+
+def test_ds_evolve_fullwidth_bracket_numeral():
+    """R03：全角括号序号剥离。"""
+    parsed = rules.apply_song_cleanup("〔10〕 JANE DOE")
+    assert "JANE DOE" in parsed
