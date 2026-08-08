@@ -921,12 +921,12 @@
 
   // RULES.md R07：删除歌名末尾"只唱一部分"表演备注括号（（少し）（ちょっと）（1番のみ）（練習）（うろ覚え）等）
   function stripPerformanceNoteParens(text) {
-    return (text || '').replace(/\s*[（(](?:少し|ちょっと|うろ覚え|練習|[0-9０-９]+番のみ|short\.?|ワンコーラス|途中まで)[）)]\s*(?=/|$)/u, '');
+    return (text || '').replace(/\s*[（(](?:少し|ちょっと|うろ覚え|練習|[0-9０-９]+番のみ|short\.?|ワンコーラス|途中まで)[）)]\s*(?=\/|$)/u, '');
   }
 
   // RULES.md R06：删除歌名末尾含空格或 | 的罗马字/译文括号（保护 ryo(supercell)）
   function stripParentheticalTransliteration(text) {
-    return (text || '').replace(/\s*[(（][^)）]*(?:\s|\|)[^)）]*[)）]\s*(?=/|$)/u, '').trim();
+    return (text || '').replace(/\s*[(（][^)）]*(?:\s|\|)[^)）]*[)）]\s*(?=\/|$)/u, '').trim();
   }
 
   function cleanSongOrArtistPart(text) {
