@@ -1,0 +1,8 @@
+# 敏感/运行态文件——绝不上传
+private.env
+runtime/
+data/
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
