@@ -26,18 +26,21 @@ def test_parse_ai_output_no_timestamp_fallback():
     assert items[0].timestamp_seconds is None
 
 
-def test_parse_ai_output_skips_no_artist():
+def test_parse_ai_output_keeps_no_artist():
     text = "0:01:00 01. ただの曲名\n0:02:00 02. 有効曲 - 歌手"
     items = ai.parse_ai_output_to_items(text)
-    assert len(items) == 1
-    assert items[0].song == "有効曲"
+    assert len(items) == 2
+    assert items[0].song == "ただの曲名"
+    assert items[0].artist == ""
+    assert items[1].song == "有効曲"
 
 
-def test_parse_ai_output_skips_unknown_artist():
+def test_parse_ai_output_unknown_artist_cleared():
     text = "0:01:00 01. 曲 - 未記載\n0:02:00 02. 有効曲 - 歌手"
     items = ai.parse_ai_output_to_items(text)
-    assert len(items) == 1
-    assert items[0].song == "有効曲"
+    assert len(items) == 2
+    assert items[0].artist == ""  # 未記載 → 视为无歌手
+    assert items[1].song == "有効曲"
 
 
 def test_parse_ai_output_skips_blank_lines():

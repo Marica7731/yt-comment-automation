@@ -90,6 +90,14 @@ def dry_run() -> bool:
     return get("DRY_RUN", "1") == "1"
 
 
+def require_artist() -> bool:
+    """是否强制要求歌手字段（默认 0=允许只有歌名）。
+
+    插件场景（油猴）强制必须有歌手；B 站评论场景用户确认"只有歌名无所谓的"，可放宽。
+    """
+    return get("REQUIRE_ARTIST", "0") == "1"
+
+
 def data_dir() -> Path:
     path = Path(get("DATA_DIR", str(ROOT / "data")))
     path.mkdir(parents=True, exist_ok=True)

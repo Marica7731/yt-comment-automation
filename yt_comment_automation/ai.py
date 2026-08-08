@@ -21,9 +21,10 @@ PROMPT_TEMPLATE = """你现在要根据我提供的一段 YouTube 评论区时�
 
 【核心原则】
 1. 只提取"明确是歌曲"的条目，按原出现顺序输出。
-2. 每首歌必须同时出现"歌名"和"歌手"才算有效；没有歌手的行直接跳过，不输出。
-3. 不要联网，不要用外部知识补全，不要猜测，不要脑补，只能根据我提供的文本判断。
-4. 最终只输出结果列表，不能有任何说明文字。
+2. 同时有"歌名"和"歌手"的条目优先完整输出；只有歌名没有歌手的条目也可保留（输出为 时间戳 NN. 歌名）。
+3. 只有歌手没有歌名的行跳过。
+4. 不要联网，不要用外部知识补全，不要猜测，不要脑补，只能根据我提供的文本判断。
+5. 最终只输出结果列表，不能有任何说明文字。
 
 【时间戳处理】
 1. 每一行必须保留原文里该歌曲对应的开始时间戳（形如 0:03:55、3:04、1:01:09）。
@@ -34,11 +35,10 @@ PROMPT_TEMPLATE = """你现在要根据我提供的一段 YouTube 评论区时�
 【严格筛选规则】
 以下内容一律视为非歌曲，直接跳过：
 1. talk、雑談、MC、聊天、感想、开场、结束、告知、企划说明、串场、休息、返场。
-2. 只有时间戳，没有歌名歌手的行。
-3. 只有歌名，没有歌手的行。
-4. 只有歌手，没有歌名的行。
-5. 描述性内容、说明性内容、话题、段子、互动内容。
-6. 宣伝、告知、お知らせ、ファンクラブ等宣传内容。
+2. 只有时间戳，没有歌名的行。
+3. 只有歌手，没有歌名的行。
+4. 描述性内容、说明性内容、话题、段子、互动内容。
+5. 宣伝、告知、お知らせ、ファンクラブ等宣传内容。
 
 【括号内容处理】
 1. 括号内容是罗马字、英文对照、读音、翻译说明时删除（如 ("Hibi" - Higuchi Ai)、[Rokutōsei]）。
@@ -51,11 +51,12 @@ PROMPT_TEMPLATE = """你现在要根据我提供的一段 YouTube 评论区时�
 2. 最终输出统一用半角连字符 -，左右各一个半角空格：歌名 - 歌手。
 
 【输出格式】
-1. 每行一首，格式严格为：时间戳 NN. 歌名 - 歌手（例如：0:03:55 01. バラライカ - 月島きらり）
+1. 每行一首。有歌手的格式为：时间戳 NN. 歌名 - 歌手（例如：0:03:55 01. バラライカ - 月島きらり）
+   没有歌手的格式为：时间戳 NN. 歌名（例如：0:20:00 05. clock lock works）
 2. 编号从 01 开始连续递增，1-99 首用两位编号 01.，100 首以上用三位 001.。
 3. 禁止输出空行、标题、前言、后记、代码块标记、括号补充、备注。
 4. 除结果列表外不能输出任何其他内容。
-5. 如果整份列表里的条目全都没有歌手信息，只输出：请提供歌手信息后再处理。
+5. 如果整份列表里没有任何歌名条目，只输出：请提供歌名信息后再处理。
 
 下面是要整理的时间轴："""
 
@@ -83,7 +84,7 @@ def call_deepseek(user_text: str, timeout: int = 180, retries: int = 2) -> tuple
         ],
         "max_output_tokens": 8000,
         "temperature": 0,
-        "reasoning": {"effort": "low"},
+        "reasoning": {"effort": "high"},
     }
     last_err = ""
     for attempt in range(retries + 1):
@@ -113,12 +114,13 @@ def call_deepseek(user_text: str, timeout: int = 180, retries: int = 2) -> tuple
 
 
 def parse_ai_output_to_items(text: str) -> list[ParsedSong]:
-    """解析 DeepSeek 输出「时间戳 NN. 歌名 - 歌手」为条目。
+    """解析 DeepSeek 输出「时间戳 NN. 歌名 - 歌手」或「时间戳 NN. 歌名」为条目。
 
-    兼容两种输出：
-    - 0:03:55 01. バラライカ - 月島きらり（新提示词）
-    - 01. バラライカ - 月島きらり（旧提示词兜底）
-    无时间戳、无歌手、或格式不符的行直接跳过（无置信来源不输出）。
+    兼容：
+    - 0:03:55 01. バラライカ - 月島きらり（有歌手）
+    - 0:20:00 05. clock lock works（无歌手）
+    - 01. バラライカ - 月島きらり（无时间戳旧格式）
+    无歌名、或时间戳/编号格式不符的行直接跳过（无置信来源不输出）。
     """
     import re
 
@@ -140,24 +142,28 @@ def parse_ai_output_to_items(text: str) -> list[ParsedSong]:
         if not m:
             continue
         body = m.group(2).strip()
-        # 歌名 - 歌手（最后一个 " - " 分隔，避免歌名本身含连字符）
+        # 歌名 - 歌手（最后一个 " - " 分隔，避免歌名本身含连字符）；无 " - " 则整行为歌名
         split_idx = body.rfind(" - ")
-        if split_idx <= 0:
-            # 兼容 / 分隔
+        if split_idx > 0:
+            song = body[:split_idx].strip()
+            artist = body[split_idx + 3 :].strip()
+        else:
             split_idx = body.rfind(" / ")
-            if split_idx <= 0:
-                continue
-        song = body[:split_idx].strip()
-        artist = body[split_idx + 3 :].strip()
+            if split_idx > 0:
+                song = body[:split_idx].strip()
+                artist = body[split_idx + 3 :].strip()
+            else:
+                song = body
+                artist = ""
         # 清理外侧书名号；引号只在首尾成对时去掉（保留 Don't say "lazy" 这类正式歌名）
         song = song.strip("「」『』")
         if len(song) >= 2 and song[0] == song[-1] and song[0] in {'"', "'", '“', '”', '‘', '’'}:
             song = song[1:-1].strip()
         artist = artist.strip()
-        if not song or not artist:
+        if not song:
             continue
         if re.match(r"^(未記載|未确定|不明|unknown)$", artist, re.IGNORECASE):
-            continue
+            artist = ""
         items.append(ParsedSong(song=song, artist=artist, timestamp_label=ts_label, timestamp_seconds=ts_seconds))
     return items
 
@@ -171,4 +177,4 @@ def clean_timestamp_to_seconds(label: str) -> Optional[int]:
 
 def is_special_no_artist_response(text: str) -> bool:
     normalized = "".join(text.split())
-    return normalized == "请提供歌手信息后再处理。"
+    return normalized in {"请提供歌手信息后再处理。", "请提供歌名信息后再处理。"}

@@ -173,8 +173,11 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if ai_detail:
             ai_detail = f"本地兜底（{ai_detail}）"
 
-    # 6. 过滤无歌手/无时间戳条目（无置信来源不输出）
-    items = [it for it in items if it.artist and it.timestamp_seconds is not None]
+    # 6. 过滤条目：必须有时间戳；歌手字段按配置（默认放宽=允许只有歌名）
+    if config.require_artist():
+        items = [it for it in items if it.artist and it.timestamp_seconds is not None]
+    else:
+        items = [it for it in items if it.timestamp_seconds is not None]
     result.song_count = len(items)
     result.source = source
     if ai_detail:
@@ -293,6 +296,18 @@ def run_pipeline(
             logger.info("  飞书通知: %s %s", ok, note)
         elif result.status == "error" and not dry_run:
             brief = notify.build_failure_brief(bvid=result.bvid, reason=result.error)
+            try:
+                notify.send_feishu_message(brief)
+            except Exception:  # noqa: BLE001
+                pass
+        elif result.status == "skipped_no_songs" and not dry_run:
+            # 报告真正没有歌名时间戳评论的视频（无置信来源）
+            brief = notify.build_no_songs_brief(
+                bvid=result.bvid,
+                yt_link=f"https://youtu.be/{result.yt_id}" if result.yt_id else "",
+                title=result.title,
+                reason=result.detail,
+            )
             try:
                 notify.send_feishu_message(brief)
             except Exception:  # noqa: BLE001

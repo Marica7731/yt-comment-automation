@@ -84,3 +84,17 @@ def build_failure_brief(bvid: str, reason: str) -> str:
             f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
         ]
     )
+
+
+def build_no_songs_brief(bvid: str, yt_link: str, title: str, reason: str) -> str:
+    """报告：该视频没有可用的歌名时间戳评论（无置信来源，未写评论）。"""
+    bili_link = f"https://www.bilibili.com/video/{bvid}"
+    return "\n".join(
+        [
+            "⚠️暂无歌名时间戳评论（未写）",
+            bili_link,
+            yt_link if yt_link else "",
+            f"视频：{title[:60]}",
+            f"原因：{reason}",
+        ]
+    )

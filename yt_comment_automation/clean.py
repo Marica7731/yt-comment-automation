@@ -1086,7 +1086,10 @@ def format_song_items(items: list[ParsedSong], include_timestamps: bool = False)
     )
     lines = []
     for idx, item in enumerate(ordered, 1):
-        line = f"{str(idx).zfill(width)}. {item.song} - {item.artist}"
+        if item.artist:
+            line = f"{str(idx).zfill(width)}. {item.song} - {item.artist}"
+        else:
+            line = f"{str(idx).zfill(width)}. {item.song}"
         if include_timestamps:
             ts = format_timestamp_for_output(item.timestamp_label, item.timestamp_seconds, force_hours)
             if ts:
