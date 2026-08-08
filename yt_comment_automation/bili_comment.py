@@ -156,3 +156,67 @@ def post_comment(bvid: str, message: str, cookies: dict[str, str]) -> dict:
         "csrf": bili_jct,
     }
     return _request_json(REPLY_ADD_API, cookies, f"https://www.bilibili.com/video/{bvid}", payload)
+
+
+# B站评论长度上限（字符）。官方限制约 1000，保守取 900 留缓冲；
+# 参考已发布成功的最长评论 889 字符。超过则自动切分为主评论 + 楼中楼续写。
+COMMENT_LENGTH_LIMIT = 900
+
+
+def split_message_by_lines(message: str, limit: int = COMMENT_LENGTH_LIMIT) -> list[str]:
+    """把完整歌单按行切分为不超过 limit 字符的若干段。
+
+    以行（歌曲条目）为单位切割，保持每行完整，不出现半行。
+    """
+    lines = [line for line in message.splitlines() if line.strip()]
+    if not lines:
+        return []
+    segments: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for line in lines:
+        line_len = len(line)
+        if current_len + line_len + 1 > limit and current:
+            segments.append("\n".join(current))
+            current = []
+            current_len = 0
+        current.append(line)
+        current_len += line_len + 1
+    if current:
+        segments.append("\n".join(current))
+    return segments
+
+
+def post_comment_with_replies(bvid: str, message: str, cookies: dict[str, str]) -> list[dict]:
+    """发布评论；若超长则第一条发主评论，后续段以楼中楼（回复）形式续写。
+
+    返回每段的接口响应 dict 列表。
+    """
+    segments = split_message_by_lines(message)
+    if not segments:
+        raise RuntimeError("评论内容为空")
+    results: list[dict] = []
+    root_rpid = ""
+    for idx, segment in enumerate(segments):
+        if idx == 0:
+            resp = post_comment(bvid, segment, cookies)
+        else:
+            # 楼中楼回复：root/parent 指向主评论 rpid
+            aid = get_aid(bvid, cookies)
+            bili_jct = cookies.get("bili_jct", "")
+            payload = {
+                "type": 1,
+                "oid": aid,
+                "message": segment,
+                "root": root_rpid,
+                "parent": root_rpid,
+                "plat": 1,
+                "csrf": bili_jct,
+            }
+            resp = _request_json(REPLY_ADD_API, cookies, f"https://www.bilibili.com/video/{bvid}", payload)
+        results.append(resp)
+        if resp.get("code") != 0:
+            break
+        if idx == 0:
+            root_rpid = str((resp.get("data") or {}).get("rpid", ""))
+    return results

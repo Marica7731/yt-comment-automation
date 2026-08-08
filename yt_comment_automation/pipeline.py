@@ -146,55 +146,64 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     comments = [c.get("text", "") for c in raw.get("comments", [])]
     description = raw.get("description", "")
 
-    # 4. 本地规则清洗
-    items = clean.build_comment_songlist(comments, description)
-    result.song_count = len(items)
-    result.source = "local"
+    # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考）
+    local_items = clean.build_comment_songlist(comments, description)
 
-    # 5. 本地结果不足时 AI 兜底
-    if len(items) < MIN_CONFIDENT_SONGS and config.deepseek_api_key():
-        logger.info("[%s] 本地仅 %d 首，触发 DeepSeek 兜底", video.bvid, len(items))
-        import re as _re
-
+    # 5. DS 优先整理（实测准确率高，能处理本地规则漏掉的方括号/＠/全角格式）
+    items: list = []
+    source = ""
+    ai_detail = ""
+    if config.deepseek_api_key():
         candidate_texts = [
-            t for t in comments if _re.search(r"\d{1,2}:\d{2}", t) or "歌" in t or "/" in t or " - " in t
+            t for t in comments if re.search(r"\d{1,2}:\d{2}", t) or "歌" in t or "/" in t or " - " in t or "＠" in t or "@" in t
         ]
         user_text = "\n\n---\n\n".join(candidate_texts)
         ai_text, ai_err = ai.call_deepseek(user_text)
         if ai_err:
-            result.detail = f"AI 兜底失败: {ai_err}"
+            ai_detail = f"AI 整理失败: {ai_err}"
+            logger.warning("[%s] %s", video.bvid, ai_detail)
         elif ai.is_special_no_artist_response(ai_text):
-            result.detail = "AI 判定缺歌手"
+            ai_detail = "AI 判定缺歌手"
         else:
-            ai_items = ai.parse_ai_output_to_items(ai_text)
-            if len(ai_items) > len(items):
-                items = ai_items
-                result.song_count = len(items)
-                result.source = "ai"
-                result.detail = "AI 兜底结果更完整"
+            items = ai.parse_ai_output_to_items(ai_text)
+            source = "ai"
+    if not items:
+        items = local_items
+        source = "local"
+        if ai_detail:
+            ai_detail = f"本地兜底（{ai_detail}）"
 
-    # 6. 无歌曲
+    # 6. 过滤无歌手/无时间戳条目（无置信来源不输出）
+    items = [it for it in items if it.artist and it.timestamp_seconds is not None]
+    result.song_count = len(items)
+    result.source = source
+    if ai_detail:
+        result.detail = ai_detail
+
+    # 6b. 无歌曲
     if not items:
         result.status = "skipped_no_songs"
-        result.detail = "未提取到有效歌曲（本地与 AI 均无结果）"
+        result.detail = f"未提取到有效歌曲（{result.detail or '本地与 AI 均无结果'}）"
         return result
 
-    # 7. 格式化 + 发布
+    # 7. 格式化 + 发布（无空行，统一时间戳 NN. 歌名 - 歌手；超长自动楼中楼续写）
     message = clean.format_song_items(items, include_timestamps=True)
     if dry_run:
         result.status = "dry_run"
         result.message = message
         return result
 
-    resp = bili_comment.post_comment(video.bvid, message, cookies)
-    if resp.get("code") != 0:
+    responses = bili_comment.post_comment_with_replies(video.bvid, message, cookies)
+    first_fail = next((r for r in responses if r.get("code") != 0), None)
+    if first_fail:
         result.status = "error"
-        result.error = f"评论发布失败: code={resp.get('code')} msg={resp.get('message')}"
+        result.error = f"评论发布失败: code={first_fail.get('code')} msg={first_fail.get('message')}"
         return result
 
     result.status = "posted"
     result.message = message
-    result.detail = f"rpid={resp.get('data', {}).get('rpid', '')}"
+    rpids = [str(r.get("data", {}).get("rpid", "")) for r in responses if r.get("data")]
+    result.detail = f"rpids={'/'.join(rpids)} segments={len(responses)}"
     return result
 
 

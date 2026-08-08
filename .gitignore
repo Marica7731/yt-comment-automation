@@ -6,3 +6,8 @@ data/
 __pycache__/
 *.pyc
 .pytest_cache/
+# 分析/评估产物
+full_analysis.py
+ds_eval.py
+ds_eval_batch.py
+data/full_analysis.*
