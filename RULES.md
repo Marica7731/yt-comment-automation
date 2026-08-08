@@ -136,3 +136,25 @@
   等函数同步 R06/R07/R14 语义；插件强制歌手（R17 关闭）。
 - 新增差异样本后重跑 `python extract_rules.py` 更新 `data/rules_from_ds.json`，
   人工复核后回填本文件。
+
+## DS 自动演进（auto_evolve.py）
+
+规则不是静止的：每次运行管道时，若本地规则与 DS 结果出现差异，可自动提炼成新规则。
+
+流程：
+1. `python auto_evolve.py`：DS 单函数聚焦分析差异样本 → 生成 JSON 规则变更
+   （reasoning effort=low 防 max_output_tokens incomplete；每函数落盘 data/evolve_changes.json）
+2. `python auto_evolve.py --changes data/evolve_changes.json --apply`：
+   应用到 user.js + rules.py → node --check + pytest 验证 → 失败自动 `git checkout` 回滚
+3. 人工 review diff → commit + push → WDC cron git pull → 插件 updateURL 自动更新
+
+DS 变更约束：
+- 只允许改规则函数（stripPerformanceNoteParens / stripParentheticalTransliteration /
+  stripTrailingLatinAnnotationSuffix / stripTrailingArtistNotes / stripLeadingSongIndexMarker /
+  stripLeadingSerialMarker / cleanSongOrArtistPart）
+- 必须附带保护说明（8.32 / DISH// / Don't say "lazy" / ryo(supercell) / ツインテールは20歳まで♡）
+- 必须附带 tests（input/expect_song/expect_artist）
+
+已落地保护（v2.9.1）：
+- R06 译文括号：内含 Remix/Mix/Live/Ver/Edit/Instrumental 版本词时保留
+- R02/R13 + SerialMarker：`Re:` 后跟字母不剥离（保护 RE:I AM）
