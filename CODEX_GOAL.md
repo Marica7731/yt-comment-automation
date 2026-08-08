@@ -31,18 +31,18 @@
 ## 当前状态
 - [x] 两个仓库规则对比分析完成（daily-song-list 覆盖最全/日文定制；song_serch_lyrics 抓取最稳/有误伤；plugin 油猴规则可移植）
 - [x] 合集视频数量验证：70 + 22 = 92，part 字段内嵌 [日期][YouTubeID]
-- [x] 评论抓取实测：8 个视频全部成功，29/22/20/18/12/10/8/6 首不等
-- [x] 本地规则清洗 Python 移植版完成（19 个单元测试通过）
-- [x] DeepSeek responses API 实测可用，prompt 缓存自动命中
-- [x] 发布接口验证：cookie 有效（owner 账号），reply/add 鉴权通过
-- [x] 干跑 5 个样本生成（SAMPLE_PREVIEW.md）
-- [ ] 用户确认干跑样本格式
-- [ ] GitHub 仓库创建 + push
-- [ ] WDC VPS 部署 + cron
-- [ ] 存量全量发布（用户确认后）
+- [x] 全量抓取 92 视频原始 JSON 完成（含 6 个本地规则漏掉的特殊格式视频）
+- [x] DS vs 本地批量评估：92 视频 87 个完全一致（94.6%）；2 个本地漏掉的方括号/＠格式由 DS 救回 52 首（BV1SVNp68Eh6 41 首、BV12Jg96sE6G 11 首）；DS 更保守 2 例为删杂谈
+- [x] DS 全量优先策略落地（本地规则作 DS 不可用时的兜底）
+- [x] 评论格式规范化：无空行、`时间戳 NN. 歌名 - 歌手`、无歌手/无时间戳不输出
+- [x] 超长评论楼中楼分段发布（root/parent 机制已真实验证：发主评+回复+验证挂载+清理）
+- [x] GitHub 仓库 Marica7731/yt-comment-automation 已创建并 push（无机密）
+- [x] 3 个样本真实发布验证成功（BV1Waub6jEnk 10 首 / BV1fTuh63EvB 6 首 / BV1ixuN6AExD 20 首），飞书通知全部送达
+- [x] WDC VPS 部署完成 + cron 定时（每天 06:00/14:00/22:00 北京时间增量运行）
+- [x] 存量 full 模式后台处理中（43/89，0 错误）
+- [ ] 存量全量处理完成 + 最终验收
 
 ## 下一步
-1. 用户确认 SAMPLE_PREVIEW.md 的 5 个样本格式
-2. 创建 GitHub 仓库并 push 代码（确认无机密后）
-3. WDC VPS clone + private.env + cron 定时
-4. 正式运行 full 模式处理存量
+1. 等待 WDC 存量 full 处理完成（约剩余 40 个视频）
+2. 验收：确认无错误、无漏发、飞书通知正常
+3. 一周内重跑无歌单视频（BV11y376xEEc 等 DS 也未提取的，未来评论可能更新）

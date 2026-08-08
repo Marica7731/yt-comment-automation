@@ -191,7 +191,11 @@ def post_comment_with_replies(bvid: str, message: str, cookies: dict[str, str]) 
     """发布评论；若超长则第一条发主评论，后续段以楼中楼（回复）形式续写。
 
     返回每段的接口响应 dict 列表。
+    注意：B 站对主评论发布后立即回复有限制（12006 没有该评论），
+    楼中楼段发布前需延时并重试。
     """
+    import time as _time
+
     segments = split_message_by_lines(message)
     if not segments:
         raise RuntimeError("评论内容为空")
@@ -201,7 +205,7 @@ def post_comment_with_replies(bvid: str, message: str, cookies: dict[str, str]) 
         if idx == 0:
             resp = post_comment(bvid, segment, cookies)
         else:
-            # 楼中楼回复：root/parent 指向主评论 rpid
+            # 楼中楼回复：root/parent 指向主评论 rpid；发布前等待主评论生效
             aid = get_aid(bvid, cookies)
             bili_jct = cookies.get("bili_jct", "")
             payload = {
@@ -213,7 +217,19 @@ def post_comment_with_replies(bvid: str, message: str, cookies: dict[str, str]) 
                 "plat": 1,
                 "csrf": bili_jct,
             }
-            resp = _request_json(REPLY_ADD_API, cookies, f"https://www.bilibili.com/video/{bvid}", payload)
+            resp = None
+            last_err = ""
+            for attempt in range(3):
+                _time.sleep(2 * (attempt + 1))  # 主评论刚发出，等待其生效
+                resp = _request_json(REPLY_ADD_API, cookies, f"https://www.bilibili.com/video/{bvid}", payload)
+                if resp.get("code") == 0:
+                    break
+                last_err = f"code={resp.get('code')} msg={resp.get('message')}"
+                if resp.get("code") in {12006, -101, -403}:  # 可重试错误
+                    continue
+                break
+            if resp is None:
+                resp = {"code": -1, "message": f"楼中楼发布失败: {last_err}"}
         results.append(resp)
         if resp.get("code") != 0:
             break

@@ -194,16 +194,29 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         return result
 
     responses = bili_comment.post_comment_with_replies(video.bvid, message, cookies)
-    first_fail = next((r for r in responses if r.get("code") != 0), None)
-    if first_fail:
+    if not responses:
         result.status = "error"
-        result.error = f"评论发布失败: code={first_fail.get('code')} msg={first_fail.get('message')}"
+        result.error = "评论发布无响应"
         return result
 
+    main_resp = responses[0]
+    if main_resp.get("code") != 0:
+        result.status = "error"
+        result.error = f"评论发布失败: code={main_resp.get('code')} msg={main_resp.get('message')}"
+        return result
+
+    # 主评论成功即视为已发布；楼中楼续写失败仅警告（缺失段可后续补发）
+    followup_fail = next((r for r in responses[1:] if r.get("code") != 0), None)
     result.status = "posted"
     result.message = message
     rpids = [str(r.get("data", {}).get("rpid", "")) for r in responses if r.get("data")]
-    result.detail = f"rpids={'/'.join(rpids)} segments={len(responses)}"
+    if followup_fail:
+        result.detail = (
+            f"rpids={'/'.join(rpids)} segments={len(responses)} "
+            f"楼中楼续写失败: code={followup_fail.get('code')} msg={followup_fail.get('message')}"
+        )
+    else:
+        result.detail = f"rpids={'/'.join(rpids)} segments={len(responses)}"
     return result
 
 
