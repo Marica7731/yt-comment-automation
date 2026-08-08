@@ -6,10 +6,10 @@ B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视
 
 1. **检测合集更新**：读取 B 站 UGC 合集（ugc_season）全部视频，对比上次快照找出新增
 2. **抓取油管评论区**：无 cookie，纯 urllib 拉取评论 + 简介 + 章节
-3. **本地规则清洗**：从评论时间轴提取「时间戳 + 歌名 - 歌手」列表
-   （规则移植自油猴脚本《YouTube 评论纯文本复制 + AI整理》，含括号保护、编号剥离、宣伝过滤、分隔符统一）
-4. **AI 兜底**：本地结果不足时用 DeepSeek（deepseek-v4-flash）直接从原文整理，自动命中 prompt 缓存降成本
-5. **发布 + 飞书通知**：用 B 站投稿 cookie 发布评论，成功后飞书通知
+3. **DeepSeek 优先整理**：deepseek-v4-flash 从原文直接整理「时间戳 NN. 歌名 - 歌手」列表
+   （92 视频批量评估：87/92 与本地规则完全一致 94.6%，2 个本地规则漏掉的方括号/＠格式由 DS 救回 52 首）
+4. **本地规则兜底**：DS 不可用时用本地规则清洗（括号保护、编号剥离、宣伝过滤）
+5. **发布 + 飞书通知**：B 站投稿 cookie 发布；超长评论自动切分主评论 + 楼中楼续写；成功后飞书通知
    （B 站链接 / 油管链接 / 评论时间 / 歌曲数量）
 
 ## 目录结构
@@ -59,9 +59,16 @@ python -m yt_comment_automation.cli run --mode full
 | `COLLECTION_ANCHORS` | 合集锚点 BV 号，逗号分隔（合集内任意视频 BV 号） |
 | `COLLECTION_NAMES` | 合集显示名（可选） |
 | `OWNER_MID` | 发布账号 mid（用于跳过已发布检测） |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key（可选，本地结果不足时兜底） |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key（DS 优先整理必需） |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 飞书自建应用 |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
+
+## 评论格式与发布规则
+
+- 每行严格 `时间戳 NN. 歌名 - 歌手`（例：`0:03:55 01. バラライカ - 月島きらり`）
+- 无空行；无歌手或无法确定时间戳的条目不输出（无置信来源）
+- 时间戳统一 `H:MM:SS` 带小时位，全角转半角
+- 超过 900 字符自动切分：第一条发主评论，后续段以楼中楼（root/parent 回复）续写
 
 ## 跳过与幂等
 
