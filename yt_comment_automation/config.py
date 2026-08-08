@@ -98,6 +98,11 @@ def require_artist() -> bool:
     return get("REQUIRE_ARTIST", "0") == "1"
 
 
+def ignore_bvids() -> set[str]:
+    """忽略列表：这些视频不写评论、不播报（如标题带歌但实际非歌枠的投稿）。"""
+    return {b.strip() for b in get("IGNORE_BVIDS", "").split(",") if b.strip()}
+
+
 def data_dir() -> Path:
     path = Path(get("DATA_DIR", str(ROOT / "data")))
     path.mkdir(parents=True, exist_ok=True)

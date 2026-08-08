@@ -104,6 +104,12 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         result.error = f"cookie 加载失败: {err}"
         return result
 
+    # 0. 忽略列表：标题带歌但实际非歌枠的投稿，不写评论、不播报
+    if video.bvid in config.ignore_bvids():
+        result.status = "ignored"
+        result.detail = "忽略列表（用户指定）"
+        return result
+
     # 1. 已有评论跳过
     try:
         existing = bili_comment.find_own_timestamp_comment(video.bvid, cookies)
@@ -282,18 +288,19 @@ def run_pipeline(
         result = process_video(video, cache_dir, dry_run)
         results.append(result)
         logger.info("  → %s (%d 首, %s)", result.status, result.song_count, result.detail or result.error)
-        if result.status == "posted" and not dry_run:
+        if result.status in {"posted", "ignored"} and not dry_run:
             posted.add(result.bvid)
-            # 飞书通知
-            posted_at = time.strftime("%Y-%m-%d %H:%M:%S")
-            brief = notify.build_success_brief(
-                bvid=result.bvid,
-                yt_link=f"https://youtu.be/{result.yt_id}",
-                posted_at=posted_at,
-                song_count=result.song_count,
-            )
-            ok, note = notify.send_feishu_message(brief)
-            logger.info("  飞书通知: %s %s", ok, note)
+            if result.status == "posted":
+                # 飞书通知
+                posted_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                brief = notify.build_success_brief(
+                    bvid=result.bvid,
+                    yt_link=f"https://youtu.be/{result.yt_id}",
+                    posted_at=posted_at,
+                    song_count=result.song_count,
+                )
+                ok, note = notify.send_feishu_message(brief)
+                logger.info("  飞书通知: %s %s", ok, note)
         elif result.status == "error" and not dry_run:
             brief = notify.build_failure_brief(bvid=result.bvid, reason=result.error)
             try:
