@@ -138,7 +138,9 @@ def looks_like_timestamp_songlist(message: str) -> bool:
 
     if not message or len(message) < 30:
         return False
-    ts_count = len(re.findall(r"\d{1,2}:\d{2}(?::\d{2})?\s*\d{2}\.\s", message))
+    # 放宽判定：只要评论里 ≥3 个时间戳（形如 0:05:57、05:57）就视为已有时间戳歌单。
+    # 兼容旧格式（无编号、tab 分隔、歌名/歌手 无连字符等），避免重复发布。
+    ts_count = len(re.findall(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)", message))
     return ts_count >= 3
 
 
