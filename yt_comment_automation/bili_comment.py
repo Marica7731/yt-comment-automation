@@ -119,29 +119,17 @@ def list_comments(bvid: str, cookies: dict[str, str], max_pages: int = 3) -> lis
     return out
 
 
-def find_own_timestamp_comment(bvid: str, cookies: dict[str, str]) -> BiliComment | None:
-    """检查本账号（owner）是否已在视频下发布过时间戳歌轴评论。
+def find_own_comment(bvid: str, cookies: dict[str, str]) -> BiliComment | None:
+    """检查本账号（owner）是否已在视频下发布过评论。
 
-    判定：评论来自 owner mid，且内容包含「数字:数字」时间戳 + 「数字. 歌名 - 歌手」结构。
+    判定：只要评论来自 owner mid 即视为已发过（不管内容、条数、格式）。
+    因为自动化只会发歌单评论，rpid 存在 = 已发过 → 跳过，绝无死循环。
     """
     owner_mid = config.owner_mid()
     for comment in list_comments(bvid, cookies):
-        if comment.mid != owner_mid:
-            continue
-        if looks_like_timestamp_songlist(comment.message):
+        if comment.mid == owner_mid:
             return comment
     return None
-
-
-def looks_like_timestamp_songlist(message: str) -> bool:
-    import re
-
-    if not message or len(message) < 30:
-        return False
-    # 放宽判定：只要评论里 ≥3 个时间戳（形如 0:05:57、05:57）就视为已有时间戳歌单。
-    # 兼容旧格式（无编号、tab 分隔、歌名/歌手 无连字符等），避免重复发布。
-    ts_count = len(re.findall(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)", message))
-    return ts_count >= 3
 
 
 def post_comment(bvid: str, message: str, cookies: dict[str, str]) -> dict:

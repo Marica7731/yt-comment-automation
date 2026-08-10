@@ -89,56 +89,6 @@ def _extract_yt_id_from_part(part: str) -> str:
     return m.group(2) if m else ""
 
 
-# 非歌曲时间戳标记词：开始/MC/章节/杂谈/告知 等（带时间戳但不是歌单）
-_NON_SONG_TS_MARKERS = re.compile(
-    r"(?:開始|开始|start|終了|end|opening|open|closing|close|mc|雑談|talk|感想|告知|お知らせ|"
-    r"チャプター|chapter|セトリ|setlist|タイムスタンプ|timestamp|スクショ|挨拶|自己紹介|コメント|"
-    r"おつ|お疲れ|ありがとう|宣伝|休憩|トイレ|お水|スパチャ読み|リクエスト募集)",
-    re.IGNORECASE,
-)
-
-# 歌名/歌手分隔特征：时间戳行里出现这些才算"歌曲行"
-_SONG_LINE_SEPARATORS = re.compile(r"[\/／|｜￤∣丨＠@]|\s-\s|\s–\s")
-
-
-def _line_is_song_line(line: str) -> bool:
-    """时间戳行是否像歌曲行（含歌名/歌手分隔特征，且不是纯标记）。"""
-    line = line.strip()
-    if not line:
-        return False
-    if _NON_SONG_TS_MARKERS.search(line):
-        return False
-    # 时间戳行 + 分隔特征 + 有内容
-    return bool(_SONG_LINE_SEPARATORS.search(line))
-
-
-def has_any_timestamp_songlist(comments: list[str]) -> bool:
-    """评论区是否已有**真正的歌曲**时间戳歌单（任何作者）。
-
-    判定：
-    - 单条评论含 ≥2 个时间戳
-    - 且至少 2 个时间戳行具备歌名/歌手特征（含 /、／、|、＠、- 等分隔符）
-    - 纯标记（開始/MC/章节/雑談/告知 等）不算歌单，不跳过，让 DS 继续提取
-    """
-    ts_re = re.compile(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
-    for text in comments:
-        if not text or len(text) < 30:
-            continue
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
-        song_ts_lines = 0
-        for line in lines:
-            if not ts_re.search(line):
-                continue
-            # 去掉时间戳后剩余部分
-            rest = ts_re.sub("", line)
-            # 时间戳行 + 歌名/歌手特征 + 非纯标记
-            if _SONG_LINE_SEPARATORS.search(rest) and not _NON_SONG_TS_MARKERS.search(rest):
-                song_ts_lines += 1
-        if song_ts_lines >= 2:
-            return True
-    return False
-
-
 def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: bool) -> VideoResult:
     result = VideoResult(
         bvid=video.bvid,
@@ -160,15 +110,15 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         result.detail = "忽略列表（用户指定）"
         return result
 
-    # 1. 已有评论跳过（本账号已发布过歌单评论）
+    # 1. 本账号已有评论跳过（rpid 存在即已发过，不管条数/格式）
     try:
-        existing = bili_comment.find_own_timestamp_comment(video.bvid, cookies)
+        existing = bili_comment.find_own_comment(video.bvid, cookies)
     except Exception as err:  # noqa: BLE001
         logger.warning("[%s] 检查已有评论失败: %s", video.bvid, err)
         existing = None
     if existing:
         result.status = "already_posted"
-        result.detail = f"rpid={existing.rpid} 已发布"
+        result.detail = f"rpid={existing.rpid} 本账号已发过评论"
         return result
     # 2. 确定 YouTube ID（part 字段优先，简介首行校验）
     yt_id = video.yt_id
@@ -200,12 +150,6 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
 
     comments = [c.get("text", "") for c in raw.get("comments", [])]
     description = raw.get("description", "")
-
-    # 3b. 已有时间戳歌单评论跳过（任何作者，含他人写的；≥2 个时间戳即视为歌单）
-    if has_any_timestamp_songlist(comments):
-        result.status = "already_posted"
-        result.detail = "YouTube 评论区已有时间戳歌单评论（非本账号）"
-        return result
 
     # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考）
     local_items = clean.build_comment_songlist(comments, description)
