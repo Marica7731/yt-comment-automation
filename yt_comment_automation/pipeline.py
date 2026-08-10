@@ -140,9 +140,9 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         return result
     result.yt_id = yt_id
 
-    # 3. 抓取 YouTube 评论 + 简介
+    # 3. 抓取 YouTube 评论 + 简介（未发布视频用 1 小时 TTL，评论区新出现歌单时能及时看到）
     try:
-        raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
+        raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, max_age_seconds=3600)
     except Exception as err:  # noqa: BLE001
         result.status = "error"
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"

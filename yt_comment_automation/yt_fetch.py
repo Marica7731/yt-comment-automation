@@ -235,18 +235,29 @@ def _extract_description_candidates(data: Any) -> list[str]:
     return list(dict.fromkeys(texts))
 
 
-def fetch_youtube_raw(video_id: str, cache_dir: str | Path | None = None, force: bool = False) -> dict[str, Any]:
+def fetch_youtube_raw(
+    video_id: str,
+    cache_dir: str | Path | None = None,
+    force: bool = False,
+    max_age_seconds: int | None = None,
+) -> dict[str, Any]:
     """抓取视频评论区 + 简介原始 JSON，返回 dict。
 
     - video_id: YouTube 视频 ID（11 位）
     - cache_dir: 若提供，原始 JSON 落盘 <cache_dir>/<video_id>.info.json；再次调用直接读缓存
     - force: 忽略缓存强制重新抓取
+    - max_age_seconds: 缓存文件年龄超过该秒数则强制重新抓取（默认 None=不检查年龄）
     """
     cache_dir = Path(cache_dir) if cache_dir else None
     if cache_dir and not force:
         cache_path = cache_dir / f"{video_id}.info.json"
         if cache_path.is_file():
-            return json.loads(cache_path.read_text(encoding="utf-8"))
+            if max_age_seconds is None:
+                return json.loads(cache_path.read_text(encoding="utf-8"))
+            age = time.time() - cache_path.stat().st_mtime
+            if age < max_age_seconds:
+                return json.loads(cache_path.read_text(encoding="utf-8"))
+            # 缓存过期，继续向下重新抓取
 
     url = WATCH_URL.format(video_id=video_id)
     html = _http_get(url)
