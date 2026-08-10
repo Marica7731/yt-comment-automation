@@ -159,19 +159,26 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     source = ""
     ai_detail = ""
     if config.deepseek_api_key():
+        # 防幻觉：评论区没有任何时间戳时，DS 拿到纯聊天输入会编造不存在的歌。
+        # 只有存在时间戳（歌单可能线索）才调 DS；否则直接走本地（大概率 0 首 → 跳过）。
+        has_ts = any(re.search(r"\d{1,2}:\d{2}(?::\d{2})?", t) for t in comments)
         candidate_texts = [
             t for t in comments if re.search(r"\d{1,2}:\d{2}", t) or "歌" in t or "/" in t or " - " in t or "＠" in t or "@" in t
         ]
         user_text = "\n\n---\n\n".join(candidate_texts)
-        ai_text, ai_err = ai.call_deepseek(user_text)
-        if ai_err:
-            ai_detail = f"AI 整理失败: {ai_err}"
-            logger.warning("[%s] %s", video.bvid, ai_detail)
-        elif ai.is_special_no_artist_response(ai_text):
-            ai_detail = "AI 判定缺歌手"
+        if not has_ts or not user_text.strip():
+            ai_detail = "评论区无时间戳（不调 DS，防幻觉）"
+            logger.info("[%s] %s", video.bvid, ai_detail)
         else:
-            items = ai.parse_ai_output_to_items(ai_text)
-            source = "ai"
+            ai_text, ai_err = ai.call_deepseek(user_text)
+            if ai_err:
+                ai_detail = f"AI 整理失败: {ai_err}"
+                logger.warning("[%s] %s", video.bvid, ai_detail)
+            elif ai.is_special_no_artist_response(ai_text):
+                ai_detail = "AI 判定缺歌手"
+            else:
+                items = ai.parse_ai_output_to_items(ai_text)
+                source = "ai"
     if not items:
         items = local_items
         source = "local"
