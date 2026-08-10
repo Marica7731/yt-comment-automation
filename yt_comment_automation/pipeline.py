@@ -89,6 +89,48 @@ def _extract_yt_id_from_part(part: str) -> str:
     return m.group(2) if m else ""
 
 
+# 非歌曲时间戳标记词（带时间戳但内容不是歌：开始/MC/章节/杂谈/告知/截图等）
+_NON_SONG_TS_MARKERS = re.compile(
+    r"(?:開始|开始|start|終了|end|opening|open|closing|close|mc|雑談|talk|感想|告知|お知らせ|"
+    r"チャプター|chapter|セトリ|setlist|タイムスタンプ|timestamp|スクショ|挨拶|自己紹介|コメント|"
+    r"おつ|お疲れ|ありがとう|宣伝|休憩|トイレ|お水|スパチャ読み|リクエスト募集|あくび|助かる|てぇてぇ)",
+    re.IGNORECASE,
+)
+
+# 歌名/歌手分隔特征（时间戳行里出现这些才算"歌曲行"）
+_SONG_LINE_SEPARATORS = re.compile(r"[\/／|｜￤∣丨＠@]|\s-\s|\s–\s|\s-\s")
+
+
+def raw_has_timestamp_songlist(raw: dict) -> bool:
+    """判定抓取到的原始 JSON 里，评论区是否已有【时间戳 + 歌曲内容】的歌单。
+
+    用途：决定是否信任缓存。缓存里有歌单 → 直接用；没歌单 → 每次 cron 重新抓
+    YouTube（直到评论区出现歌单为止）。
+
+    判定：任一评论行满足
+    - 行内任意位置含时间戳（如 11:10、0:05:57）
+    - 去掉时间戳后的内容非空、且不含纯标记词（開始/MC/雑談/宣伝/スクショ/あくび 等）
+    即视为歌曲行（覆盖 歌名+时间戳 无分隔符格式，如「ライラック 11:10」）。
+    只要求 ≥1 个歌曲行（不限定条数，避免死循环/漏判）。
+    """
+    ts_re = re.compile(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
+    for c in raw.get("comments", []) or []:
+        text = c.get("text", "") if isinstance(c, dict) else str(c)
+        if not text:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not ts_re.search(line):
+                continue
+            rest = ts_re.sub("", line).strip()
+            if not rest:
+                continue
+            if _NON_SONG_TS_MARKERS.search(rest):
+                continue
+            return True
+    return False
+
+
 def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: bool) -> VideoResult:
     result = VideoResult(
         bvid=video.bvid,
@@ -140,9 +182,14 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         return result
     result.yt_id = yt_id
 
-    # 3. 抓取 YouTube 评论 + 简介（未发布视频用 1 小时 TTL，评论区新出现歌单时能及时看到）
+    # 3. 抓取 YouTube 评论 + 简介
+    #    缓存策略：先读缓存；若缓存里没有【时间戳+明确歌曲】的歌单，则强制重新抓取
+    #    YouTube（评论区可能刚出现歌单）。一旦缓存里有歌单，后续直接用缓存不再重抓。
     try:
-        raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, max_age_seconds=3600)
+        raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
+        if not raw_has_timestamp_songlist(raw):
+            logger.info("[%s] 缓存无歌单，强制重新抓取 YouTube", video.bvid)
+            raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
     except Exception as err:  # noqa: BLE001
         result.status = "error"
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"
