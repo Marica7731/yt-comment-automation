@@ -27,6 +27,10 @@ from . import ai, bili_comment, clean, collections, config, notify, yt_fetch
 
 logger = logging.getLogger("yt_comment_automation")
 
+# 低置信阈值：本地规则 0 首 + DS 结果少于该数量 → 判定为疑似幻觉，跳过不发布。
+# 真实歌枠通常 ≥3 首；1-2 首的"歌单"极可能是 DS 幻觉（如把 UP 主/频道名当歌手）。
+LOW_CONFIDENCE_MIN_SONGS = 3
+
 # 本地规则结果可信的下限：低于此数量时触发 DeepSeek 兜底
 MIN_CONFIDENT_SONGS = 5
 
@@ -38,7 +42,7 @@ class VideoResult:
     title: str
     part_date: str
     collection: str
-    status: str = ""  # already_posted / posted / skipped_no_songs / error / no_yt_link / dry_run
+    status: str = ""  # already_posted / posted / skipped_no_songs / skipped_low_confidence / error / no_yt_link / dry_run
     song_count: int = 0
     source: str = ""  # local / ai
     message: str = ""
@@ -232,6 +236,14 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if ai_detail:
             ai_detail = f"本地兜底（{ai_detail}）"
 
+    # 5b. 交叉校验：本地规则是确定性代码，比 DS 更可信。两种情况处理：
+    #   ① 本地更全（≥DS）→ 用本地，避免 DS 漏歌
+    #   ② 本地 0 首 + DS 极少首（<阈值）→ 疑似 DS 幻觉，宁缺勿滥跳过
+    if source == "ai" and local_items and len(local_items) >= len(items):
+        items = local_items
+        source = "local"
+        ai_detail = f"本地更全（本地 {len(local_items)} ≥ DS {len(items)}），采用本地"
+
     # 6. 过滤条目：必须有时间戳；歌手字段按配置（默认放宽=允许只有歌名）
     if config.require_artist():
         items = [it for it in items if it.artist and it.timestamp_seconds is not None]
@@ -246,6 +258,12 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     if not items:
         result.status = "skipped_no_songs"
         result.detail = f"未提取到有效歌曲（{result.detail or '本地与 AI 均无结果'}）"
+        return result
+
+    # 6c. 低置信校验：本地 0 首 + DS 仅 1-2 首 → 疑似幻觉（如 BV1eYgV6WEq3 把 UP 主当歌手）
+    if source == "ai" and not local_items and len(items) < LOW_CONFIDENCE_MIN_SONGS:
+        result.status = "skipped_low_confidence"
+        result.detail = f"低置信：本地规则 0 首，DS 仅 {len(items)} 首（疑似幻觉），宁缺勿滥跳过"
         return result
 
     # 7. 格式化 + 发布（无空行，统一时间戳 NN. 歌名 - 歌手；超长自动楼中楼续写）
