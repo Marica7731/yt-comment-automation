@@ -101,77 +101,48 @@ _NON_SONG_TS_MARKERS = re.compile(
 _SONG_LINE_SEPARATORS = re.compile(r"[\/／|｜￤∣丨＠@]|\s-\s|\s–\s|\s-\s")
 
 
+def _is_songlist_comment(text: str) -> bool:
+    """判定一条评论是否「结构化歌单」而非零散感想。
+
+    核心区分（不是看条数，是看时间戳行密度 + 内容）：
+    - 歌单：密集的时间戳行（如 Setlist 每行「时间戳 歌名/歌手」），
+      或「歌名 + 时间戳」无分隔符格式（如「ライラック 11:10」）
+    - 感想：零星 1 个时间戳夹在聊天里（如「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」）
+    - 纯标记：全是開始/MC/雑談/あくび 等标记行，不算歌单
+
+    判定：≥2 个「歌曲时间戳行」（时间戳行去掉时间戳后非空、且不含纯标记词），
+    且歌曲时间戳行占该评论非空行数 ≥50%。
+    """
+    ts_re = re.compile(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    if len(lines) < 2:
+        return False
+    song_ts_lines = 0
+    for line in lines:
+        if not ts_re.search(line):
+            continue
+        rest = ts_re.sub("", line).strip()
+        if not rest:
+            continue
+        if _NON_SONG_TS_MARKERS.search(rest):
+            continue
+        song_ts_lines += 1
+    if song_ts_lines < 2:
+        return False
+    return song_ts_lines / len(lines) >= 0.5
+
+
 def raw_has_timestamp_songlist(raw: dict) -> bool:
-    """判定抓取到的原始 JSON 里，评论区是否已有【时间戳 + 歌曲内容】的歌单。
+    """抓取到的原始 JSON 里，评论区是否已有结构化歌单评论。
 
     用途：决定是否信任缓存。缓存里有歌单 → 直接用；没歌单 → 每次 cron 重新抓
     YouTube（直到评论区出现歌单为止）。
-
-    判定：任一评论行满足
-    - 行内任意位置含时间戳（如 11:10、0:05:57）
-    - 去掉时间戳后的内容非空、且不含纯标记词（開始/MC/雑談/宣伝/スクショ/あくび 等）
-    即视为歌曲行（覆盖 歌名+时间戳 无分隔符格式，如「ライラック 11:10」）。
-    只要求 ≥1 个歌曲行（不限定条数，避免死循环/漏判）。
     """
-    ts_re = re.compile(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
     for c in raw.get("comments", []) or []:
         text = c.get("text", "") if isinstance(c, dict) else str(c)
-        if not text:
-            continue
-        for line in text.splitlines():
-            line = line.strip()
-            if not ts_re.search(line):
-                continue
-            rest = ts_re.sub("", line).strip()
-            if not rest:
-                continue
-            if _NON_SONG_TS_MARKERS.search(rest):
-                continue
+        if _is_songlist_comment(text):
             return True
     return False
-
-
-def _normalize_for_verify(text: str) -> str:
-    """回验用的规范化：去空格/全角空格/常见装饰符号，统一小写。"""
-    t = (text or "").lower()
-    t = re.sub(r"[\s\u3000]+", "", t)
-    t = re.sub(r"[「」『』【】\[\]（）()《》〈〉\"'“”‘’・･~～!！?？.．、,，:：;；\-—–−/／|｜￤∣丨]+", "", t)
-    return t
-
-
-def _verify_ai_items_against_source(items, comments) -> list:
-    """DS 原文回验：歌名必须能在输入原文（评论区）里找到，找不到视为幻觉丢弃。
-
-    回验规则：
-    - 取 DS 每首歌的歌名，规范化后（去空格/标点/括号装饰）
-    - 歌名的核心片段（≥2 字符，纯数字或单字符除外）在任一评论原文中出现即通过
-    - 保留括号内正式名（ryo(supercell)）不做去括号，避免误伤
-    """
-    source_norm = _normalize_for_verify("\n".join(comments))
-    verified = []
-    for it in items:
-        song = (it.song or "").strip()
-        if not song:
-            continue
-        # 取歌名核心：去掉括号内内容，保留主歌名
-        core = re.sub(r"[\(（\[［].*?[\)）\]］]", "", song).strip()
-        core_norm = _normalize_for_verify(core)
-        if not core_norm:
-            core_norm = _normalize_for_verify(song)
-        # 回验：歌名核心（或前 6 字符）出现在原文
-        # 太短（<2 字符）或纯数字时放宽，直接用原歌名
-        if len(core_norm) < 2 or core_norm.isdigit():
-            verified.append(it)
-            continue
-        haystack = source_norm
-        if core_norm in haystack:
-            verified.append(it)
-        else:
-            # 宽松：歌名前 5 字符作为子串匹配（歌名可能被 DS 规范化去掉了尾部符号）
-            prefix = core_norm[:5]
-            if len(prefix) >= 3 and prefix in haystack:
-                verified.append(it)
-    return verified
 
 
 def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: bool) -> VideoResult:
@@ -241,61 +212,37 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     comments = [c.get("text", "") for c in raw.get("comments", [])]
     description = raw.get("description", "")
 
+    # 3b. 只保留「结构化歌单评论」，零散感想评论（夹 1 个时间戳的聊天）不喂给 DS/本地，
+    #    避免 DS 把「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」这类感想当歌单、
+    #    还把 UP 主昵称当歌手（BV1eYgV6WEq3 的错误根源）。
+    songlist_comments = [t for t in comments if _is_songlist_comment(t)]
+
     # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考）
-    local_items = clean.build_comment_songlist(comments, description)
+    local_items = clean.build_comment_songlist(songlist_comments, description)
 
     # 5. DS 优先整理（实测准确率高，能处理本地规则漏掉的方括号/＠/全角格式）
     items: list = []
     source = ""
     ai_detail = ""
-    if config.deepseek_api_key():
-        # 防幻觉：评论区没有任何时间戳时，DS 拿到纯聊天输入会编造不存在的歌。
-        # 只有存在时间戳（歌单可能线索）才调 DS；否则直接走本地（大概率 0 首 → 跳过）。
-        has_ts = any(re.search(r"\d{1,2}:\d{2}(?::\d{2})?", t) for t in comments)
-        candidate_texts = [
-            t for t in comments if re.search(r"\d{1,2}:\d{2}", t) or "歌" in t or "/" in t or " - " in t or "＠" in t or "@" in t
-        ]
-        user_text = "\n\n---\n\n".join(candidate_texts)
-        if not has_ts or not user_text.strip():
-            ai_detail = "评论区无时间戳（不调 DS，防幻觉）"
-            logger.info("[%s] %s", video.bvid, ai_detail)
+    if config.deepseek_api_key() and songlist_comments:
+        # 只喂结构化歌单评论；无歌单评论则不调 DS（防从感想提取/幻觉）
+        user_text = "\n\n---\n\n".join(songlist_comments)
+        ai_text, ai_err = ai.call_deepseek(user_text)
+        if ai_err:
+            ai_detail = f"AI 整理失败: {ai_err}"
+            logger.warning("[%s] %s", video.bvid, ai_detail)
+        elif ai.is_special_no_artist_response(ai_text):
+            ai_detail = "AI 判定缺歌手"
         else:
-            ai_text, ai_err = ai.call_deepseek(user_text)
-            if ai_err:
-                ai_detail = f"AI 整理失败: {ai_err}"
-                logger.warning("[%s] %s", video.bvid, ai_detail)
-            elif ai.is_special_no_artist_response(ai_text):
-                ai_detail = "AI 判定缺歌手"
-            else:
-                items = ai.parse_ai_output_to_items(ai_text)
-                source = "ai"
+            items = ai.parse_ai_output_to_items(ai_text)
+            source = "ai"
+    else:
+        ai_detail = "评论区无结构化歌单（不调 DS）"
     if not items:
         items = local_items
         source = "local"
         if ai_detail:
             ai_detail = f"本地兜底（{ai_detail}）"
-
-    # 5b. DS 原文回验：DS 输出的每首歌，歌名必须在输入的原文里能找到。
-    #    幻觉的标志是"编造原文里不存在的歌"（如 BV1eYgV6WEq3 把 UP 主当歌手，
-    #    歌名'悪ノ召使'当时评论区是纯聊天、压根不存在）。
-    #    回验通过才信任 DS；否则改用本地 / 跳过。真实小歌单（如 BV1NV3g6eEpF
-    #    只有 2 首，但歌名都在原文里）能正常通过。
-    if source == "ai" and items:
-        verified = _verify_ai_items_against_source(items, comments)
-        if len(verified) < len(items):
-            dropped = len(items) - len(verified)
-            logger.warning("[%s] DS 有 %d 首歌名不在原文，判幻觉丢弃", video.bvid, dropped)
-            items = verified
-            if not items:
-                # 全部是幻觉 → 回退本地；本地也空 → 跳过
-                if local_items:
-                    items = local_items
-                    source = "local"
-                    ai_detail = "DS 全部幻觉（歌名不在原文），回退本地"
-                else:
-                    result.status = "skipped_hallucination"
-                    result.detail = "DS 输出歌名均不在原文（幻觉），本地也无结果，跳过"
-                    return result
 
     # 6. 过滤条目：必须有时间戳；歌手字段按配置（默认放宽=允许只有歌名）
     if config.require_artist():

@@ -23,47 +23,35 @@ def test_raw_markers_only_no_songlist():
     assert raw_has_timestamp_songlist(raw) is False
 
 
-def test_raw_one_songline_detected():
-    """至少 1 个歌曲行即判定有歌单（不限条数）。"""
-    raw = {"comments": [{"text": "0:12:11 Tokimeki / Vaundy\n3:49 開始~start~"}]}
+def test_raw_two_songlines_detected():
+    """BV1NV3g6eEpF 式：2 首真歌 + 開始标记 → 判定有歌单。"""
+    raw = {"comments": [{"text": "3:49 開始~start~\n12:11 Tokimeki / Vaundy\n30:41 メランコリック / Junky feat. 鏡音リン"}]}
     assert raw_has_timestamp_songlist(raw) is True
 
-from yt_comment_automation.pipeline import _verify_ai_items_against_source  # noqa: E402
+
+def test_raw_scattered_chat_not_songlist():
+    """BV1eYgV6WEq3 式：感想夹 1 个时间戳 → 不是歌单。"""
+    raw = {"comments": [{"text": "おつかささまでしたー！！\n1:30:53 つかさくんの『悪ノ召使』めっっちゃ良いー\n最後のお焚き上げも面白かったwww"}]}
+    assert raw_has_timestamp_songlist(raw) is False
 
 
-def test_verify_hallucination_dropped():
-    """BV1eYgV6WEq3：歌名'悪ノ召使'不在纯聊天原文里 → 幻觉丢弃。"""
-    comments = [
-        "おつかささまでした～。最高に楽しかった！",
-        "今日も楽しかった～！いぇーい！",
-    ]
-    items = [type("X", (), {"song": "悪ノ召使", "artist": "つかさくん"})()]
-    verified = _verify_ai_items_against_source(items, comments)
-    assert len(verified) == 0
 
+def test_songlist_comment_vs_scattered_chat():
+    """BV1eYgV6WEq3 区分：结构化歌单 vs 零散感想。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
 
-def test_verify_real_songs_kept():
-    """BV1NV3g6eEpF：真实 2 首，歌名都在原文 → 全部保留。"""
-    comments = [
-        "3:49 開始~start~\n12:11 Tokimeki / Vaundy\n30:41 メランコリック / Junky feat. 鏡音リン"
-    ]
-    items = [
-        type("X", (), {"song": "Tokimeki", "artist": "Vaundy"})(),
-        type("X", (), {"song": "メランコリック", "artist": "Junky feat. 鏡音リン"})(),
-    ]
-    verified = _verify_ai_items_against_source(items, comments)
-    assert len(verified) == 2
+    # 结构化歌单（Setlist 每行时间戳+歌名/歌手）→ True
+    setlist = "『15:10』 clock lock works / ハチ\n『22:16』 ワンダーランドと羊の歌 / ハチ\n『35:29』 Q / 椎名もた"
+    assert _is_songlist_comment(setlist) is True
 
+    # 零散感想（夹 1 个时间戳的聊天）→ False，不喂 DS
+    chat = "おつかささまでしたー！！\n1:30:53 つかさくんの『悪ノ召使』めっっちゃ良いー\n最後のお焚き上げも面白かったwww"
+    assert _is_songlist_comment(chat) is False
 
-def test_verify_setlist_kept():
-    """BV1eYgV6WEq3 的 Setlist：歌名都在原文 → 保留（含纯数字/短歌名）。"""
-    comments = [
-        "『15:10』 clock lock works / ハチ\n『22:16』 ワンダーランドと羊の歌 / ハチ\n『35:29』 Q / 椎名もた"
-    ]
-    items = [
-        type("X", (), {"song": "clock lock works", "artist": "ハチ"})(),
-        type("X", (), {"song": "ワンダーランドと羊の歌", "artist": "ハチ"})(),
-        type("X", (), {"song": "Q", "artist": "椎名もた"})(),
-    ]
-    verified = _verify_ai_items_against_source(items, comments)
-    assert len(verified) == 3
+    # BV1NV3g6eEpF 真实小歌单（2 首，时间戳行密集）→ True
+    small = "3:49 開始~start~\n12:11 Tokimeki / Vaundy\n30:41 メランコリック / Junky feat. 鏡音リン"
+    assert _is_songlist_comment(small) is True
+
+    # BV1vLuY6yEXo 歌名+时间戳 无分隔符格式 → True
+    nodelim = "ライラック 11:10\n私は最強 18:46\nサウダージ 23:23\n世界は恋に落ちている 31:01"
+    assert _is_songlist_comment(nodelim) is True
