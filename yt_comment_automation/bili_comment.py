@@ -11,6 +11,7 @@ from . import config
 VIEW_API = "https://api.bilibili.com/x/web-interface/view"
 REPLY_LIST_API = "https://api.bilibili.com/x/v2/reply"
 REPLY_ADD_API = "https://api.bilibili.com/x/v2/reply/add"
+REPLY_DEL_API = "https://api.bilibili.com/x/v2/reply/del"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
@@ -146,6 +147,21 @@ def post_comment(bvid: str, message: str, cookies: dict[str, str]) -> dict:
         "csrf": bili_jct,
     }
     return _request_json(REPLY_ADD_API, cookies, f"https://www.bilibili.com/video/{bvid}", payload)
+
+
+def delete_comment(bvid: str, rpid: str, cookies: dict[str, str]) -> dict:
+    """删除本账号在视频下的评论（用于低质量歌单升级为高质量歌单时替换）。"""
+    aid = get_aid(bvid, cookies)
+    bili_jct = cookies.get("bili_jct", "")
+    if not bili_jct:
+        raise RuntimeError("cookie 缺少 bili_jct，无法删除")
+    payload = {
+        "type": 1,
+        "oid": aid,
+        "rpid": rpid,
+        "csrf": bili_jct,
+    }
+    return _request_json(REPLY_DEL_API, cookies, f"https://www.bilibili.com/video/{bvid}", payload)
 
 
 # B站评论长度上限（字符）。官方限制约 1000，保守取 900 留缓冲；

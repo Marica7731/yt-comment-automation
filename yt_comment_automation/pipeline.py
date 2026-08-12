@@ -27,6 +27,11 @@ from . import ai, bili_comment, clean, collections, config, notify, yt_fetch
 
 logger = logging.getLogger("yt_comment_automation")
 
+# 质量升级阈值：已发歌单首数 + 该阈值以上，YouTube 出现更全歌单时才升级（避免 1→2 首抖动刷屏）
+UPGRADE_THRESHOLD = 3
+# 已发视频的缓存复查 TTL（秒）：缓存超过该时间才 force 重抓检查是否有更全歌单，控制已发视频流量
+UPGRADE_CHECK_TTL = 6 * 3600
+
 # 本地规则结果可信的下限：低于此数量时触发 DeepSeek 兜底
 MIN_CONFIDENT_SONGS = 5
 
@@ -110,8 +115,8 @@ def _is_songlist_comment(text: str) -> bool:
     - 感想：零星 1 个时间戳夹在聊天里（如「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」）
     - 纯标记：全是開始/MC/雑談/あくび 等标记行，不算歌单
 
-    判定：≥2 个「歌曲时间戳行」（时间戳行去掉时间戳后非空、且不含纯标记词），
-    且歌曲时间戳行占该评论非空行数 ≥50%。
+    判定：≥2 个「歌曲时间戳行」（时间戳行去掉时间戳后非空、且不含纯标记词）。
+    不设密度阈值（避免把「半歌单半感想」的评论一刀砍掉）。
     """
     ts_re = re.compile(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
     lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
@@ -127,9 +132,23 @@ def _is_songlist_comment(text: str) -> bool:
         if _NON_SONG_TS_MARKERS.search(rest):
             continue
         song_ts_lines += 1
-    if song_ts_lines < 2:
-        return False
-    return song_ts_lines / len(lines) >= 0.5
+    return song_ts_lines >= 2
+
+
+def _count_own_songlist_lines(message: str) -> int:
+    """数本账号已发评论的歌单首数。
+
+    我们发布的格式每行一首：`时间戳 NN. 歌名 - 歌手`（编号 NN. 紧跟时间戳）。
+    统计带「时间戳 + 编号 + 点」的行数即为首数。
+    """
+    if not message:
+        return 0
+    ts_idx_re = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?\s+\d{2,3}\.")
+    count = 0
+    for line in message.splitlines():
+        if ts_idx_re.search(line.strip()):
+            count += 1
+    return count
 
 
 def raw_has_timestamp_songlist(raw: dict) -> bool:
@@ -166,16 +185,27 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         result.detail = "忽略列表（用户指定）"
         return result
 
-    # 1. 本账号已有评论跳过（rpid 存在即已发过，不管条数/格式）
+    # 1. 本账号已有评论：不是"直接跳过"，而是区分两种情况
+    #    - 已发"足量"歌单（≥阈值）→ 直接跳过
+    #    - 已发"低质量"歌单（<阈值，可能是 1 首/错误）→ 进入升级模式：
+    #      继续抓 YouTube，若出现更全歌单则删旧发新（质量升级），否则保留原样
     try:
         existing = bili_comment.find_own_comment(video.bvid, cookies)
     except Exception as err:  # noqa: BLE001
         logger.warning("[%s] 检查已有评论失败: %s", video.bvid, err)
         existing = None
+    upgrade_mode = False
+    existing_rpid = ""
     if existing:
-        result.status = "already_posted"
-        result.detail = f"rpid={existing.rpid} 本账号已发过评论"
-        return result
+        existing_count = _count_own_songlist_lines(existing.message)
+        if existing_count >= UPGRADE_THRESHOLD:
+            result.status = "already_posted"
+            result.detail = f"rpid={existing.rpid} 已发 {existing_count} 首（足量）"
+            return result
+        # 已发歌单很少 → 升级候选
+        upgrade_mode = True
+        existing_rpid = existing.rpid
+        logger.info("[%s] 已发仅 %d 首（<阈值），进入质量升级检查", video.bvid, existing_count)
     # 2. 确定 YouTube ID（part 字段优先，简介首行校验）
     yt_id = video.yt_id
     if not yt_id:
@@ -197,13 +227,17 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     result.yt_id = yt_id
 
     # 3. 抓取 YouTube 评论 + 简介
-    #    缓存策略：先读缓存；若缓存里没有【时间戳+明确歌曲】的歌单，则强制重新抓取
-    #    YouTube（评论区可能刚出现歌单）。一旦缓存里有歌单，后续直接用缓存不再重抓。
+    #    缓存策略：
+    #    - 未发布：读缓存 → 无歌单则 force 重抓（直到评论区出现歌单）
+    #    - 升级模式：缓存按 TTL 过期（避免每次 cron 都重抓已发视频）
     try:
-        raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
-        if not raw_has_timestamp_songlist(raw):
-            logger.info("[%s] 缓存无歌单，强制重新抓取 YouTube", video.bvid)
-            raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
+        if upgrade_mode:
+            raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, max_age_seconds=UPGRADE_CHECK_TTL)
+        else:
+            raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
+            if not raw_has_timestamp_songlist(raw):
+                logger.info("[%s] 缓存无歌单，强制重新抓取 YouTube", video.bvid)
+                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
     except Exception as err:  # noqa: BLE001
         result.status = "error"
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"
@@ -256,16 +290,52 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
 
     # 6b. 无歌曲
     if not items:
+        if upgrade_mode:
+            # 已发过低质量评论，但 YouTube 当前也没歌单 → 保留原样
+            result.status = "already_posted"
+            result.detail = f"rpid={existing_rpid} 升级检查：YouTube 无更全歌单，保留原评论"
+            return result
         result.status = "skipped_no_songs"
         result.detail = f"未提取到有效歌曲（{result.detail or '本地与 AI 均无结果'}）"
         return result
+
+    # 6c. 升级判定：已发低质量评论时，只有"更全"才升级（避免 1→2 首抖动刷屏）
+    if upgrade_mode:
+        existing_count = _count_own_songlist_lines(existing.message) if existing else 0
+        if len(items) < existing_count + UPGRADE_THRESHOLD:
+            result.status = "already_posted"
+            result.detail = (
+                f"rpid={existing_rpid} 升级检查：新提取 {len(items)} 首 vs 已发 {existing_count} 首，"
+                f"未达升级阈值（需 +{UPGRADE_THRESHOLD}），保留原评论"
+            )
+            return result
+        logger.info(
+            "[%s] 质量升级：已发 %d 首 → 新歌单 %d 首，删旧发新",
+            video.bvid, existing_count, len(items),
+        )
 
     # 7. 格式化 + 发布（无空行，统一时间戳 NN. 歌名 - 歌手；超长自动楼中楼续写）
     message = clean.format_song_items(items, include_timestamps=True)
     if dry_run:
         result.status = "dry_run"
         result.message = message
+        if upgrade_mode:
+            result.detail = f"升级：删 rpid={existing_rpid} 后发 {len(items)} 首（dry-run 不执行）"
         return result
+
+    # 升级模式：先删旧评论，再发新评论
+    if upgrade_mode and existing_rpid:
+        try:
+            del_resp = bili_comment.delete_comment(video.bvid, existing_rpid, cookies)
+            if del_resp.get("code") != 0:
+                result.status = "error"
+                result.error = f"删除旧评论失败: code={del_resp.get('code')} msg={del_resp.get('message')}"
+                return result
+            logger.info("[%s] 已删除旧评论 rpid=%s", video.bvid, existing_rpid)
+        except Exception as err:  # noqa: BLE001
+            result.status = "error"
+            result.error = f"删除旧评论异常: {err}"
+            return result
 
     responses = bili_comment.post_comment_with_replies(video.bvid, message, cookies)
     if not responses:
@@ -284,7 +354,9 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     result.status = "posted"
     result.message = message
     rpids = [str(r.get("data", {}).get("rpid", "")) for r in responses if r.get("data")]
-    if followup_fail:
+    if upgrade_mode:
+        result.detail = f"升级成功：删旧 rpid={existing_rpid}，发新 rpids={'/'.join(rpids)} segments={len(responses)}"
+    elif followup_fail:
         result.detail = (
             f"rpids={'/'.join(rpids)} segments={len(responses)} "
             f"楼中楼续写失败: code={followup_fail.get('code')} msg={followup_fail.get('message')}"

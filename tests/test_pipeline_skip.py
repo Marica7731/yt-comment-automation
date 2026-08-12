@@ -55,3 +55,22 @@ def test_songlist_comment_vs_scattered_chat():
     # BV1vLuY6yEXo 歌名+时间戳 无分隔符格式 → True
     nodelim = "ライラック 11:10\n私は最強 18:46\nサウダージ 23:23\n世界は恋に落ちている 31:01"
     assert _is_songlist_comment(nodelim) is True
+
+
+def test_upgrade_logic_count():
+    """质量升级：数已发歌单首数（时间戳+编号格式）。"""
+    from yt_comment_automation.pipeline import _count_own_songlist_lines
+    msg = "0:06:41 01. おジャ魔女カーニバル!! - 歌手\n0:09:27 02. Together - あきよしふみえ"
+    assert _count_own_songlist_lines(msg) == 2
+    # 低质量 1 首
+    assert _count_own_songlist_lines("1:30:53 01. 悪ノ召使 - つかさくん") == 1
+    # 旧格式（无编号）
+    assert _count_own_songlist_lines("0:17:27 Butter-Fly / 和田光司") == 0
+
+
+def test_scattered_chat_not_cut():
+    """感想夹 1 个时间戳的评论：不因密度一刀砍（放宽后 _is_songlist_comment 只看 ≥2 歌曲行）。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+    # 半歌单半感想（2 歌曲行 + 1 感想行）→ 仍算歌单（不再要求密度≥50%）
+    mixed = "おつかささまでした\n1:30:53 悪ノ召使 / mothy\n1:37:25 廃都アトリエスタにて / 暴走P"
+    assert _is_songlist_comment(mixed) is True
