@@ -27,3 +27,43 @@ def test_raw_one_songline_detected():
     """至少 1 个歌曲行即判定有歌单（不限条数）。"""
     raw = {"comments": [{"text": "0:12:11 Tokimeki / Vaundy\n3:49 開始~start~"}]}
     assert raw_has_timestamp_songlist(raw) is True
+
+from yt_comment_automation.pipeline import _verify_ai_items_against_source  # noqa: E402
+
+
+def test_verify_hallucination_dropped():
+    """BV1eYgV6WEq3：歌名'悪ノ召使'不在纯聊天原文里 → 幻觉丢弃。"""
+    comments = [
+        "おつかささまでした～。最高に楽しかった！",
+        "今日も楽しかった～！いぇーい！",
+    ]
+    items = [type("X", (), {"song": "悪ノ召使", "artist": "つかさくん"})()]
+    verified = _verify_ai_items_against_source(items, comments)
+    assert len(verified) == 0
+
+
+def test_verify_real_songs_kept():
+    """BV1NV3g6eEpF：真实 2 首，歌名都在原文 → 全部保留。"""
+    comments = [
+        "3:49 開始~start~\n12:11 Tokimeki / Vaundy\n30:41 メランコリック / Junky feat. 鏡音リン"
+    ]
+    items = [
+        type("X", (), {"song": "Tokimeki", "artist": "Vaundy"})(),
+        type("X", (), {"song": "メランコリック", "artist": "Junky feat. 鏡音リン"})(),
+    ]
+    verified = _verify_ai_items_against_source(items, comments)
+    assert len(verified) == 2
+
+
+def test_verify_setlist_kept():
+    """BV1eYgV6WEq3 的 Setlist：歌名都在原文 → 保留（含纯数字/短歌名）。"""
+    comments = [
+        "『15:10』 clock lock works / ハチ\n『22:16』 ワンダーランドと羊の歌 / ハチ\n『35:29』 Q / 椎名もた"
+    ]
+    items = [
+        type("X", (), {"song": "clock lock works", "artist": "ハチ"})(),
+        type("X", (), {"song": "ワンダーランドと羊の歌", "artist": "ハチ"})(),
+        type("X", (), {"song": "Q", "artist": "椎名もた"})(),
+    ]
+    verified = _verify_ai_items_against_source(items, comments)
+    assert len(verified) == 3

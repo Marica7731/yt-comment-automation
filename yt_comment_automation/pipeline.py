@@ -27,10 +27,6 @@ from . import ai, bili_comment, clean, collections, config, notify, yt_fetch
 
 logger = logging.getLogger("yt_comment_automation")
 
-# 低置信阈值：本地规则 0 首 + DS 结果少于该数量 → 判定为疑似幻觉，跳过不发布。
-# 真实歌枠通常 ≥3 首；1-2 首的"歌单"极可能是 DS 幻觉（如把 UP 主/频道名当歌手）。
-LOW_CONFIDENCE_MIN_SONGS = 3
-
 # 本地规则结果可信的下限：低于此数量时触发 DeepSeek 兜底
 MIN_CONFIDENT_SONGS = 5
 
@@ -135,6 +131,49 @@ def raw_has_timestamp_songlist(raw: dict) -> bool:
     return False
 
 
+def _normalize_for_verify(text: str) -> str:
+    """回验用的规范化：去空格/全角空格/常见装饰符号，统一小写。"""
+    t = (text or "").lower()
+    t = re.sub(r"[\s\u3000]+", "", t)
+    t = re.sub(r"[「」『』【】\[\]（）()《》〈〉\"'“”‘’・･~～!！?？.．、,，:：;；\-—–−/／|｜￤∣丨]+", "", t)
+    return t
+
+
+def _verify_ai_items_against_source(items, comments) -> list:
+    """DS 原文回验：歌名必须能在输入原文（评论区）里找到，找不到视为幻觉丢弃。
+
+    回验规则：
+    - 取 DS 每首歌的歌名，规范化后（去空格/标点/括号装饰）
+    - 歌名的核心片段（≥2 字符，纯数字或单字符除外）在任一评论原文中出现即通过
+    - 保留括号内正式名（ryo(supercell)）不做去括号，避免误伤
+    """
+    source_norm = _normalize_for_verify("\n".join(comments))
+    verified = []
+    for it in items:
+        song = (it.song or "").strip()
+        if not song:
+            continue
+        # 取歌名核心：去掉括号内内容，保留主歌名
+        core = re.sub(r"[\(（\[［].*?[\)）\]］]", "", song).strip()
+        core_norm = _normalize_for_verify(core)
+        if not core_norm:
+            core_norm = _normalize_for_verify(song)
+        # 回验：歌名核心（或前 6 字符）出现在原文
+        # 太短（<2 字符）或纯数字时放宽，直接用原歌名
+        if len(core_norm) < 2 or core_norm.isdigit():
+            verified.append(it)
+            continue
+        haystack = source_norm
+        if core_norm in haystack:
+            verified.append(it)
+        else:
+            # 宽松：歌名前 5 字符作为子串匹配（歌名可能被 DS 规范化去掉了尾部符号）
+            prefix = core_norm[:5]
+            if len(prefix) >= 3 and prefix in haystack:
+                verified.append(it)
+    return verified
+
+
 def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: bool) -> VideoResult:
     result = VideoResult(
         bvid=video.bvid,
@@ -236,13 +275,27 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if ai_detail:
             ai_detail = f"本地兜底（{ai_detail}）"
 
-    # 5b. 交叉校验：本地规则是确定性代码，比 DS 更可信。两种情况处理：
-    #   ① 本地更全（≥DS）→ 用本地，避免 DS 漏歌
-    #   ② 本地 0 首 + DS 极少首（<阈值）→ 疑似 DS 幻觉，宁缺勿滥跳过
-    if source == "ai" and local_items and len(local_items) >= len(items):
-        items = local_items
-        source = "local"
-        ai_detail = f"本地更全（本地 {len(local_items)} ≥ DS {len(items)}），采用本地"
+    # 5b. DS 原文回验：DS 输出的每首歌，歌名必须在输入的原文里能找到。
+    #    幻觉的标志是"编造原文里不存在的歌"（如 BV1eYgV6WEq3 把 UP 主当歌手，
+    #    歌名'悪ノ召使'当时评论区是纯聊天、压根不存在）。
+    #    回验通过才信任 DS；否则改用本地 / 跳过。真实小歌单（如 BV1NV3g6eEpF
+    #    只有 2 首，但歌名都在原文里）能正常通过。
+    if source == "ai" and items:
+        verified = _verify_ai_items_against_source(items, comments)
+        if len(verified) < len(items):
+            dropped = len(items) - len(verified)
+            logger.warning("[%s] DS 有 %d 首歌名不在原文，判幻觉丢弃", video.bvid, dropped)
+            items = verified
+            if not items:
+                # 全部是幻觉 → 回退本地；本地也空 → 跳过
+                if local_items:
+                    items = local_items
+                    source = "local"
+                    ai_detail = "DS 全部幻觉（歌名不在原文），回退本地"
+                else:
+                    result.status = "skipped_hallucination"
+                    result.detail = "DS 输出歌名均不在原文（幻觉），本地也无结果，跳过"
+                    return result
 
     # 6. 过滤条目：必须有时间戳；歌手字段按配置（默认放宽=允许只有歌名）
     if config.require_artist():
@@ -258,12 +311,6 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     if not items:
         result.status = "skipped_no_songs"
         result.detail = f"未提取到有效歌曲（{result.detail or '本地与 AI 均无结果'}）"
-        return result
-
-    # 6c. 低置信校验：本地 0 首 + DS 仅 1-2 首 → 疑似幻觉（如 BV1eYgV6WEq3 把 UP 主当歌手）
-    if source == "ai" and not local_items and len(items) < LOW_CONFIDENCE_MIN_SONGS:
-        result.status = "skipped_low_confidence"
-        result.detail = f"低置信：本地规则 0 首，DS 仅 {len(items)} 首（疑似幻觉），宁缺勿滥跳过"
         return result
 
     # 7. 格式化 + 发布（无空行，统一时间戳 NN. 歌名 - 歌手；超长自动楼中楼续写）
