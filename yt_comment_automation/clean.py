@@ -54,10 +54,10 @@ def timestamp_to_seconds(timestamp: str) -> Optional[int]:
 def find_timestamp_start_positions_in_line(line: str) -> list[int]:
     source = normalize_timeline_marker_chars(line or "")
     positions: list[int] = []
-    regex = re.compile(r"(^|[^\d])((?:[\[【(（]\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*[\]】)）])?)(?!\d)")
+    regex = re.compile(r"(^|[^\d])((?:[\[【(（『]\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*[\]】)）』])?)(?!\d)")
     for match in regex.finditer(source):
-        raw_timestamp = re.sub(r"^[\[【(（]\s*", "", match.group(2) or "")
-        raw_timestamp = re.sub(r"\s*[\]】)）]$", "", raw_timestamp)
+        raw_timestamp = re.sub(r"^[\[【(（『]\s*", "", match.group(2) or "")
+        raw_timestamp = re.sub(r"\s*[\]】)）』]$", "", raw_timestamp)
         if timestamp_to_seconds(raw_timestamp) is None:
             continue
         index = match.start() + (len(match.group(1)) if match.group(1) else 0)
@@ -368,7 +368,7 @@ def strip_weird_leading_chars(text: str) -> str:
 def strip_leading_timestamp(text: str) -> str:
     t = normalize_timeline_marker_chars(strip_timeline_tree_prefix(text or "")).strip()
     timestamp_pattern = re.compile(
-        r"^(?:[\[【(（]\s*)?\d{1,2}:\d{2}(?::\d{2})?\s*(?:[\]】)）])?(?:[\s\u3000]*[;；,，、~～\-—–−]+\s*)?"
+        r"^(?:[\[【(（『]\s*)?\d{1,2}:\d{2}(?::\d{2})?\s*(?:[\]】)）』])?(?:[\s\u3000]*[;；,，、~～\-—–−]+\s*)?"
     )
     for _ in range(8):
         next_t = strip_timeline_tree_prefix(timestamp_pattern.sub("", t)).strip()
@@ -718,12 +718,17 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
     - 行尾罗马字/译文括号（先删再拆，避免其内部 " - " 被误当分隔符）
     """
     t = strip_weird_leading_chars(line)
+    # 兼容带包裹符的时间戳：『15:10』、[15:10]、15:10 等
+    ts_prefixed = re.match(r"^[\[【(（『]\s*\d{1,2}:\d{2}(?::\d{2})?\s*[\]】)）』]\s*", t)
     if not re.match(r"^\d{1,2}:\d{2}(?::\d{2})?\s*", t):
         stripped = _strip_leading_numbered_marker(t)
         if stripped == t:
-            return None
-        t = stripped
-    if not re.match(r"^\d{1,2}:\d{2}(?::\d{2})?\s*", t):
+            # 若还不是数字时间戳开头，但带包裹符时间戳（『15:10』）则继续
+            if not ts_prefixed:
+                return None
+        else:
+            t = stripped
+    if not re.match(r"^\d{1,2}:\d{2}(?::\d{2})?\s*", t) and not ts_prefixed:
         return None
     timestamp_info = extract_first_timestamp_info(t)
     t = strip_leading_timeline_decorations(t)

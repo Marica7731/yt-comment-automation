@@ -160,3 +160,13 @@ def test_start_placeholder():
     assert items[0].song == "ANIMA"
     assert items[0].artist == "ReoNa"
     assert items[0].timestamp_seconds == 624
+
+
+def test_fullwidth_bracket_timestamp_setlist():
+    """『时间戳』歌名 / 歌手 格式（Setlist 包裹符）本地可解析。"""
+    setlist = "《Setlist》\n 『15:10』 clock lock works / ハチ\n 『22:16』 ワンダーランドと羊の歌 / ハチ\n『2:19:29』Ｃパート"
+    items = clean.build_comment_songlist([setlist], "")
+    assert len(items) >= 2
+    assert items[0].song == "clock lock works"
+    assert items[0].artist == "ハチ"
+    assert items[0].timestamp_seconds == 910  # 15:10
