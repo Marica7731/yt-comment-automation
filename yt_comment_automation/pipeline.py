@@ -30,7 +30,7 @@ logger = logging.getLogger("yt_comment_automation")
 # 质量升级阈值：已发歌单首数 + 该阈值以上，YouTube 出现更全歌单时才升级（避免 1→2 首抖动刷屏）
 UPGRADE_THRESHOLD = 3
 # 已发视频的缓存复查 TTL（秒）：缓存超过该时间才 force 重抓检查是否有更全歌单，控制已发视频流量
-UPGRADE_CHECK_TTL = 6 * 3600
+UPGRADE_CHECK_TTL = 3600
 
 # 本地规则结果可信的下限：低于此数量时触发 DeepSeek 兜底
 MIN_CONFIDENT_SONGS = 5
