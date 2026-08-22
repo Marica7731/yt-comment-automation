@@ -70,7 +70,7 @@ def song_serch_lyrics_root() -> str:
 
 
 def collection_anchors() -> list[str]:
-    return [a for a in get("COLLECTION_ANCHORS", "BV13ege65Es5,BV1ZYNT6hEEe").split(",") if a]
+    return [a for a in get("COLLECTION_ANCHORS", "BV1e4TV6mE9R,BV15zbv6YE7j,BV11Zbv6HEEt,BV1ntuo6XESr").split(",") if a]
 
 
 def collection_names() -> list[str]:
