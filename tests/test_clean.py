@@ -69,6 +69,24 @@ def test_quoted_song_titles():
     assert parsed.artist == "ヒグチアイ"
 
 
+def test_ascii_quote_wrapped_setlist():
+    # YouTube 频道主 SETLIST：`0:05:39 " 歌名 / 歌手` 裸引号是条目包裹符，应剥掉
+    line = "0:05:39 \" アルストロメリア / 凛々咲"
+    parsed = clean.parse_song_line_after_timestamp(line)
+    assert parsed is not None
+    assert parsed.song == "アルストロメリア"
+    assert parsed.artist == "凛々咲"
+
+
+def test_paired_ascii_quote_title_kept():
+    # 成对引号包裹的歌名是正规写法，应完整保留
+    line = "0:05:39 \"Alstroemeria\" / 凛々咲"
+    parsed = clean.parse_song_line_after_timestamp(line)
+    assert parsed is not None
+    assert parsed.song == '"Alstroemeria"'
+    assert parsed.artist == "凛々咲"
+
+
 def test_numbered_attached_index_stripped():
     line = "6:16 01.heavenly blue / Kalafina"
     parsed = clean.parse_song_line_after_timestamp(line)

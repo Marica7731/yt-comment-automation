@@ -416,6 +416,25 @@ def strip_loose_edge_title_quotes(text: str) -> str:
     return t
 
 
+def strip_unpaired_leading_ascii_quote(text: str) -> str:
+    """剥掉歌名前导的裸 ASCII 引号（YouTube 频道主 SETLIST 用 `"` 包裹条目）。
+
+    只处理「以引号开头、但后续没有配对收尾引号」的情况：
+    - `" アルストロメリア / 凛々咲` → `アルストロメリア / 凛々咲`（真实场景，引号是条目包裹开始符）
+    - `"Alstroemeria" / 凛々咲` → 保留（成对引号包裹的歌名，是正规写法）
+    """
+    t = (text or "").strip()
+    if not t or not t.startswith('"'):
+        return t
+    rest = t[1:].strip()
+    if not rest:
+        return rest
+    # 行内任意位置存在配对的收尾引号 → 成对包裹，不剥
+    if rest.endswith('"') or '"' in rest:
+        return t
+    return rest
+
+
 def clean_song_or_artist_part(text: str) -> str:
     raw = text or ""
     # 受保护正式标题（R09）：任何清洗步骤都不删改符号，直接返回干净结果
@@ -732,6 +751,8 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
         return None
     timestamp_info = extract_first_timestamp_info(t)
     t = strip_leading_timeline_decorations(t)
+    # YouTube 频道主 SETLIST 用裸引号包裹条目：`0:05:39 " 歌名 / 歌手` → 剥掉前导引号
+    t = strip_unpaired_leading_ascii_quote(t)
     if not t or is_obviously_non_song_text(t):
         return None
     # 先清理行尾译文/罗马字括号，避免其内部 " - " 干扰歌名/歌手拆分
