@@ -31,6 +31,16 @@ class YtFetchError(RuntimeError):
     pass
 
 
+def is_rate_limited_error(err: Exception) -> bool:
+    """判断异常是否为 YouTube 限流（429）。urllib 对 429 抛 HTTPError，重试耗尽后原样上抛。"""
+    import urllib.error
+
+    if isinstance(err, urllib.error.HTTPError) and err.code == 429:
+        return True
+    lowered = str(err).lower()
+    return "429" in lowered or "rate limit" in lowered or "too many request" in lowered
+
+
 def _headers() -> dict[str, str]:
     return {
         "User-Agent": UA,

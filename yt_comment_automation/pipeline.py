@@ -35,6 +35,9 @@ UPGRADE_CHECK_TTL = 3600
 # 本地规则结果可信的下限：低于此数量时触发 DeepSeek 兜底
 MIN_CONFIDENT_SONGS = 5
 
+# 本次运行已发过 YouTube 429 通知的 bvid（多个视频同时限流时只提醒一次，避免刷屏）
+_yt_rate_limited_notified: set[str] = set()
+
 
 @dataclass
 class VideoResult:
@@ -241,6 +244,15 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     except Exception as err:  # noqa: BLE001
         result.status = "error"
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"
+        # YouTube 限流（429）→ 飞书提醒；同一次运行只提醒一次，避免多个视频同时限流刷屏
+        if yt_fetch.is_rate_limited_error(err) and video.bvid not in _yt_rate_limited_notified:
+            _yt_rate_limited_notified.add(video.bvid)
+            try:
+                brief = notify.build_yt_rate_limit_brief(video.bvid, result.error)
+                ok, note = notify.send_feishu_message(brief)
+                logger.info("[%s] 飞书 YouTube 429 通知: %s %s", video.bvid, ok, note)
+            except Exception as notify_err:  # noqa: BLE001
+                logger.warning("[%s] 飞书 YouTube 429 通知失败: %s", video.bvid, notify_err)
         return result
 
     comments = [c.get("text", "") for c in raw.get("comments", [])]
@@ -265,14 +277,6 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if ai_err:
             ai_detail = f"AI 整理失败: {ai_err}"
             logger.warning("[%s] %s", video.bvid, ai_detail)
-            # DeepSeek 限流（429）直接飞书提醒，方便及时排查 key/配额（其余失败静默走本地兜底）
-            if ai_err.startswith("DEEPSEEK_RATE_LIMITED"):
-                try:
-                    brief = notify.build_ai_failure_brief(video.bvid, ai_detail)
-                    ok, note = notify.send_feishu_message(brief)
-                    logger.info("[%s] 飞书 DeepSeek 限流通知: %s %s", video.bvid, ok, note)
-                except Exception as notify_err:  # noqa: BLE001
-                    logger.warning("[%s] 飞书 DeepSeek 限流通知失败: %s", video.bvid, notify_err)
         elif ai.is_special_no_artist_response(ai_text):
             ai_detail = "AI 判定缺歌手"
         else:
@@ -395,6 +399,9 @@ def run_pipeline(
 
     cookies = bili_comment.load_cookie_map()
     posted = load_processed(data_dir)
+
+    # 每次运行重置限流通知去重（跨 cron 周期每个视频可再提醒）
+    _yt_rate_limited_notified.clear()
 
     # 抓取合集
     logger.info("抓取合集视频列表...")

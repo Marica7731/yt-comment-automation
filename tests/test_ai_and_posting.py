@@ -84,30 +84,22 @@ def test_split_message_keeps_lines_integer():
     assert total_lines == 79
 
 
-def test_is_rate_limited_http_429():
+
+def test_yt_rate_limited_detection():
     import urllib.error
 
-    err = urllib.error.HTTPError("https://api.deepseek.com/v1/responses", 429, "Too Many Requests", None, None)
-    assert ai._is_rate_limited(err, '{"error":{"message":"Rate limit reached"}}')
+    from yt_comment_automation import yt_fetch
+
+    err = urllib.error.HTTPError("https://www.youtube.com/watch?v=xxx", 429, "Too Many Requests", None, None)
+    assert yt_fetch.is_rate_limited_error(err)
+    assert yt_fetch.is_rate_limited_error(Exception("HTTP Error 429: Too Many Requests"))
+    assert not yt_fetch.is_rate_limited_error(Exception("HTTP Error 403: Forbidden"))
 
 
-def test_is_rate_limited_body_keyword():
-    assert ai._is_rate_limited(Exception("plain"), '{"error":{"message":"Rate limit exceeded for model"}}')
-    assert ai._is_rate_limited(Exception("plain"), '{"error":{"message":"too many requests, please retry later"}}')
-
-
-def test_is_rate_limited_not_429():
-    import urllib.error
-
-    err = urllib.error.HTTPError("https://api.deepseek.com/v1/responses", 401, "Unauthorized", None, None)
-    assert not ai._is_rate_limited(err, '{"error":{"message":"Authentication Fails"}}')
-    assert not ai._is_rate_limited(Exception("plain"), "some other error")
-
-
-def test_build_ai_failure_brief():
+def test_build_yt_rate_limit_brief():
     from yt_comment_automation import notify
 
-    brief = notify.build_ai_failure_brief("BV1Wq846oE3E", "AI 整理失败: DEEPSEEK_RATE_LIMITED: HTTP 429")
-    assert "⚠️DeepSeek 异常" in brief
+    brief = notify.build_yt_rate_limit_brief("BV1Wq846oE3E", "YouTube 抓取失败: HTTPError: HTTP Error 429")
+    assert "⚠️YouTube 限流(429)" in brief
     assert "https://www.bilibili.com/video/BV1Wq846oE3E" in brief
-    assert "DEEPSEEK_RATE_LIMITED" in brief
+    assert "429" in brief
