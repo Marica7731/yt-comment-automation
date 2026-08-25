@@ -77,8 +77,23 @@ def _extract_output_text(resp: dict) -> str:
     return "\n".join(parts).strip()
 
 
+def _is_rate_limited(err: Exception, body_text: str = "") -> bool:
+    """判断是否 DeepSeek 限流（429）。urllib 对 429 抛 HTTPError。"""
+    import urllib.error
+
+    if isinstance(err, urllib.error.HTTPError) and err.code == 429:
+        return True
+    lowered = (body_text or "").lower()
+    return "rate limit" in lowered or "429" in lowered or "too many request" in lowered
+
+
 def call_deepseek(user_text: str, timeout: int = 180, retries: int = 2) -> tuple[str, Optional[str]]:
-    """调用 DeepSeek responses API。返回 (结果文本, 错误信息)。"""
+    """调用 DeepSeek responses API。返回 (结果文本, 错误信息)。
+
+    限流（429）错误以 `DEEPSEEK_RATE_LIMITED: ...` 前缀返回，方便上层单独处理。
+    """
+    import urllib.error
+
     api_key = config.deepseek_api_key()
     if not api_key:
         return "", "未配置 DEEPSEEK_API_KEY"
@@ -104,10 +119,23 @@ def call_deepseek(user_text: str, timeout: int = 180, retries: int = 2) -> tuple
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as err:  # noqa: BLE001
+            body_text = ""
+            if isinstance(err, urllib.error.HTTPError):
+                try:
+                    body_text = err.read().decode("utf-8", errors="replace")
+                except Exception:  # noqa: BLE001
+                    pass
+            if _is_rate_limited(err, body_text):
+                return "", f"DEEPSEEK_RATE_LIMITED: HTTP {getattr(err, 'code', '?')} {body_text[:200]}"
             last_err = f"DeepSeek 请求失败: {type(err).__name__}: {err}"
             continue
         if data.get("status") != "completed":
-            last_err = f"DeepSeek 状态异常: {data.get('status')} error={data.get('error')}"
+            status = data.get("status")
+            error = data.get("error")
+            # 响应体状态异常，但 error 里带限流信息时也按 429 处理
+            if _is_rate_limited(Exception(""), json.dumps(error) if error else ""):
+                return "", f"DEEPSEEK_RATE_LIMITED: status={status} error={error}"
+            last_err = f"DeepSeek 状态异常: {status} error={error}"
             if attempt < retries:
                 continue
             return "", last_err

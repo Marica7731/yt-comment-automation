@@ -82,3 +82,32 @@ def test_split_message_keeps_lines_integer():
     segs = bili_comment.split_message_by_lines(msg)
     total_lines = sum(len(s.splitlines()) for s in segs)
     assert total_lines == 79
+
+
+def test_is_rate_limited_http_429():
+    import urllib.error
+
+    err = urllib.error.HTTPError("https://api.deepseek.com/v1/responses", 429, "Too Many Requests", None, None)
+    assert ai._is_rate_limited(err, '{"error":{"message":"Rate limit reached"}}')
+
+
+def test_is_rate_limited_body_keyword():
+    assert ai._is_rate_limited(Exception("plain"), '{"error":{"message":"Rate limit exceeded for model"}}')
+    assert ai._is_rate_limited(Exception("plain"), '{"error":{"message":"too many requests, please retry later"}}')
+
+
+def test_is_rate_limited_not_429():
+    import urllib.error
+
+    err = urllib.error.HTTPError("https://api.deepseek.com/v1/responses", 401, "Unauthorized", None, None)
+    assert not ai._is_rate_limited(err, '{"error":{"message":"Authentication Fails"}}')
+    assert not ai._is_rate_limited(Exception("plain"), "some other error")
+
+
+def test_build_ai_failure_brief():
+    from yt_comment_automation import notify
+
+    brief = notify.build_ai_failure_brief("BV1Wq846oE3E", "AI 整理失败: DEEPSEEK_RATE_LIMITED: HTTP 429")
+    assert "⚠️DeepSeek 异常" in brief
+    assert "https://www.bilibili.com/video/BV1Wq846oE3E" in brief
+    assert "DEEPSEEK_RATE_LIMITED" in brief

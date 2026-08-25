@@ -92,3 +92,16 @@ def build_failure_brief(bvid: str, reason: str) -> str:
             f"时间：{beijing_now()}",
         ]
     )
+
+
+def build_ai_failure_brief(bvid: str, reason: str) -> str:
+    """AI（DeepSeek）异常通知：限流 429 / 状态异常时提醒，方便及时排查 key 或配额。"""
+    bili_link = f"https://www.bilibili.com/video/{bvid}"
+    return "\n".join(
+        [
+            "⚠️DeepSeek 异常",
+            bili_link,
+            f"原因：{reason}",
+            f"时间：{beijing_now()}",
+        ]
+    )

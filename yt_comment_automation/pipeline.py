@@ -265,6 +265,14 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if ai_err:
             ai_detail = f"AI 整理失败: {ai_err}"
             logger.warning("[%s] %s", video.bvid, ai_detail)
+            # DeepSeek 限流（429）直接飞书提醒，方便及时排查 key/配额（其余失败静默走本地兜底）
+            if ai_err.startswith("DEEPSEEK_RATE_LIMITED"):
+                try:
+                    brief = notify.build_ai_failure_brief(video.bvid, ai_detail)
+                    ok, note = notify.send_feishu_message(brief)
+                    logger.info("[%s] 飞书 DeepSeek 限流通知: %s %s", video.bvid, ok, note)
+                except Exception as notify_err:  # noqa: BLE001
+                    logger.warning("[%s] 飞书 DeepSeek 限流通知失败: %s", video.bvid, notify_err)
         elif ai.is_special_no_artist_response(ai_text):
             ai_detail = "AI 判定缺歌手"
         else:
