@@ -103,3 +103,53 @@ def test_build_yt_rate_limit_brief():
     assert "⚠️YouTube 限流(429)" in brief
     assert "https://www.bilibili.com/video/BV1Wq846oE3E" in brief
     assert "429" in brief
+
+
+def test_extract_desc_profile_ririsya_format():
+    from yt_comment_automation import notify
+
+    desc = """https://youtu.be/2uzi8bOkU9Y
+关注凛々咲 / Ririsya谢谢喵！
+主播：凛々咲 / Ririsya@RirisyaMusic
+原标题：【 #Ririsya6thAnniversary 】Special Singing Stream ✧ 6周年記念スペシャル #歌枠 #karaoke【 VTuber / #凛々咲 #Ririsya 】
+直播开始时间：2026-08-23 12:59:59"""
+    profile = notify.extract_desc_profile(desc)
+    assert "主播：凛々咲 / Ririsya@RirisyaMusic" in profile
+    assert "原标题：" in profile
+    assert "谢谢" not in profile
+    assert "关注凛々咲" not in profile
+
+
+def test_extract_desc_profile_yoshika_format():
+    from yt_comment_automation import notify
+
+    desc = """https://youtu.be/HdS1-R5ndQM
+主播/稿件上传者：YOSHIKA⁂Ch.@YOSHIKA-Ch
+原标题：【#歌枠 】初見さん歓迎中！みんな集まれ！ #shorts #vtuber #vsinger
+视频发布时间：2026-08-07 23:25:06"""
+    profile = notify.extract_desc_profile(desc)
+    assert "主播/稿件上传者：YOSHIKA⁂Ch.@YOSHIKA-Ch" in profile
+    assert "原标题：" in profile
+
+
+def test_extract_desc_profile_no_anchor():
+    from yt_comment_automation import notify
+
+    desc = "https://youtu.be/xxx\n原标题：テスト動画\nテスト"
+    profile = notify.extract_desc_profile(desc)
+    assert profile == "原标题：テスト動画"
+
+
+def test_build_success_brief_with_profile():
+    from yt_comment_automation import notify
+
+    brief = notify.build_success_brief(
+        "BV1Wq846oE3E",
+        "https://youtu.be/2uzi8bOkU9Y",
+        posted_at="2026-08-23 07:43:00",
+        song_count=14,
+        profile="主播：凛々咲 / Ririsya@RirisyaMusic",
+    )
+    assert "✅评论发送成功" in brief
+    assert "主播：凛々咲 / Ririsya@RirisyaMusic" in brief
+    assert "歌曲数量：14" in brief

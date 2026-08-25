@@ -68,18 +68,19 @@ def send_feishu_message(text: str, dry_run: bool = False) -> tuple[bool, str]:
     return True, f"飞书已发送 message_id={resp.get('data', {}).get('message_id', '')}"
 
 
-def build_success_brief(bvid: str, yt_link: str, posted_at: str = "", song_count: int = 0) -> str:
+def build_success_brief(bvid: str, yt_link: str, posted_at: str = "", song_count: int = 0, profile: str = "") -> str:
     """发送成功通知：B站链接、油管链接、评论时间、歌曲数量，中间都用回车。时间用北京时间。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
-    return "\n".join(
-        [
-            "✅评论发送成功",
-            bili_link,
-            yt_link,
-            posted_at or beijing_now(),
-            f"歌曲数量：{song_count}",
-        ]
-    )
+    lines = [
+        "✅评论发送成功",
+        bili_link,
+        yt_link,
+        posted_at or beijing_now(),
+        f"歌曲数量：{song_count}",
+    ]
+    if profile:
+        lines.append(profile)
+    return "\n".join(lines)
 
 
 def build_failure_brief(bvid: str, reason: str) -> str:
@@ -105,3 +106,25 @@ def build_yt_rate_limit_brief(bvid: str, reason: str) -> str:
             f"时间：{beijing_now()}",
         ]
     )
+
+
+def extract_desc_profile(desc: str) -> str:
+    """从 B 站简介提取「主播 + 原标题」两行，供成功通知展示。
+
+    跳过首行 YouTube 链接、寒暄行（关注/谢谢/喵 等），只保留：
+    - 主播行：`主播：xxx` 或 `主播/稿件上传者：xxx`
+    - 原标题行：`原标题：xxx`
+    找不到对应行则省略；全部找不到返回空串。
+    """
+    lines = [ln.strip() for ln in (desc or "").splitlines() if ln.strip()]
+    parts: list[str] = []
+    for ln in lines:
+        if ln.startswith("http://") or ln.startswith("https://"):
+            continue
+        if "谢谢" in ln or "关注" in ln or "感谢" in ln or "喵" in ln:
+            continue
+        if ln.startswith("主播") or ln.startswith("主播/稿件上传者"):
+            parts.append(ln)
+        elif ln.startswith("原标题") or ln.startswith("原標題"):
+            parts.append(ln)
+    return "\n".join(parts)

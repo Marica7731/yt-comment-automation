@@ -52,6 +52,7 @@ class VideoResult:
     message: str = ""
     error: str = ""
     detail: str = ""
+    desc_profile: str = ""  # 简介提取的「主播 + 原标题」，随成功通知发送
 
 
 @dataclass
@@ -79,17 +80,23 @@ def save_processed(data_dir: Path, posted: set[str]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _fetch_youtube_id_for_bvid(bvid: str) -> str:
-    """从 B 站简介第一行取 YouTube 链接 ID。"""
+def _fetch_bili_video_info(bvid: str) -> tuple[str, str]:
+    """一次 view API 调用返回 (简介首行 YouTube ID, 完整简介)。"""
     cookies = bili_comment.load_cookie_map()
     try:
         aid = bili_comment.get_aid(bvid, cookies)
     except Exception:  # noqa: BLE001
-        return ""
+        return "", ""
     url = f"https://api.bilibili.com/x/web-interface/view?aid={aid}"
     data = bili_comment._request_json(url, cookies, "https://www.bilibili.com/")  # noqa: SLF001
     desc = ((data.get("data") or {}).get("desc")) or ""
-    return yt_fetch.extract_description_first_line_youtube_url(desc)
+    return yt_fetch.extract_description_first_line_youtube_url(desc), desc
+
+
+def _fetch_youtube_id_for_bvid(bvid: str) -> str:
+    """从 B 站简介第一行取 YouTube 链接 ID（兼容旧调用）。"""
+    yt_id, _ = _fetch_bili_video_info(bvid)
+    return yt_id
 
 
 def _extract_yt_id_from_part(part: str) -> str:
@@ -209,15 +216,19 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         upgrade_mode = True
         existing_rpid = existing.rpid
         logger.info("[%s] 已发仅 %d 首（<阈值），进入质量升级检查", video.bvid, existing_count)
-    # 2. 确定 YouTube ID（part 字段优先，简介首行校验）
+    # 2. 确定 YouTube ID（part 字段优先，简介首行校验）；顺带拿完整简介供通知提取主播/标题
     yt_id = video.yt_id
+    desc = ""
     if not yt_id:
-        yt_id = _fetch_youtube_id_for_bvid(video.bvid)
+        yt_id, desc = _fetch_bili_video_info(video.bvid)
     desc_url_id = ""
-    try:
-        desc_url_id = _fetch_youtube_id_for_bvid(video.bvid)
-    except Exception:  # noqa: BLE001
-        desc_url_id = ""
+    if not desc:
+        try:
+            desc_url_id, desc = _fetch_bili_video_info(video.bvid)
+        except Exception:  # noqa: BLE001
+            desc_url_id = ""
+    else:
+        desc_url_id = yt_fetch.extract_description_first_line_youtube_url(desc)
     if yt_id and desc_url_id and yt_id != desc_url_id:
         logger.warning("[%s] part 与简介 YouTube ID 不一致: %s vs %s，采用简介", video.bvid, yt_id, desc_url_id)
         yt_id = desc_url_id
@@ -228,6 +239,8 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         result.detail = "B 站简介首行没有 YouTube 链接"
         return result
     result.yt_id = yt_id
+    # 简介提取「主播 + 原标题」，随成功通知发送
+    result.desc_profile = notify.extract_desc_profile(desc)
 
     # 3. 抓取 YouTube 评论 + 简介
     #    缓存策略：
@@ -449,6 +462,7 @@ def run_pipeline(
                     yt_link=f"https://youtu.be/{result.yt_id}",
                     posted_at=notify.beijing_now(),
                     song_count=result.song_count,
+                    profile=result.desc_profile,
                 )
                 ok, note = notify.send_feishu_message(brief)
                 logger.info("  飞书通知: %s %s", ok, note)
@@ -479,6 +493,7 @@ def run_pipeline(
                 "source": r.source,
                 "detail": r.detail,
                 "error": r.error,
+                "desc_profile": r.desc_profile,
             }
             for r in results
         ],
