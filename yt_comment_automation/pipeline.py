@@ -115,6 +115,34 @@ _NON_SONG_TS_MARKERS = re.compile(
 # 歌名/歌手分隔特征（时间戳行里出现这些才算"歌曲行"）
 _SONG_LINE_SEPARATORS = re.compile(r"[\/／|｜￤∣丨＠@]|\s-\s|\s–\s|\s-\s")
 
+# 感想句特征词：时间戳行去掉时间戳后若含这些 → 是感想不是歌名。
+# 只作用于"无歌手分隔符"的行（有 歌名/歌手 分隔的一定是歌名，感想不会这么写）。
+_FEELING_MARKS = re.compile(
+    r"(www+|w{2,}|[！!]{2,}|好き|すごい|凄い|やば|面白|笑|楽し|最高|ここ|めっ+ちゃ|"
+    r"ありがとう|おつ|良い[ー~～]?$|いい[ー~～]?$)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_song_line_rest(rest: str) -> bool:
+    """时间戳行去掉时间戳后的内容，判断是否像歌名（歌曲行）。
+
+    规则（只拦"感想句"，不误伤真歌名）：
+    - 有 歌名/歌手 分隔符（/、-、|、＠）→ 一定是歌名（感想不会写"歌名/歌手"）
+    - 无分隔符：含感想词（www/！！！/好き/めっちゃ 等）→ 感想
+    - 无分隔符长句（>20 字符且 ≥2 个 の）→ 感想（如"の「すずめ」のところの..."）
+    - 其余短文本 → 歌名（无歌手歌名，如"すずめ"、"ライラック"）
+    """
+    if not rest:
+        return False
+    if _SONG_LINE_SEPARATORS.search(rest):
+        return True
+    if _FEELING_MARKS.search(rest):
+        return False
+    if len(rest) > 20 and rest.count("の") >= 2:
+        return False
+    return True
+
 
 def _is_songlist_comment(text: str) -> bool:
     """判定一条评论是否「结构化歌单」而非零散感想。
@@ -125,7 +153,7 @@ def _is_songlist_comment(text: str) -> bool:
     - 感想：零星 1 个时间戳夹在聊天里（如「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」）
     - 纯标记：全是開始/MC/雑談/あくび 等标记行，不算歌单
 
-    判定：≥2 个「歌曲时间戳行」（时间戳行去掉时间戳后非空、且不含纯标记词）。
+    判定：≥2 个「歌曲时间戳行」（时间戳行去掉时间戳后像歌名、且不含纯标记词）。
     不设密度阈值（避免把「半歌单半感想」的评论一刀砍掉）。
     """
     ts_re = re.compile(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
@@ -140,6 +168,8 @@ def _is_songlist_comment(text: str) -> bool:
         if not rest:
             continue
         if _NON_SONG_TS_MARKERS.search(rest):
+            continue
+        if not _looks_like_song_line_rest(rest):
             continue
         song_ts_lines += 1
     return song_ts_lines >= 2

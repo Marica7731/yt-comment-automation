@@ -74,3 +74,22 @@ def test_scattered_chat_not_cut():
     # 半歌单半感想（2 歌曲行 + 1 感想行）→ 仍算歌单（不再要求密度≥50%）
     mixed = "おつかささまでした\n1:30:53 悪ノ召使 / mothy\n1:37:25 廃都アトリエスタにて / 暴走P"
     assert _is_songlist_comment(mixed) is True
+
+
+def test_scattered_chat_multiple_timestamps_not_songlist():
+    """BV1ZehV6LEMc 式：感想夹多个时间戳（25:39、40:58）不是歌单。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+    chat = """25:39、52:40ここ好き！！！
+40:58の「すずめ」のところの合いの手が面白すぎるwww
+どうしても、にじゅなさんの左手がストップウォッチを
+持ってる様に見えて仕方なかったwww"""
+    assert _is_songlist_comment(chat) is False
+
+
+def test_song_line_with_feeling_word_still_song():
+    """歌名含好き/最高 等词但有 歌名/歌手 分隔符 → 仍是歌单。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+    setlist = """0:05:39 好きだ / コブクロ
+0:07:33 最高到達点 / SEKAI NO OWARI
+0:12:02 マリーゴールド / あいみょん"""
+    assert _is_songlist_comment(setlist) is True
