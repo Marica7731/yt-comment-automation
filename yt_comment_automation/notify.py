@@ -83,16 +83,36 @@ def build_success_brief(bvid: str, yt_link: str, posted_at: str = "", song_count
     return "\n".join(lines)
 
 
-def build_failure_brief(bvid: str, reason: str) -> str:
+def _error_title(reason: str) -> str:
+    """按错误原因生成通知标题（区分抓取失败/发布失败等，不误导）。"""
+    if "YouTube 抓取失败" in reason or "YouTube" in reason and ("抓取" in reason or "解析" in reason):
+        return "⚠️YouTube 抓取失败"
+    if "评论发布" in reason or "发布失败" in reason or "发布无响应" in reason or "删除旧评论" in reason:
+        return "❌评论发布/处理失败"
+    if "cookie" in reason.lower():
+        return "⚠️Cookie 配置异常"
+    return "❌处理失败"
+
+
+def build_failure_brief(
+    bvid: str,
+    reason: str,
+    title: str = "",
+    collection: str = "",
+    yt_link: str = "",
+) -> str:
+    """失败通知：按错误类型给标题，附视频标题、合集、B站/油管链接、原因、时间。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
-    return "\n".join(
-        [
-            "❌评论发送失败",
-            bili_link,
-            f"原因：{reason}",
-            f"时间：{beijing_now()}",
-        ]
-    )
+    lines = [_error_title(reason), bili_link]
+    if title:
+        lines.append(title)
+    if collection:
+        lines.append(f"合集：{collection}")
+    if yt_link:
+        lines.append(yt_link)
+    lines.append(f"原因：{reason}")
+    lines.append(f"时间：{beijing_now()}")
+    return "\n".join(lines)
 
 
 def build_yt_rate_limit_brief(bvid: str, reason: str) -> str:

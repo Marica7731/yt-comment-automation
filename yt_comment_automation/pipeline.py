@@ -497,7 +497,13 @@ def run_pipeline(
                 ok, note = notify.send_feishu_message(brief)
                 logger.info("  飞书通知: %s %s", ok, note)
         elif result.status == "error" and not dry_run:
-            brief = notify.build_failure_brief(bvid=result.bvid, reason=result.error)
+            brief = notify.build_failure_brief(
+                bvid=result.bvid,
+                reason=result.error,
+                title=result.title,
+                collection=result.collection,
+                yt_link=f"https://youtu.be/{result.yt_id}" if result.yt_id else "",
+            )
             try:
                 notify.send_feishu_message(brief)
             except Exception:  # noqa: BLE001

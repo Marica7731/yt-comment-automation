@@ -153,3 +153,33 @@ def test_build_success_brief_with_profile():
     assert "✅评论发送成功" in brief
     assert "主播：凛々咲 / Ririsya@RirisyaMusic" in brief
     assert "歌曲数量：14" in brief
+
+
+def test_failure_brief_title_by_error_type():
+    from yt_comment_automation import notify
+
+    # YouTube 抓取失败 → 标题不是"评论发送失败"
+    brief = notify.build_failure_brief(
+        "BV19hxdzfEkb",
+        "YouTube 抓取失败: JSONDecodeError: ...",
+        title="配信タイトル",
+        collection="凛々咲",
+        yt_link="https://youtu.be/xxx",
+    )
+    assert "⚠️YouTube 抓取失败" in brief
+    assert "评论发送失败" not in brief
+    assert "配信タイトル" in brief
+    assert "合集：凛々咲" in brief
+    assert "https://youtu.be/xxx" in brief
+
+    # 评论发布失败 → 发布标题
+    brief2 = notify.build_failure_brief("BV1xxx", "评论发布失败: code=-403 msg=权限不足")
+    assert "❌评论发布/处理失败" in brief2
+    assert "评论发送失败" not in brief2
+
+
+def test_failure_brief_fallback_title():
+    from yt_comment_automation import notify
+
+    brief = notify.build_failure_brief("BV1xxx", "未知异常: xxx")
+    assert "❌处理失败" in brief
