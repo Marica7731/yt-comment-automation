@@ -77,7 +77,15 @@ def _http_post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     headers = {**_headers(), "Content-Type": "application/json"}
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     with _urlopen_with_retry(req) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        text = resp.read().decode("utf-8", errors="replace")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as err:
+        # YouTube 反爬/验证码时 youtubei 会返回 HTML 而非 JSON，带上响应头便于诊断
+        snippet = text[:200].replace("\n", " ").strip()
+        raise YtFetchError(
+            f"youtubei 响应不是 JSON（可能是验证码/反爬 HTML）: {err}; 响应开头: {snippet!r}"
+        ) from err
 
 
 def _extract_re(text: str, pattern: str) -> str:
@@ -112,7 +120,14 @@ def _extract_json_after(text: str, marker: str) -> Any:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return json.loads(text[start : pos + 1])
+                segment = text[start : pos + 1]
+                try:
+                    return json.loads(segment)
+                except json.JSONDecodeError as err:
+                    raise YtFetchError(
+                        f"{marker} 内嵌 JSON 解析失败（可能页面被反爬/截断）: {err}; "
+                        f"片段开头: {segment[:200].replace(chr(10), ' ')!r}"
+                    ) from err
     raise YtFetchError(f"{marker} object end not found")
 
 

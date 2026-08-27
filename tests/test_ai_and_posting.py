@@ -183,3 +183,35 @@ def test_failure_brief_fallback_title():
 
     brief = notify.build_failure_brief("BV1xxx", "未知异常: xxx")
     assert "❌处理失败" in brief
+
+
+def test_yt_fetch_json_decode_error_diagnosable():
+    """YouTube 返回 HTML（反爬/验证码）时，错误信息要能看出不是 JSON。"""
+    from yt_comment_automation import yt_fetch
+
+    # 模拟 youtubei 返回 HTML
+    html = '<!DOCTYPE html><html><body>captcha please enable javascript</body></html>'
+    try:
+        import json
+        json.loads(html)
+        assert False, "should have raised"
+    except json.JSONDecodeError as err:
+        snippet = html[:200].replace("\n", " ").strip()
+        msg = f"youtubei 响应不是 JSON（可能是验证码/反爬 HTML）: {err}; 响应开头: {snippet!r}"
+        assert "验证码/反爬" in msg
+        assert "captcha" in msg
+
+
+def test_yt_fetch_error_goes_through_failure_brief():
+    """抓取失败通知的标题应为 YouTube 抓取失败，且带可诊断信息。"""
+    from yt_comment_automation import notify
+
+    brief = notify.build_failure_brief(
+        "BV19hxdzfEkb",
+        "YouTube 抓取失败: YtFetchError: youtubei 响应不是 JSON（可能是验证码/反爬 HTML）: ...; 响应开头: '<!DOCTYPE html>...'",
+        title="SHONEN MANGA",
+        collection="凛々咲",
+        yt_link="https://youtu.be/WVGFpUyvxgo",
+    )
+    assert "⚠️YouTube 抓取失败" in brief
+    assert "验证码/反爬" in brief
