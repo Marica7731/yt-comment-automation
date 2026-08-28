@@ -96,7 +96,7 @@ def _extract_re(text: str, pattern: str) -> str:
 def _extract_json_after(text: str, marker: str) -> Any:
     """提取 `marker` 后的 JSON 对象（如 `ytInitialData = {...}`、`ytInitialData:{...}`）。
 
-    用正则精确定位 `marker\s*[=:]\s*{`（等号/冒号后紧跟左花括号），
+    用正则精确定位 marker 后 [等号或冒号] 紧跟左花括号，
     避免页面里 `marker` 出现多次时 `find("{", idx)` 误命中 JS 里的其他对象
     （如 `window['ytPageType']=...;window['ytCommand']={...}`）。
     第一个候选解析失败时继续找下一个出现点，直到成功或耗尽。
