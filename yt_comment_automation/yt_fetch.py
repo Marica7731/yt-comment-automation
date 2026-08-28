@@ -176,6 +176,33 @@ def _find_comments_continuation(data: Any) -> str:
     return ""
 
 
+def _find_newest_comments_continuation(data: Any) -> str:
+    """返回评论区「新しい順（最新）」排序的 continuation token。
+
+    YouTube 评论默认初始 token 是「人気順（热门）」，置顶歌单评论在热门排序下
+    经常不被纳入前面的样本，导致抓不到歌单。改用「新しい順」能稳定抓到置顶歌单。
+    找不到「新しい順」选项时返回空串，由上层回退到默认（热门）排序。
+    """
+    for item in _walk_dicts(data):
+        sfr = item.get("sortFilterSubMenuRenderer")
+        if not isinstance(sfr, dict):
+            continue
+        for sub in sfr.get("subMenuItems", []) or []:
+            title = sub.get("title")
+            if isinstance(title, dict):
+                title = title.get("simpleText") or title.get("runs")
+            if title != "新しい順" and title != "最新":
+                continue
+            token = (
+                sub.get("serviceEndpoint", {})
+                .get("continuationCommand", {})
+                .get("token")
+            )
+            if token:
+                return token
+    return ""
+
+
 def _fetch_youtube_continuation(api_key: str, client_version: str, continuation: str) -> dict[str, Any]:
     payload = {
         "context": {
@@ -307,7 +334,9 @@ def fetch_youtube_raw(
     client_version = _extract_re(html, r'"INNERTUBE_CLIENT_VERSION":"([^"]+)"') or "2.20260601.00.00"
     initial_data = _extract_json_after(html, "ytInitialData")
 
-    continuation = _find_comments_continuation(initial_data)
+    # 优先用「新しい順（最新）」抓评论，置顶歌单在热门排序下常被算法排除、抓不到；
+    # 找不到最新排序 token 时回退默认（热门）排序。
+    continuation = _find_newest_comments_continuation(initial_data) or _find_comments_continuation(initial_data)
     comments: list[str] = []
     comments_response: dict[str, Any] | None = None
     reply_responses: list[dict[str, Any]] = []
