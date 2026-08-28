@@ -94,41 +94,56 @@ def _extract_re(text: str, pattern: str) -> str:
 
 
 def _extract_json_after(text: str, marker: str) -> Any:
-    idx = text.find(marker)
-    if idx < 0:
-        raise YtFetchError(f"{marker} not found")
-    start = text.find("{", idx)
-    if start < 0:
-        raise YtFetchError(f"{marker} object start not found")
-    depth = 0
-    in_string = False
-    escape = False
-    for pos in range(start, len(text)):
-        ch = text[pos]
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                segment = text[start : pos + 1]
-                try:
-                    return json.loads(segment)
-                except json.JSONDecodeError as err:
-                    raise YtFetchError(
-                        f"{marker} 内嵌 JSON 解析失败（可能页面被反爬/截断）: {err}; "
-                        f"片段开头: {segment[:200].replace(chr(10), ' ')!r}"
-                    ) from err
-    raise YtFetchError(f"{marker} object end not found")
+    """提取 `marker` 后的 JSON 对象（如 `ytInitialData = {...}`、`ytInitialData:{...}`）。
+
+    用正则精确定位 `marker\s*[=:]\s*{`（等号/冒号后紧跟左花括号），
+    避免页面里 `marker` 出现多次时 `find("{", idx)` 误命中 JS 里的其他对象
+    （如 `window['ytPageType']=...;window['ytCommand']={...}`）。
+    第一个候选解析失败时继续找下一个出现点，直到成功或耗尽。
+    """
+    import re
+
+    pattern = re.compile(re.escape(marker) + r"\s*[=:]\s*({)")
+    for m in pattern.finditer(text):
+        start = m.start(1)
+        # 记录尝试起点，用于失败时输出诊断片段
+        attempt_start = start
+        depth = 0
+        in_string = False
+        escape = False
+        for pos in range(start, len(text)):
+            ch = text[pos]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    segment = text[start : pos + 1]
+                    try:
+                        return json.loads(segment)
+                    except json.JSONDecodeError:
+                        # 该出现点解析失败（可能被截断），尝试下一个 marker 出现点
+                        break
+    # 没有成功解析：给出尽量可诊断的错误
+    with_brace = re.search(re.escape(marker) + r"\s*[=:]", text)
+    if with_brace:
+        start = with_brace.end()
+        snippet = text[start : start + 200].replace("\n", " ").strip()
+        raise YtFetchError(
+            f"未能解析 {marker} 后 JSON（找到 {marker} 赋值但内容异常）: "
+            f"赋值后片段开头: {snippet!r}"
+        )
+    raise YtFetchError(f"{marker} not found")
 
 
 def _walk_dicts(value: Any):
