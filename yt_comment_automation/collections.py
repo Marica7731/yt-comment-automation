@@ -7,16 +7,21 @@ part 字段内嵌 [YYYY-MM-DD][YouTubeID] 前缀，可解析出投稿日期与�
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import urllib.request
 from dataclasses import dataclass, field
 
-from . import config
+from . import bili_comment, config
+
+logger = logging.getLogger("yt_comment_automation")
 
 VIEW_API = "https://api.bilibili.com/x/web-interface/view"
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-HEADERS = {"User-Agent": UA, "Referer": "https://www.bilibili.com/"}
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
 
 PART_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2})\]\[([\w-]{11})\](.*)$", re.S)
 
@@ -43,11 +48,28 @@ class CollectionSnapshot:
         return {v.key() for v in self.videos}
 
 
+def _headers_with_cookie() -> dict[str, str]:
+    """B 站合集抓取请求头：完整 UA + Referer，尽量带 cookie。
+
+    WDC 出口在 2026-09 起对无 cookie 的 view API 请求返回 412（风控），
+    带 cookie 后恢复 200（bili_comment 实测）。cookie 加载失败时回退无 cookie，
+    保持接口兼容（本地开发无 cookie 时仍可跑）。
+    """
+    headers = {"User-Agent": UA, "Referer": "https://www.bilibili.com/"}
+    try:
+        cookies = bili_comment.load_cookie_map()
+        if cookies:
+            headers["Cookie"] = bili_comment.cookie_header(cookies)
+    except Exception as err:  # noqa: BLE001
+        logger.warning("合集抓取 cookie 加载失败，使用无 cookie 请求: %s", err)
+    return headers
+
+
 def _fetch_json(url: str, retries: int = 3) -> dict:
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(url, headers=HEADERS)
+            req = urllib.request.Request(url, headers=_headers_with_cookie())
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as err:  # noqa: BLE001
