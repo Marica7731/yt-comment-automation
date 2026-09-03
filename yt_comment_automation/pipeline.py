@@ -496,6 +496,9 @@ def run_pipeline(
         logger.info("  → %s (%d 首, %s)", result.status, result.song_count, result.detail or result.error)
         if result.status in {"posted", "ignored"} and not dry_run:
             posted.add(result.bvid)
+            # 立即落盘：防止本轮后续处理崩溃（如 YouTube/B站接口异常）导致
+            # save_processed 不执行，下轮 cron 重新发布同一视频（重复评论事故）
+            save_processed(data_dir, posted)
             if result.status == "posted":
                 # 飞书通知（仅新投稿发布时；无新增/缺歌单不播报）
                 brief = notify.build_success_brief(
