@@ -108,7 +108,10 @@ def _extract_yt_id_from_part(part: str) -> str:
 _NON_SONG_TS_MARKERS = re.compile(
     r"(?:開始|开始|start|終了|end|opening|open|closing|close|mc|雑談|talk|感想|告知|お知らせ|"
     r"チャプター|chapter|セトリ|setlist|タイムスタンプ|timestamp|スクショ|挨拶|自己紹介|コメント|"
-    r"おつ|お疲れ|ありがとう|宣伝|休憩|トイレ|お水|スパチャ読み|リクエスト募集|あくび|助かる|てぇてぇ)",
+    r"おつ|お疲れ|ありがとう|宣伝|休憩|トイレ|お水|スパチャ読み|リクエスト募集|あくび|助かる|てぇてぇ|"
+    r"声入り|開始前|準備|待機|待機所|文房具|マウント|ご飯|お風呂|お風呂|おかえり|ただいま|"
+    r"配信開始|配信終了|終了予定|挨拶タイム|ダジャレ|冗談|雑談タイム|本編開始|"
+    r"うんぽこ|ぽこ|ぷんぷん|ぱふぱふ|ららら|るるる|うぅ|あぁ|いぇい|おー|えー|うー)",
     re.IGNORECASE,
 )
 
@@ -149,11 +152,13 @@ def _is_songlist_comment(text: str) -> bool:
 
     核心区分（不是看条数，是看时间戳行密度 + 内容）：
     - 歌单：密集的时间戳行（如 Setlist 每行「时间戳 歌名/歌手」），
-      或「歌名 + 时间戳」无分隔符格式（如「ライラック 11:10」）
+      或「歌名 + 时间戳」无分隔符格式（如「ライラック 11:10」），
+      或「时间戳单独一行 + 下一行歌名」跨行格式（如「3:40\\nミックスナッツ/ Official髭男dism」）
     - 感想：零星 1 个时间戳夹在聊天里（如「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」）
     - 纯标记：全是開始/MC/雑談/あくび 等标记行，不算歌单
 
-    判定：≥2 个「歌曲时间戳行」（时间戳行去掉时间戳后像歌名、且不含纯标记词）。
+    判定：≥2 个「歌曲时间戳行」（时间戳行去掉时间戳后像歌名、且不含纯标记词；
+    时间戳单独成行时看下一行是否像歌名）。
     不设密度阈值（避免把「半歌单半感想」的评论一刀砍掉）。
     """
     ts_re = re.compile(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
@@ -161,12 +166,18 @@ def _is_songlist_comment(text: str) -> bool:
     if len(lines) < 2:
         return False
     song_ts_lines = 0
-    for line in lines:
+    for idx, line in enumerate(lines):
         if not ts_re.search(line):
             continue
         rest = ts_re.sub("", line).strip()
         if not rest:
-            continue
+            # 时间戳单独一行 → 看下一行是否有歌名（跨行歌单格式）
+            if idx + 1 < len(lines):
+                rest = lines[idx + 1].strip()
+                if ts_re.search(rest):
+                    continue  # 下一行也是时间戳开头，不是歌名
+            else:
+                continue
         if _NON_SONG_TS_MARKERS.search(rest):
             continue
         if not _looks_like_song_line_rest(rest):

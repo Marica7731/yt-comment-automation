@@ -93,3 +93,28 @@ def test_song_line_with_feeling_word_still_song():
 0:07:33 最高到達点 / SEKAI NO OWARI
 0:12:02 マリーゴールド / あいみょん"""
     assert _is_songlist_comment(setlist) is True
+
+
+def test_split_timestamp_song_lines_songlist():
+    """时间戳单独一行 + 下一行歌名的跨行歌单 → 是歌单。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+    text = """3:40
+ミックスナッツ/ Official髭男dism
+6:01
+何なんw / 藤井風
+15:40
+プラスティック・ラブ / 竹内 まりや"""
+    assert _is_songlist_comment(text) is True
+
+
+def test_meme_markers_not_songlist():
+    """时间戳+梗/闲聊（うんぽころこ、文房具マウント 等）→ 不是歌单。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+    text = """2:01 声入り
+3:00 開始
+14:21 スクショタイム
+38:21 文房具マウント
+44:16 ｳﾝﾎﾟｺﾛｺ
+45:19 ご飯？お風呂？それとも...
+1:00:21 ジュエルありがとうの話"""
+    assert _is_songlist_comment(text) is False
