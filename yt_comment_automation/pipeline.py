@@ -80,23 +80,67 @@ def save_processed(data_dir: Path, posted: set[str]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _fetch_bili_video_info(bvid: str) -> tuple[str, str]:
-    """一次 view API 调用返回 (简介首行 YouTube ID, 完整简介)。"""
+def _fetch_bili_video_info(bvid: str) -> tuple[str, str, list[dict]]:
+    """一次 view API 调用返回 (简介首行 YouTube ID, 完整简介, 分P列表)。
+
+    分P列表元素形如 {"page": 1, "part": "P001", "duration": 35995}；
+    单P视频也返回 1 个元素。请求失败时 pages 为空列表。
+    """
     cookies = bili_comment.load_cookie_map()
     try:
         aid = bili_comment.get_aid(bvid, cookies)
     except Exception:  # noqa: BLE001
-        return "", ""
+        return "", "", []
     url = f"https://api.bilibili.com/x/web-interface/view?aid={aid}"
     data = bili_comment._request_json(url, cookies, "https://www.bilibili.com/")  # noqa: SLF001
-    desc = ((data.get("data") or {}).get("desc")) or ""
-    return yt_fetch.extract_description_first_line_youtube_url(desc), desc
+    d = data.get("data") or {}
+    desc = d.get("desc") or ""
+    pages = [
+        {"page": p.get("page"), "part": p.get("part"), "duration": p.get("duration")}
+        for p in (d.get("pages") or [])
+        if isinstance(p, dict)
+    ]
+    return yt_fetch.extract_description_first_line_youtube_url(desc), desc, pages
 
 
 def _fetch_youtube_id_for_bvid(bvid: str) -> str:
     """从 B 站简介第一行取 YouTube 链接 ID（兼容旧调用）。"""
-    yt_id, _ = _fetch_bili_video_info(bvid)
+    yt_id, _, _ = _fetch_bili_video_info(bvid)
     return yt_id
+
+
+def split_items_by_pages(items: list, durations: list[int]) -> list[list]:
+    """按分P时长把歌单切到各P。返回每个P的条目列表，时间戳已重算为P内相对时间。
+
+    时间计算方法：P_k 覆盖 YouTube 时间 [前 k-1 个P时长之和, 前 k 个P时长之和)。
+    P_k 内显示时间 = 原时间戳 - 前面所有P的时长之和。
+    例：P1=35995s 时，YouTube 4:20:00 → P1 原样；10:14:06 → P2 的 0:14:11。
+    超出总时长的条目归入最后一个P（时间戳可能仍超长，调用方可再校验）。
+    """
+    from .clean import ParsedSong
+
+    if not durations:
+        durations = [0]
+    bounds = [0]
+    for d in durations:
+        bounds.append(bounds[-1] + max(0, int(d or 0)))
+    pages: list[list] = [[] for _ in durations]
+    for it in items:
+        ts = it.timestamp_seconds
+        if ts is None:
+            continue
+        if ts < bounds[-1]:
+            # 找 ts 所属P：bounds = [0, d1, d1+d2, ...]；ts==边界值归下一个P
+            idx = 0
+            for k in range(len(durations)):
+                if bounds[k] <= ts < bounds[k + 1]:
+                    idx = k
+                    break
+        else:
+            idx = len(durations) - 1
+        offset = bounds[idx]
+        pages[idx].append(ParsedSong(it.song, it.artist, "", ts - offset))
+    return pages
 
 
 def _extract_yt_id_from_part(part: str) -> str:
@@ -257,15 +301,16 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         upgrade_mode = True
         existing_rpid = existing.rpid
         logger.info("[%s] 已发仅 %d 首（<阈值），进入质量升级检查", video.bvid, existing_count)
-    # 2. 确定 YouTube ID（part 字段优先，简介首行校验）；顺带拿完整简介供通知提取主播/标题
+    # 2. 确定 YouTube ID（part 字段优先，简介首行校验）；顺带拿完整简介与分P列表
     yt_id = video.yt_id
     desc = ""
+    pages: list[dict] = []
     if not yt_id:
-        yt_id, desc = _fetch_bili_video_info(video.bvid)
+        yt_id, desc, pages = _fetch_bili_video_info(video.bvid)
     desc_url_id = ""
     if not desc:
         try:
-            desc_url_id, desc = _fetch_bili_video_info(video.bvid)
+            desc_url_id, desc, pages = _fetch_bili_video_info(video.bvid)
         except Exception:  # noqa: BLE001
             desc_url_id = ""
     else:
@@ -381,54 +426,85 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         )
 
     # 7. 格式化 + 发布（无空行，统一时间戳 NN. 歌名 - 歌手；超长自动楼中楼续写）
-    message = clean.format_song_items(items, include_timestamps=True)
+    # 多P视频（B 站单视频限 10 小时，超长直播会分 P）：每个P一条主评论，
+    # 时间按各P时长切分，P2+ 的时间戳重算为 P 内相对时间。
+    multi_page = len(pages) > 1
+    if multi_page:
+        durations = [int(p.get("duration") or 0) for p in pages]
+        page_items = split_items_by_pages(items, durations)
+        messages = []
+        for k, pitems in enumerate(page_items, 1):
+            if not pitems:
+                logger.warning("[%s] P%d 无歌曲条目，跳过该P", video.bvid, k)
+                continue
+            messages.append(f"P{k}\n" + clean.format_song_items(pitems, include_timestamps=True))
+        if not messages:
+            result.status = "skipped_no_songs"
+            result.detail = "多P切分后无有效歌曲"
+            return result
+    else:
+        messages = [message]
+
     if dry_run:
         result.status = "dry_run"
-        result.message = message
+        result.message = "\n---\n".join(messages)
+        result.song_count = len(items)
         if upgrade_mode:
-            result.detail = f"升级：删 rpid={existing_rpid} 后发 {len(items)} 首（dry-run 不执行）"
+            result.detail = f"升级：删旧后发 {len(messages)} 条主评论（dry-run 不执行）"
         return result
 
-    # 升级模式：先删旧评论，再发新评论
-    if upgrade_mode and existing_rpid:
+    # 升级模式：先删旧评论（多P删自己的全部主评论），再发新评论
+    if upgrade_mode:
         try:
-            del_resp = bili_comment.delete_comment(video.bvid, existing_rpid, cookies)
-            if del_resp.get("code") != 0:
-                result.status = "error"
-                result.error = f"删除旧评论失败: code={del_resp.get('code')} msg={del_resp.get('message')}"
-                return result
-            logger.info("[%s] 已删除旧评论 rpid=%s", video.bvid, existing_rpid)
+            own_all = bili_comment.find_own_comments(video.bvid, cookies)
+            deleted_any = False
+            for cm in own_all:
+                del_resp = bili_comment.delete_comment(video.bvid, cm.rpid, cookies)
+                if del_resp.get("code") != 0:
+                    result.status = "error"
+                    result.error = f"删除旧评论失败: rpid={cm.rpid} code={del_resp.get('code')} msg={del_resp.get('message')}"
+                    return result
+                deleted_any = True
+            if deleted_any:
+                logger.info("[%s] 已删除旧主评论 %d 条", video.bvid, len(own_all))
         except Exception as err:  # noqa: BLE001
             result.status = "error"
             result.error = f"删除旧评论异常: {err}"
             return result
 
-    responses = bili_comment.post_comment_with_replies(video.bvid, message, cookies)
-    if not responses:
+    all_rpids: list[str] = []
+    all_segments = 0
+    failures: list[str] = []
+    for k, msg in enumerate(messages, 1):
+        responses = bili_comment.post_comment_with_replies(video.bvid, msg, cookies)
+        if not responses:
+            failures.append(f"P{k}:无响应")
+            continue
+        main_resp = responses[0]
+        if main_resp.get("code") != 0:
+            failures.append(f"P{k}:code={main_resp.get('code')} msg={main_resp.get('message')}")
+            continue
+        all_rpids.extend(str(r.get("data", {}).get("rpid", "")) for r in responses if r.get("data"))
+        all_segments += len(responses)
+        followup_fail = next((r for r in responses[1:] if r.get("code") != 0), None)
+        if followup_fail:
+            failures.append(f"P{k}楼中楼:code={followup_fail.get('code')}")
+
+    if not all_rpids:
         result.status = "error"
-        result.error = "评论发布无响应"
+        result.error = f"评论发布失败: {'; '.join(failures) or '无响应'}"
         return result
 
-    main_resp = responses[0]
-    if main_resp.get("code") != 0:
-        result.status = "error"
-        result.error = f"评论发布失败: code={main_resp.get('code')} msg={main_resp.get('message')}"
-        return result
-
-    # 主评论成功即视为已发布；楼中楼续写失败仅警告（缺失段可后续补发）
-    followup_fail = next((r for r in responses[1:] if r.get("code") != 0), None)
+    # 至少一条主评论成功即视为已发布；失败段记录在 detail（缺失段可升级补发）
     result.status = "posted"
-    result.message = message
-    rpids = [str(r.get("data", {}).get("rpid", "")) for r in responses if r.get("data")]
+    result.message = "\n---\n".join(messages)
+    prefix = f"P1-P{len(messages)} " if multi_page else ""
     if upgrade_mode:
-        result.detail = f"升级成功：删旧 rpid={existing_rpid}，发新 rpids={'/'.join(rpids)} segments={len(responses)}"
-    elif followup_fail:
-        result.detail = (
-            f"rpids={'/'.join(rpids)} segments={len(responses)} "
-            f"楼中楼续写失败: code={followup_fail.get('code')} msg={followup_fail.get('message')}"
-        )
+        result.detail = f"升级成功：发新 rpids={'/'.join(all_rpids)} segments={all_segments}"
+    elif failures:
+        result.detail = f"{prefix}rpids={'/'.join(all_rpids)} segments={all_segments} 部分失败: {'; '.join(failures)}"
     else:
-        result.detail = f"rpids={'/'.join(rpids)} segments={len(responses)}"
+        result.detail = f"{prefix}rpids={'/'.join(all_rpids)} segments={all_segments}"
     return result
 
 

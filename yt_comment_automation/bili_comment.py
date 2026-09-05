@@ -136,6 +136,12 @@ def find_own_comment(bvid: str, cookies: dict[str, str]) -> BiliComment | None:
     return None
 
 
+def find_own_comments(bvid: str, cookies: dict[str, str]) -> list[BiliComment]:
+    """返回本账号在该视频下的全部顶层主评论（多P视频会发多条主评论）。"""
+    owner_mid = config.owner_mid()
+    return [cm for cm in list_comments(bvid, cookies) if cm.mid == owner_mid]
+
+
 def post_comment(bvid: str, message: str, cookies: dict[str, str]) -> dict:
     """发布评论到视频。返回接口响应 dict。"""
     aid = get_aid(bvid, cookies)

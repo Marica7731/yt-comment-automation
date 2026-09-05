@@ -118,3 +118,29 @@ def test_meme_markers_not_songlist():
 45:19 ご飯？お風呂？それとも...
 1:00:21 ジュエルありがとうの話"""
     assert _is_songlist_comment(text) is False
+
+
+def test_split_items_by_pages_recalcs_timestamps():
+    """多P视频按各P时长切分；P2+ 时间戳重算为 P 内相对时间。"""
+    from yt_comment_automation.pipeline import split_items_by_pages
+    from yt_comment_automation.clean import ParsedSong
+
+    items = [
+        ParsedSong("A", "", "0:02:10", 130),
+        ParsedSong("B", "", "9:47:21", 9 * 3600 + 47 * 60 + 21),   # 35241 < 35995 → P1
+        ParsedSong("C", "", "10:14:06", 10 * 3600 + 14 * 60 + 6),  # 36846 → P2 (851)
+    ]
+    pages = split_items_by_pages(items, [35995, 3679])
+    assert len(pages) == 2
+    assert [it.song for it in pages[0]] == ["A", "B"]
+    assert [it.song for it in pages[1]] == ["C"]
+    assert pages[1][0].timestamp_seconds == 851
+    # 边界：正好等于 P1 结束时刻 → 属于 P2（时间 0）
+    edge = [ParsedSong("E", "", "9:59:55", 35995)]
+    pages2 = split_items_by_pages(edge, [35995, 3679])
+    assert len(pages2[0]) == 0
+    assert pages2[1][0].timestamp_seconds == 0
+    # 超出总时长 → 归入最后一个P
+    over = [ParsedSong("O", "", "12:00:00", 12 * 3600)]
+    pages3 = split_items_by_pages(over, [35995, 3679])
+    assert len(pages3[1]) == 1
