@@ -103,7 +103,9 @@ def call_deepseek(user_text: str, timeout: int = 180, retries: int = 2) -> tuple
             {"role": "developer", "content": "你是精确的歌曲列表整理助手。"},
             {"role": "user", "content": PROMPT_TEMPLATE + "\n" + user_text},
         ],
-        "max_output_tokens": 8000,
+        # high reasoning 本身消耗大量输出预算（实测 111 首歌单 reasoning 15805 + 正文 ~1700），
+        # 8000 会 status=incomplete 截断，导致只发尾部几首的脏数据
+        "max_output_tokens": 32000,
         "temperature": 0,
         "reasoning": {"effort": "high"},
     }
