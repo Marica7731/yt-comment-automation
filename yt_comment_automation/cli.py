@@ -65,7 +65,25 @@ def main() -> int:
     else:
         mode = "incremental"
 
-    record = pipeline.run_pipeline(mode=mode, dry_run=dry_run, limit=args.limit, specific_bvids=bvids)
+    try:
+        record = pipeline.run_pipeline(mode=mode, dry_run=dry_run, limit=args.limit, specific_bvids=bvids)
+    except Exception:  # noqa: BLE001
+        import traceback
+
+        tb = traceback.format_exc()
+        logger.error("管线崩溃:\n%s", tb)
+        # 正式运行崩溃时飞书提醒，避免"很久没发"才发现；dry-run 是人工调试不发
+        if not dry_run:
+            try:
+                from . import notify
+
+                brief = notify.build_crash_brief(tb)
+                ok, note = notify.send_feishu_message(brief)
+                logger.info("崩溃飞书通知: %s %s", ok, note)
+            except Exception as notify_err:  # noqa: BLE001
+                logger.warning("崩溃通知发送失败: %s", notify_err)
+        print(tb, file=sys.stderr)
+        return 1
 
     print("\n===== 本轮结果 =====")
     for r in record.results:

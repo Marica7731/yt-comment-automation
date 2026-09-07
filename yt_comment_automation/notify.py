@@ -128,6 +128,23 @@ def build_yt_rate_limit_brief(bvid: str, reason: str) -> str:
     )
 
 
+def build_crash_brief(traceback_text: str) -> str:
+    """整轮管线崩溃通知：任何未捕获异常都提醒，避免"很久没发"才发现。"""
+    lines = (traceback_text or "").splitlines()
+    # 提炼调用链（File "...", line N, in func）与最终异常
+    frames = [ln.strip() for ln in lines if ln.strip().startswith("File ") and ", in " in ln]
+    err_line = next((ln.strip() for ln in reversed(lines) if ln.strip() and not ln.strip().startswith(("Traceback", "File ", "    "))), "未知异常")
+    frames_str = "\n".join(frames[-3:]) if frames else "（无堆栈）"
+    return "\n".join(
+        [
+            "💥管线崩溃",
+            f"异常：{err_line}",
+            frames_str,
+            f"时间：{beijing_now()}",
+        ]
+    )
+
+
 def extract_desc_profile(desc: str) -> str:
     """从 B 站简介提取「主播 + 原标题」两行，供成功通知展示。
 

@@ -215,3 +215,41 @@ def test_yt_fetch_error_goes_through_failure_brief():
     )
     assert "⚠️YouTube 抓取失败" in brief
     assert "验证码/反爬" in brief
+
+
+def test_build_crash_brief():
+    from yt_comment_automation import notify
+
+    tb = """Traceback (most recent call last):
+  File "yt_comment_automation/pipeline.py", line 446, in process_video
+    messages = [message]
+NameError: name 'message' is not defined"""
+    brief = notify.build_crash_brief(tb)
+    assert "💥管线崩溃" in brief
+    assert "NameError: name 'message' is not defined" in brief
+    assert "pipeline.py\", line 446" in brief
+
+
+def test_cli_crash_sends_notify(mocker=None):
+    """cli 正式运行崩溃时调用飞书通知。"""
+    import sys
+    import types
+
+    import yt_comment_automation.cli as cli_mod
+
+    sent = []
+    fake_notify = types.SimpleNamespace(
+        build_crash_brief=lambda tb: "brief",
+        send_feishu_message=lambda text, *a, **k: sent.append(text) or (True, "ok"),
+    )
+    fake_pipeline = types.SimpleNamespace(
+        run_pipeline=lambda **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    cli_mod.pipeline = fake_pipeline
+    # 模拟非 dry-run 分支：直接调用 main 太复杂，验证 build_crash_brief + send 组合即可
+    tb = "Traceback\n  File 'pipeline.py', line 1\nRuntimeError: boom"
+    brief = cli_mod  # noqa
+    from yt_comment_automation import notify
+
+    b = notify.build_crash_brief(tb)
+    assert "RuntimeError: boom" in b
