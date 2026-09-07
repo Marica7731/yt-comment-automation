@@ -443,7 +443,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             result.detail = "多P切分后无有效歌曲"
             return result
     else:
-        messages = [message]
+        messages = [clean.format_song_items(items, include_timestamps=True)]
 
     if dry_run:
         result.status = "dry_run"
