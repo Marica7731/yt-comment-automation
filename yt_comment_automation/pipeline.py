@@ -365,14 +365,14 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考）
     local_items = clean.build_comment_songlist(songlist_comments, description)
 
-    # 5. DS 优先整理（实测准确率高，能处理本地规则漏掉的方括号/＠/全角格式）
+    # 5. AI 整理（生产主路径 OpenCode：omen-alpha 主提取 + glm-5.3-flash 复核；
+    #     OpenCode 未配/失败时回退 DeepSeek）。只喂结构化歌单评论，防从感想提取/幻觉。
     items: list = []
     source = ""
     ai_detail = ""
-    if config.deepseek_api_key() and songlist_comments:
-        # 只喂结构化歌单评论；无歌单评论则不调 DS（防从感想提取/幻觉）
+    if (config.opencode_api_key() or config.deepseek_api_key()) and songlist_comments:
         user_text = "\n\n---\n\n".join(songlist_comments)
-        ai_text, ai_err = ai.call_deepseek(user_text)
+        ai_text, ai_err, ai_source = ai.call_songlist_ai(user_text)
         if ai_err:
             ai_detail = f"AI 整理失败: {ai_err}"
             logger.warning("[%s] %s", video.bvid, ai_detail)
@@ -380,7 +380,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             ai_detail = "AI 判定缺歌手"
         else:
             items = ai.parse_ai_output_to_items(ai_text)
-            source = "ai"
+            source = ai_source or "ai"
     else:
         ai_detail = "评论区无结构化歌单（不调 DS）"
     if not items:

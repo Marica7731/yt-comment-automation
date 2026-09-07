@@ -15,6 +15,126 @@ from .clean import ParsedSong
 BASE = "https://api.deepseek.com/v1"
 MODEL = "deepseek-v4-flash"
 
+# OpenCode Go：OpenAI 兼容 chat/completions，比 DeepSeek 便宜（套餐制），实测质量更高
+OG_MAX_TOKENS = 32000  # 长歌单(100+) reasoning+正文需要；套餐内不贵，宁可拉满防截断
+
+CHECK_PROMPT_TEMPLATE = """你是歌曲列表复核助手。下面是"主模型整理出的候选歌曲列表"和"原始 YouTube 时间轴"。
+
+请对照原始时间轴严格复核候选列表，只输出修正后的最终列表：
+1. 【剔除】非歌曲：talk/雑談/MC/感想/开场/结束/告知/宣伝/スクショタイム/挨拶/自己紹介/あくび/章节标记/只有歌手没歌名/只有时间戳没歌名。
+2. 【补充】原始时间轴里明确是"时间戳+歌名（可带歌手）"但候选漏掉的行，按原时间戳补上。
+3. 【校正】歌名/歌手错字、括号误留（罗马字对照括号删，正式名称括号 ryo(supercell)/久住小春（モーニング娘。）保留）、分隔符统一为半角 " - "。
+4. 【格式】每行：时间戳 NN. 歌名 - 歌手 或 时间戳 NN. 歌名。编号从 01 连续。按时间戳升序。
+5. 只输出最终列表，禁止任何说明。若确认无任何歌名，只输出：请提供歌名信息后再处理。
+
+【候选歌曲列表】
+{primary_output}
+
+【原始 YouTube 时间轴】
+{raw_text}"""
+
+
+def _call_opencode_chat(user_text: str, model: str, timeout: int = 240, retries: int = 1) -> tuple[str, Optional[str]]:
+    """调用 OpenCode Go chat/completions（OpenAI 兼容）。返回 (文本, 错误)。"""
+    import urllib.error
+
+    api_key = config.opencode_api_key()
+    if not api_key:
+        return "", "未配置 OPENCODE_API_KEY"
+    base = config.opencode_base()
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": user_text}],
+        "max_tokens": OG_MAX_TOKENS,
+        "temperature": 1,
+    }
+    last_err = ""
+    for attempt in range(retries + 1):
+        req = urllib.request.Request(
+            f"{base}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "x-opencode-session": "yt-comment-automation-prod",
+                "User-Agent": "curl/8.0",  # 网关要求 curl 类 UA，否则 Cloudflare 403
+                "Accept": "*/*",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as err:  # noqa: BLE001
+            body_text = ""
+            if isinstance(err, urllib.error.HTTPError):
+                try:
+                    body_text = err.read().decode("utf-8", errors="replace")
+                except Exception:  # noqa: BLE001
+                    pass
+                if _is_rate_limited(err, body_text):
+                    return "", f"OG_RATE_LIMITED: HTTP {err.code} {body_text[:150]}"
+            last_err = f"OpenCode 请求失败: {type(err).__name__}: {err} {body_text[:150]}"
+            if attempt < retries:
+                continue
+            return "", last_err
+        choices = data.get("choices") or []
+        if not choices:
+            last_err = f"OpenCode 无返回: {str(data.get('error'))[:150]}"
+            if attempt < retries:
+                continue
+            return "", last_err
+        text = (choices[0].get("message") or {}).get("content") or ""
+        text = text.strip()
+        if not text:
+            last_err = "OpenCode 未返回文本结果"
+            if attempt < retries:
+                continue
+            return "", last_err
+        return text, None
+    return "", last_err
+
+
+def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[str], str]:
+    """生产主路径：OpenCode 主提取(omen-alpha) → glm-5.3-flash 复核 → 最终文本。
+
+    返回 (最终文本, 错误, source)。source ∈ {opencode, deepseek, ""}。
+    - OpenCode key 未配/失败 → 回退 DeepSeek（原路径）
+    - 复核失败 → 用主提取结果（仍可发布）
+    """
+    source = ""
+    if config.opencode_api_key():
+        primary, err = _call_opencode_chat(user_text, config.opencode_primary_model(), timeout=timeout)
+        if not err:
+            source = "opencode"
+            # 复核：剔除幻觉/补漏，输出最终列表
+            check_text, check_err = _call_opencode_chat(
+                CHECK_PROMPT_TEMPLATE.format(primary_output=primary, raw_text=user_text),
+                config.opencode_check_model(),
+                timeout=timeout,
+            )
+            if not check_err:
+                return check_text, None, source
+            # 复核失败 → 退回主提取结果
+            return primary, f"复核失败用主结果: {check_err}", source
+        # 主模型失败 → 尝试另一个候选模型（glm 主 / omen 主互换）
+        alt = config.opencode_check_model() if config.opencode_primary_model() != config.opencode_check_model() else ""
+        if alt:
+            primary2, err2 = _call_opencode_chat(user_text, alt, timeout=timeout)
+            if not err2:
+                source = "opencode"
+                check2, check_err2 = _call_opencode_chat(
+                    CHECK_PROMPT_TEMPLATE.format(primary_output=primary2, raw_text=user_text),
+                    config.opencode_check_model(),
+                    timeout=timeout,
+                )
+                return (check2 if not check_err2 else primary2), None, source
+        # 双模型都失败 → 回退 DeepSeek
+    text, ds_err = call_deepseek(user_text, timeout=timeout, retries=1)
+    if ds_err:
+        return "", f"OpenCode 失败({err})，DeepSeek 也失败: {ds_err}", ""
+    return text, None, "deepseek"
+
 PROMPT_TEMPLATE = """你现在要根据我提供的一段 YouTube 评论区时间轴，整理出歌曲命名列表。
 
 这是一个严格筛选任务。你的目标不是"尽量多提取"，而是"只保留可以明确判断为歌曲的条目"，宁可少收，也不要把杂谈、MC、感想、互动、开场、结束、企划说明、串场、聊天内容误判成歌曲。
