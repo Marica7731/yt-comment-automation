@@ -251,6 +251,58 @@ def _extract_comment_reply_continuation_tokens(data: Any) -> list[str]:
     return tokens
 
 
+def _extract_comment_page_continuation_tokens(data: Any) -> list[str]:
+    """评论区「下一页」的 continuation token（区别于楼中楼翻页）。
+
+    楼中楼的 token 嵌在 commentRepliesRenderer 里；评论列表分页的 token 在
+    评论 section 层的 continuationItemRenderer。这里只取后者，避免混淆。
+    """
+    tokens: list[str] = []
+    for item in _walk_dicts(data):
+        renderer = item.get("continuationItemRenderer")
+        if not isinstance(renderer, dict):
+            continue
+        endpoint = renderer.get("continuationEndpoint") or {}
+        token = (endpoint.get("continuationCommand") or {}).get("token")
+        if not token:
+            continue
+        text = json.dumps(item, ensure_ascii=False)
+        # 评论列表分页 token 不含 commentRepliesRenderer（那是楼中楼）
+        if "commentRepliesRenderer" in text:
+            continue
+        tokens.append(token)
+    return tokens
+
+
+def _fetch_comment_pages(
+    api_key: str,
+    client_version: str,
+    first_response: dict[str, Any],
+    max_pages: int = 5,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """翻评论区「下一页」，把主评论列表抓全（不只第一页）。
+
+    第一页评论已由调用方从 first_response 提取；这里从每页响应里找下一页
+    continuation token 继续抓，直到没有下一页或达上限。
+    """
+    comments: list[str] = []
+    responses: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    pending = _extract_comment_page_continuation_tokens(first_response)
+    while pending and len(responses) < max_pages:
+        token = pending.pop(0)
+        if token in seen:
+            continue
+        seen.add(token)
+        response = _fetch_youtube_continuation(api_key, client_version, token)
+        responses.append(response)
+        comments.extend(_extract_comment_texts(response))
+        for next_token in _extract_comment_page_continuation_tokens(response):
+            if next_token not in seen:
+                pending.append(next_token)
+    return comments, responses
+
+
 def _fetch_comment_reply_texts_with_responses(
     api_key: str,
     client_version: str,
@@ -343,6 +395,10 @@ def fetch_youtube_raw(
     if continuation:
         comments_response = _fetch_youtube_continuation(api_key, client_version, continuation)
         comments.extend(_extract_comment_texts(comments_response))
+        # 评论列表分页：抓第一页后继续翻「下一页」，避免漏掉后续评论里的置顶歌单
+        more_comments, _page_responses = _fetch_comment_pages(api_key, client_version, comments_response)
+        comments.extend(more_comments)
+        # 楼中楼回复（每页的回复折叠区）
         reply_texts, reply_responses = _fetch_comment_reply_texts_with_responses(
             api_key,
             client_version,
