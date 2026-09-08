@@ -191,6 +191,25 @@ def _looks_like_song_line_rest(rest: str) -> bool:
     return True
 
 
+def is_junk_song_title(song: str) -> bool:
+    """是否脏歌名：直播拟声/碎片（ｺｯ、ﾋﾟﾖ、ｳﾝ、単音 コ/ッ）被误当歌。
+
+    规则：
+    - 纯半角片假名（去掉ﾞﾟ浊音记号后视觉长度 ≤2）→ 拟声碎片（ｺｯ/ﾋﾟﾖ/ｳﾝ/ｶﾞ/ﾊﾟ）
+    - 纯单字符平/片假名 → コ/ッ/ン 这类不成词
+    真歌名（すずめ/楓/ハチミツ/うんぽころこ/ハーモニカ）不受影响。
+    """
+    s = (song or "").strip()
+    if not s:
+        return True
+    base = re.sub(r"[ﾞﾟ]", "", s)
+    if re.fullmatch(r"[ｦ-ﾟ]+", s) and len(base) <= 2:
+        return True
+    if re.fullmatch(r"[ぁ-んァ-ヶ]{1}", s):
+        return True
+    return False
+
+
 def _is_songlist_comment(text: str) -> bool:
     """判定一条评论是否「结构化歌单」而非零散感想。
 
@@ -389,11 +408,12 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if ai_detail:
             ai_detail = f"本地兜底（{ai_detail}）"
 
-    # 6. 过滤条目：必须有时间戳；歌手字段按配置（默认放宽=允许只有歌名）
+    # 6. 过滤条目：必须有时间戳；歌手字段按配置（默认放宽=允许只有歌名）；
+    #    剔除拟声/碎片脏歌名（ｺｯ/ﾋﾟﾖ 等直播怪声标记被 AI 误当歌）
     if config.require_artist():
-        items = [it for it in items if it.artist and it.timestamp_seconds is not None]
+        items = [it for it in items if it.artist and it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
     else:
-        items = [it for it in items if it.timestamp_seconds is not None]
+        items = [it for it in items if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
     result.song_count = len(items)
     result.source = source
     if ai_detail:

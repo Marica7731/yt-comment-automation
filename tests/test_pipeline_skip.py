@@ -144,3 +144,20 @@ def test_split_items_by_pages_recalcs_timestamps():
     over = [ParsedSong("O", "", "12:00:00", 12 * 3600)]
     pages3 = split_items_by_pages(over, [35995, 3679])
     assert len(pages3[1]) == 1
+
+
+def test_is_junk_song_title_filters_onomatopoeia():
+    """直播拟声碎片（ｺｯ/ﾋﾟﾖ）是脏歌名，真歌名不受影响。"""
+    from yt_comment_automation.pipeline import is_junk_song_title
+    assert is_junk_song_title("ｺｯ") is True
+    assert is_junk_song_title("ﾋﾟﾖ") is True
+    assert is_junk_song_title("ｳﾝ") is True
+    assert is_junk_song_title("コ") is True
+    assert is_junk_song_title("ｶﾞ") is True
+    # 真歌名/长拟声词不误伤
+    assert is_junk_song_title("すずめ") is False
+    assert is_junk_song_title("楓") is False
+    assert is_junk_song_title("ハチミツ") is False
+    assert is_junk_song_title("うんぽころこ") is False
+    assert is_junk_song_title("ハーモニカ") is False
+    assert is_junk_song_title("ﾋﾟﾖﾋﾟﾖ") is False
