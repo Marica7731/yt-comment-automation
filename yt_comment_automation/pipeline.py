@@ -399,6 +399,20 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             ai_detail = "AI 判定缺歌手"
         else:
             items = ai.parse_ai_output_to_items(ai_text)
+            # 原文配对校验：AI 错位/幻觉行（时间戳与歌名在原文对不上）剔除；
+            # 错位占比高说明整体坏（如时间戳整体移位），整体作废回退本地
+            if items:
+                good, bad = ai.verify_items_against_source(items, user_text)
+                if good is None:
+                    logger.warning(
+                        "[%s] AI 输出 %d/%d 行未通过原文配对校验，整体作废回退本地",
+                        video.bvid, len(bad), len(items),
+                    )
+                    items = []
+                    ai_detail = f"AI 输出校验失败（{len(bad)}/{len(items)}行错位），用本地规则"
+                elif bad:
+                    logger.warning("[%s] AI 输出剔除 %d 行（原文配对失败）", video.bvid, len(bad))
+                    items = good
             source = ai_source or "ai"
     else:
         ai_detail = "评论区无结构化歌单（不调 DS）"

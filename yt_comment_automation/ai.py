@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from typing import Optional
 
@@ -145,7 +146,8 @@ PROMPT_TEMPLATE = """你现在要根据我提供的一段 YouTube 评论区时�
 2. 同时有"歌名"和"歌手"的条目优先完整输出；只有歌名没有歌手的条目也可保留（输出为 时间戳 NN. 歌名）。
 3. 只有歌手没有歌名的行跳过。
 4. 不要联网，不要用外部知识补全，不要猜测，不要脑补，只能根据我提供的文本判断。
-5. 最终只输出结果列表，不能有任何说明文字。
+5. 每首歌的时间戳必须和歌名来自原文**同一行**（或紧邻行），严禁把剔除行（如「スタート」）的时间戳配给其他歌名。
+6. 最终只输出结果列表，不能有任何说明文字。
 
 【时间戳处理】
 1. 每一行必须保留原文里该歌曲对应的开始时间戳（形如 0:03:55、3:04、1:01:09）。
@@ -335,3 +337,78 @@ def clean_timestamp_to_seconds(label: str) -> Optional[int]:
 def is_special_no_artist_response(text: str) -> bool:
     normalized = "".join(text.split())
     return normalized in {"请提供歌手信息后再处理。", "请提供歌名信息后再处理。"}
+
+
+# 跨行配对禁止词：时间戳行去掉时间戳后若含这些标记词，其时间戳不能配给相邻行歌名
+_REST_MARKER_RE = re.compile(r"スタート|開始|开始|start|end|終了|mc|雑談|talk|se\b|おまけ|rest", re.IGNORECASE)
+
+
+def _normalize_for_match(text: str) -> str:
+    """配对校验用规范化：去空白、引号、书名号、装饰符号。"""
+    return re.sub(r"[\s「」『』【】\[\]''\"\"·・♪♫✦✧⋆🐺☽🌟🎶〜~～\-—–_=+*#＃.:：;；!！?？,，、()（）]", "", text or "").lower()
+
+
+def verify_items_against_source(items: list[ParsedSong], source_text: str, max_bad_ratio: float = 0.3) -> tuple[Optional[list[ParsedSong]], list[ParsedSong]]:
+    """校验 AI 输出的每行（时间戳+歌名）在原文中确实配对出现过。
+
+    防 AI 错位/幻觉（如 BV1JdYJ6GEev：剔除「スタート」行后时间戳整体错位一行）。
+    匹配规则：原文某行同时含该时间戳（按秒数比较）和该歌名（规范化子串）→ 配对；
+    或时间戳行与歌名行相邻（跨行格式）→ 配对。
+
+    返回 (good_items, bad_items)；bad 占比超 max_bad_ratio 时 good=None（整体不可信，
+    调用方应回退本地规则）。
+    """
+    import re as _re
+
+    raw_lines = [l for l in (source_text or "").splitlines() if l.strip()]
+    norm_lines = [_normalize_for_match(l) for l in raw_lines]
+    # 每行的时间戳秒数集合 + 去掉时间戳后的剩余长度（判断是否"纯时间戳行"）
+    line_ts: list[set[int]] = []
+    line_rest_len: list[int] = []
+    for line in raw_lines:
+        secs = set()
+        stripped = line
+        for m in _re.finditer(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", line):
+            parts = [int(x) for x in m.groups() if x is not None]
+            while len(parts) < 3:
+                parts.insert(0, 0)
+            h, mi, se = parts
+            if mi < 60 and se < 60:
+                secs.add(h * 3600 + mi * 60 + se)
+            stripped = stripped.replace(m.group(0), "")
+        line_ts.append(secs)
+        line_rest_len.append(len(_normalize_for_match(stripped)))
+
+    bad: list[ParsedSong] = []
+    good: list[ParsedSong] = []
+    for it in items:
+        song_key = _normalize_for_match(it.song)
+        if not song_key or it.timestamp_seconds is None:
+            bad.append(it)
+            continue
+        ok = False
+        for i, nline in enumerate(norm_lines):
+            if it.timestamp_seconds in line_ts[i] and song_key in nline:
+                ok = True
+                break
+        if not ok:
+            # 跨行：仅当时间戳行本身几乎无内容（纯时间戳/装饰行）时，
+            # 允许与相邻歌名行配对；剩余内容是開始/スタート等标记词时禁止
+            # （防止「05:33 スタート」的时间戳错配给下一行歌名）
+            for i, secs in enumerate(line_ts):
+                if it.timestamp_seconds in secs and line_rest_len[i] <= 6 and not _REST_MARKER_RE.search(
+                    raw_lines[i]
+                ):
+                    if (i + 1 < len(norm_lines) and song_key in norm_lines[i + 1]) or (
+                        i - 1 >= 0 and song_key in norm_lines[i - 1]
+                    ):
+                        ok = True
+                    break
+        if ok:
+            good.append(it)
+        else:
+            bad.append(it)
+
+    if items and len(bad) > len(items) * max_bad_ratio:
+        return None, bad
+    return good, bad
