@@ -217,8 +217,9 @@ def test_no_artist_opening_markers_filtered():
             and not __import__("re").search("声入り|ハーモニカ|あくび", it.song)
         ))
     ]
-    songs = [it.song for it in filtered]
-    assert "声入り" not in songs
-    assert "ハーモニカ" not in songs
-    assert "わたしの一番かわいいところ" in songs
-    assert "すずめ" in songs
+    songs = [(it.song, it.artist) for it in filtered]
+    assert ("声入り", "") not in songs
+    assert ("ハーモニカ", "") not in songs          # 无歌手口琴标记剔除
+    assert ("ハーモニカ", "aiko") in songs          # 带歌手真歌保留
+    assert ("わたしの一番かわいいところ", "FRUITS ZIPPER") in songs
+    assert ("すずめ", "") in songs
