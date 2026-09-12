@@ -654,7 +654,10 @@ def is_obviously_non_song_text(text: str) -> bool:
         return True
     if re.match(r"^(開始|结束|終了|end|start)$", t, re.IGNORECASE):
         return True
-    if re.match(r"^(talk|mc|雑談|聊天|感想|告知|返场|休息)$", t):
+    if re.match(r"^(talk|mc|雑談|聊天|感想|告知|返场|休息)$", t, re.IGNORECASE):
+        return True
+    # 简介歌单常见非歌行（BV15wYE68EBb）
+    if re.match(r"^(エンドカード|エンドロール|end\s*card|end\s*roll|cm|提供)$", t, re.IGNORECASE):
         return True
     if re.search(r"(?:宣伝|告知|お知らせ)\s*$", t):
         return True
@@ -729,6 +732,38 @@ def _strip_leading_numbered_marker(text: str) -> str:
     return t
 
 
+# 无歌手歌名接受的排除词（简介/闲聊常见，避免宽松解析收脏）
+_BARE_TITLE_EXCLUDE = re.compile(
+    r"(www+|w{2,}|[！!]{2,}|好き|すごい|やば|面白|楽し|めっ+ちゃ|ありがとう|おつ|"
+    r"https?://|@|＠|谢谢|关注|販売|発送|グッズ|チケット|発売|"
+    r"\d{1,2}月\d{1,2}日|配信開始|ホームページ|公式サイト)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_bare_song_title(text: str, source_line: str = "") -> bool:
+    """无歌手裸歌名判定（简介 SETLIST「0:04:34 Citylight Fantasy」）。
+
+    时间戳已剥离后的文本：短、无感想词/URL/营销词、非纯符号 → 视为歌名。
+    source_line 为剥离时间戳前的原始行（营销行如「販売期間：…21:00～23:59まで」
+    剥离后剩残片，需在原始行上查营销词才能排除）。
+    """
+    t = (text or "").strip()
+    if not t or len(t) > 60:
+        return False
+    if _BARE_TITLE_EXCLUDE.search(t):
+        return False
+    if source_line and _BARE_TITLE_EXCLUDE.search(source_line):
+        return False
+    # 1-3 字符纯平假名是助词/残片（まで、から），不是歌名
+    if re.fullmatch(r"[ぁ-ん]{1,3}", t):
+        return False
+    # 纯数字/符号/单字符假名不算
+    if not re.search(r"[A-Za-z0-9ぁ-んァ-ヶ一-龯々]{2,}", t):
+        return False
+    return True
+
+
 def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
     """处理单行时间轴：「0:03:55 バラライカ / 月島きらり ...」。
 
@@ -761,8 +796,19 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
     if not t or is_obviously_non_song_text(t):
         return None
     parsed = extract_song_artist_core(t)
-    if not parsed or is_bad_field(parsed["song"]) or is_bad_field(parsed["artist"]):
+    if parsed and (is_bad_field(parsed["song"]) or is_bad_field(parsed["artist"])):
         return None
+    if not parsed:
+        # 无歌手歌名（简介 SETLIST 常见：「0:04:34 Citylight Fantasy」）
+        # 内容判定通过时接受为无歌手条目；脏词/营销行由 _looks_like_bare_song_title 排除
+        if not _looks_like_bare_song_title(t, line):
+            return None
+        return ParsedSong(
+            song=t,
+            artist="",
+            timestamp_label=timestamp_info["label"],
+            timestamp_seconds=timestamp_info["seconds"],
+        )
     if is_non_song_chapter_like_pair(parsed["song"], parsed["artist"]):
         return None
     return ParsedSong(

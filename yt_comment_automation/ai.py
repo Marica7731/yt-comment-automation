@@ -104,9 +104,15 @@ def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[
     - OpenCode key 未配/失败 → 回退 DeepSeek（原路径）
     - 复核失败 → 用主提取结果（仍可发布）
     """
+    def _has_valid_lines(text: str) -> bool:
+        """输出有效性：至少 1 行带时间戳+编号的条目（防 omen 输出闲聊总结）。"""
+        return any(parse_ai_output_to_items(text or ""))
+
     source = ""
     if config.opencode_api_key():
         primary, err = _call_opencode_chat(user_text, config.opencode_primary_model(), timeout=timeout)
+        if not err and not _has_valid_lines(primary):
+            err = "主模型输出无效（无时间戳条目，疑似闲聊）"
         if not err:
             source = "opencode"
             # 复核：剔除幻觉/补漏，输出最终列表
@@ -123,6 +129,8 @@ def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[
         alt = config.opencode_check_model() if config.opencode_primary_model() != config.opencode_check_model() else ""
         if alt:
             primary2, err2 = _call_opencode_chat(user_text, alt, timeout=timeout)
+            if not err2 and not _has_valid_lines(primary2):
+                err2 = "备用模型输出无效（无时间戳条目）"
             if not err2:
                 source = "opencode"
                 check2, check_err2 = _call_opencode_chat(
