@@ -381,14 +381,17 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    还把 UP 主昵称当歌手（BV1eYgV6WEq3 的错误根源）。
     songlist_comments = [t for t in comments if _is_songlist_comment(t)]
 
-    # 3c. 评论区无歌单时，简介自带的 SETLIST 也是可靠来源（BV15wYE68EBb：简介有完整歌单但评论区没有）
+    # 3c. 评论区无歌单时，简介自带的 SETLIST 也是可靠来源。投稿脚本会把我方模板
+    #     （主播/原标题等）连同原文 SETLIST 一起写进 B 站简介（BV15wYE68EBb），
+    #     所以用 B 站简介 desc 判定与喂 AI；YouTube 简介（raw description）来源杂乱不用于判定。
     ai_sources = list(songlist_comments)
-    if not ai_sources and _is_songlist_comment(description):
-        ai_sources = [description]
-        logger.info("[%s] 评论区无歌单，简介含 SETLIST，用简介喂 AI", video.bvid)
+    if not ai_sources and desc and _is_songlist_comment(desc):
+        ai_sources = [desc]
+        logger.info("[%s] 评论区无歌单，B站简介含 SETLIST，用简介喂 AI", video.bvid)
 
-    # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考）
-    local_items = clean.build_comment_songlist(songlist_comments, description)
+    # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考；B站简介一并参与）
+    local_source_text = description + ("\n" + desc if desc else "")
+    local_items = clean.build_comment_songlist(songlist_comments, local_source_text)
 
     # 5. AI 整理（生产主路径 OpenCode：omen-alpha 主提取 + glm-5.3-flash 复核；
     #     OpenCode 未配/失败时回退 DeepSeek）。只喂结构化歌单评论/简介 SETLIST，
