@@ -736,9 +736,18 @@ def _strip_leading_numbered_marker(text: str) -> str:
 _BARE_TITLE_EXCLUDE = re.compile(
     r"(www+|w{2,}|[！!]{2,}|好き|すごい|やば|面白|楽し|めっ+ちゃ|ありがとう|おつ|"
     r"https?://|@|＠|谢谢|关注|販売|発送|グッズ|チケット|発売|"
-    r"\d{1,2}月\d{1,2}日|配信開始|ホームページ|公式サイト)",
+    r"\d{1,2}月\d{1,2}日|配信開始|ホームページ|公式サイト|ハーモニカ|口琴|あくび)",
     re.IGNORECASE,
 )
+
+
+def is_bare_title_excluded(song: str) -> bool:
+    """无歌手歌名的排除判定（口琴间奏 ハーモニカ、哈欠 あくび 等被当歌名）。
+
+    供 AI 输出过滤复用：无歌手条目命中排除词 → 非歌；带歌手的不受影响
+    （aiko 的「ハーモニカ」这类真歌会以 歌名 - 歌手 形式出现）。
+    """
+    return bool(_BARE_TITLE_EXCLUDE.search((song or "").strip()))
 
 
 def _looks_like_bare_song_title(text: str, source_line: str = "") -> bool:
