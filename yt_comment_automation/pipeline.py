@@ -381,15 +381,18 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    还把 UP 主昵称当歌手（BV1eYgV6WEq3 的错误根源）。
     songlist_comments = [t for t in comments if _is_songlist_comment(t)]
 
-    # 3c. 评论区无歌单时，简介自带的 SETLIST 也是可靠来源。投稿脚本会把我方模板
-    #     （主播/原标题等）连同原文 SETLIST 一起写进 B 站简介（BV15wYE68EBb），
-    #     所以用 B 站简介 desc 判定与喂 AI；YouTube 简介（raw description）来源杂乱不用于判定。
+    # 3c. 评论区无歌单时，简介自带的 SETLIST 也是可靠来源：YouTube 简介
+    #     （attributedDescription，频道主常写 SETLIST）优先，其次 B 站简介
+    #     （投稿模板连同原文 SETLIST 一起写入，BV15wYE68EBb）。
     ai_sources = list(songlist_comments)
-    if not ai_sources and desc and _is_songlist_comment(desc):
-        ai_sources = [desc]
-        logger.info("[%s] 评论区无歌单，B站简介含 SETLIST，用简介喂 AI", video.bvid)
+    if not ai_sources:
+        for cand in (description, desc):
+            if cand and _is_songlist_comment(cand):
+                ai_sources = [cand]
+                logger.info("[%s] 评论区无歌单，简介含 SETLIST，用简介喂 AI", video.bvid)
+                break
 
-    # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考；B站简介一并参与）
+    # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考；两个简介一并参与）
     local_source_text = description + ("\n" + desc if desc else "")
     local_items = clean.build_comment_songlist(songlist_comments, local_source_text)
 

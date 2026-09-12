@@ -343,6 +343,13 @@ def _is_timestamp_candidate_text(text: str) -> bool:
 def _extract_description_candidates(data: Any) -> list[str]:
     texts: list[str] = []
     for item in _walk_dicts(data):
+        # 视频简介主体（YT 新版结构：attributedDescription.content）
+        for key in ("attributedDescription", "attributedDescriptionBodyText"):
+            body = item.get(key)
+            if isinstance(body, dict):
+                content = body.get("content")
+                if isinstance(content, str) and _is_timestamp_candidate_text(content):
+                    texts.append(content)
         simple_text = item.get("simpleText")
         if isinstance(simple_text, str) and _is_timestamp_candidate_text(simple_text):
             texts.append(simple_text)
@@ -351,6 +358,7 @@ def _extract_description_candidates(data: Any) -> list[str]:
             joined = "".join(run.get("text", "") for run in runs if isinstance(run, dict))
             if _is_timestamp_candidate_text(joined):
                 texts.append(joined)
+    # 简介主体放最前（含 SETLIST 的整段），其余碎片在后
     return list(dict.fromkeys(texts))
 
 
