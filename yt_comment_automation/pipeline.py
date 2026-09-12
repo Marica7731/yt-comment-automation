@@ -441,8 +441,15 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         items = [it for it in items if it.artist and it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
     else:
         items = [it for it in items if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
-    # 无歌手条目再过一道排除词（口琴间奏 ハーモニカ/あくび 等被当歌名；带歌手的真歌不受影响）
-    items = [it for it in items if it.artist or not clean.is_bare_title_excluded(it.song)]
+    # 无歌手条目再过一道排除词（口琴间奏 ハーモニカ/あくび/声入り 等被当歌名；
+    # 带歌手的真歌不受影响）。_NON_SONG_TS_MARKERS 覆盖本地与 AI 两条路径的输出。
+    items = [
+        it for it in items
+        if it.artist or (
+            not clean.is_bare_title_excluded(it.song)
+            and not _NON_SONG_TS_MARKERS.search(it.song.strip())
+        )
+    ]
     result.song_count = len(items)
     result.source = source
     if ai_detail:

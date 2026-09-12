@@ -194,3 +194,31 @@ def test_verify_items_against_description():
     ]
     good, bad = ai.verify_items_against_source(items, desc)
     assert good is not None and len(good) == 3 and len(bad) == 0
+
+
+def test_no_artist_opening_markers_filtered():
+    """BV1K8Yo6RESA：无歌手开场标记（声入り）与口琴（ハーモニカ）不进歌单；带歌手真歌保留。"""
+    from yt_comment_automation import clean, ai
+    from yt_comment_automation.pipeline import is_junk_song_title
+
+    items = [
+        ai.ParsedSong("声入り", "", "0:02:39", 159),
+        ai.ParsedSong("わたしの一番かわいいところ", "FRUITS ZIPPER", "0:06:18", 378),
+        ai.ParsedSong("ハーモニカ", "", "0:17:17", 1037),
+        ai.ParsedSong("ハーモニカ", "aiko", "0:20:00", 1200),
+        ai.ParsedSong("すずめ", "", "0:25:00", 1500),
+    ]
+    filtered = [
+        it for it in items
+        if it.timestamp_seconds is not None
+        and not is_junk_song_title(it.song)
+        and (it.artist or (
+            not clean.is_bare_title_excluded(it.song)
+            and not __import__("re").search("声入り|ハーモニカ|あくび", it.song)
+        ))
+    ]
+    songs = [it.song for it in filtered]
+    assert "声入り" not in songs
+    assert "ハーモニカ" not in songs
+    assert "わたしの一番かわいいところ" in songs
+    assert "すずめ" in songs
