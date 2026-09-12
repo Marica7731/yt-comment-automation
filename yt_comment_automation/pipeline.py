@@ -441,15 +441,23 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         items = [it for it in items if it.artist and it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
     else:
         items = [it for it in items if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
-    # 无歌手条目再过一道排除词（口琴间奏 ハーモニカ/あくび/声入り 等被当歌名；
-    # 带歌手的真歌不受影响）。_NON_SONG_TS_MARKERS 覆盖本地与 AI 两条路径的输出。
-    items = [
-        it for it in items
-        if it.artist or (
-            not clean.is_bare_title_excluded(it.song)
-            and not _NON_SONG_TS_MARKERS.search(it.song.strip())
-        )
-    ]
+    # 无歌手条目过滤（口琴间奏/开场标记等被当歌名；带歌手的真歌不受影响）：
+    # 第一道：黑名单免费过滤已知词；第二道：AI 语义判定兜底（开放集合，无需持续加词）。
+    bare_blocked = lambda it: (
+        not it.artist.strip()
+        and (clean.is_bare_title_excluded(it.song) or _NON_SONG_TS_MARKERS.search(it.song.strip()))
+    )
+    items = [it for it in items if not bare_blocked(it)]
+    if any(not it.artist.strip() for it in items) and config.opencode_api_key():
+        try:
+            items, ai_dropped = ai.filter_bare_titles_with_ai(items)
+            if ai_dropped:
+                logger.info(
+                    "[%s] AI 语义判定剔除无歌手非歌条目: %s",
+                    video.bvid, [it.song for it in ai_dropped],
+                )
+        except Exception as err:  # noqa: BLE001
+            logger.warning("[%s] 无歌手条目 AI 判定失败（全保留）: %s", video.bvid, err)
     result.song_count = len(items)
     result.source = source
     if ai_detail:

@@ -97,6 +97,52 @@ def _call_opencode_chat(user_text: str, model: str, timeout: int = 240, retries:
     return "", last_err
 
 
+BARE_TITLE_CHECK_PROMPT = """你在判定一组「候选歌曲标题」是否真的是歌曲名。
+
+背景：这些标题来自直播 SETLIST 的无歌手条目，混有非歌的杂项标记（开场/间奏/设备/闲聊类，如「声入り」「ハーモニカ」「エンドカード」「あくび」这类），也有真正的歌名（如「すずめ」「ブルーバード」「夜に駆ける」）。
+
+判定标准：
+- 是歌名：明确的乐曲/单曲名（含惯用缩写、外文歌名）。
+- 不是歌名：开场标记、结束标记、间奏/乐器段落（口琴、钢琴独奏等）、设备/环境说明、闲聊词、章节标记、MC、送礼/宣伝相关。
+- 拿不准的一律算"不是歌名"（宁可漏收一首，不发脏数据）。
+
+只输出每行的判定结果，格式（禁止任何其他文字）：
+<N>是 / <N>否
+
+候选列表：
+{titles}
+"""
+
+
+def filter_bare_titles_with_ai(items: list, timeout: int = 120) -> tuple[list, list]:
+    """对无歌手条目做语义判定，剔除非歌杂项（黑名单的兜底层，无需持续加词）。
+
+    返回 (保留条目, 剔除条目)。带歌手条目不参与。AI 失败时全保留（不因复核挂掉丢歌单）。
+    """
+    targets = [it for it in items if not (it.artist or "").strip()]
+    if len(targets) < 1:
+        return items, []
+    titles_block = "\n".join(f"{i+1}. {it.song.strip()}" for i, it in enumerate(targets))
+    resp, err = _call_opencode_chat(
+        BARE_TITLE_CHECK_PROMPT.format(titles=titles_block),
+        config.opencode_check_model(),
+        timeout=timeout,
+    )
+    if err or not resp:
+        return items, []
+    # 解析判定：<N>是 / <N>否
+    keep_ids: set[int] = set()
+    for line in resp.splitlines():
+        m = re.match(r"^(\d{1,3})\s*[.、）)]?\s*(是|否)", line.strip())
+        if m:
+            idx = int(m.group(1))
+            if 1 <= idx <= len(targets) and m.group(2) == "是":
+                keep_ids.add(idx)
+    kept = [it for it in items if (it.artist or "").strip() or (targets.index(it) + 1) in keep_ids]
+    dropped = [it for it in targets if (targets.index(it) + 1) not in keep_ids]
+    return kept, dropped
+
+
 def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[str], str]:
     """生产主路径：OpenCode 主提取(omen-alpha) → glm-5.3-flash 复核 → 最终文本。
 
