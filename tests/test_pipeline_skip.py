@@ -161,3 +161,36 @@ def test_is_junk_song_title_filters_onomatopoeia():
     assert is_junk_song_title("うんぽころこ") is False
     assert is_junk_song_title("ハーモニカ") is False
     assert is_junk_song_title("ﾋﾟﾖﾋﾟﾖ") is False
+
+
+def test_description_setlist_detected_as_songlist():
+    """BV15wYE68EBb：B站简介自带 SETLIST（无歌手歌名）应判为歌单、可喂 AI。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+
+    desc = """・セットリスト
+0:00:00 Starry☆Melody
+0:04:34 Citylight Fantasy
+0:07:44 MC
+0:17:06 トイ×トイ⭐︎パーティ！
+0:20:44 Breeze in the Sun
+0:25:17 Like a Night Crusing
+0:27:54 浮かれたってムテキ
+0:31:00 エンドカード"""
+    assert _is_songlist_comment(desc) is True
+
+
+def test_verify_items_against_description():
+    """AI 从简介提取的结果能在简介原文配对。"""
+    from yt_comment_automation import ai
+
+    desc = """・セットリスト
+0:00:00 Starry☆Melody
+0:04:34 Citylight Fantasy
+0:17:06 トイ×トイ⭐︎パーティ！"""
+    items = [
+        ai.ParsedSong("Starry☆Melody", "", "0:00:00", 0),
+        ai.ParsedSong("Citylight Fantasy", "", "0:04:34", 274),
+        ai.ParsedSong("トイ×トイ⭐︎パーティ！", "", "0:17:06", 1026),
+    ]
+    good, bad = ai.verify_items_against_source(items, desc)
+    assert good is not None and len(good) == 3 and len(bad) == 0

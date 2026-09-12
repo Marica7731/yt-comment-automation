@@ -381,16 +381,23 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    还把 UP 主昵称当歌手（BV1eYgV6WEq3 的错误根源）。
     songlist_comments = [t for t in comments if _is_songlist_comment(t)]
 
+    # 3c. 评论区无歌单时，简介自带的 SETLIST 也是可靠来源（BV15wYE68EBb：简介有完整歌单但评论区没有）
+    ai_sources = list(songlist_comments)
+    if not ai_sources and _is_songlist_comment(description):
+        ai_sources = [description]
+        logger.info("[%s] 评论区无歌单，简介含 SETLIST，用简介喂 AI", video.bvid)
+
     # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考）
     local_items = clean.build_comment_songlist(songlist_comments, description)
 
     # 5. AI 整理（生产主路径 OpenCode：omen-alpha 主提取 + glm-5.3-flash 复核；
-    #     OpenCode 未配/失败时回退 DeepSeek）。只喂结构化歌单评论，防从感想提取/幻觉。
+    #     OpenCode 未配/失败时回退 DeepSeek）。只喂结构化歌单评论/简介 SETLIST，
+    #     防从感想提取/幻觉。
     items: list = []
     source = ""
     ai_detail = ""
-    if (config.opencode_api_key() or config.deepseek_api_key()) and songlist_comments:
-        user_text = "\n\n---\n\n".join(songlist_comments)
+    if (config.opencode_api_key() or config.deepseek_api_key()) and ai_sources:
+        user_text = "\n\n---\n\n".join(ai_sources)
         ai_text, ai_err, ai_source = ai.call_songlist_ai(user_text)
         if ai_err:
             ai_detail = f"AI 整理失败: {ai_err}"
@@ -415,7 +422,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                     items = good
             source = ai_source or "ai"
     else:
-        ai_detail = "评论区无结构化歌单（不调 DS）"
+        ai_detail = "评论区/简介均无结构化歌单（不调 AI）"
     if not items:
         items = local_items
         source = "local"
