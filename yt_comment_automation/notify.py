@@ -68,8 +68,16 @@ def send_feishu_message(text: str, dry_run: bool = False) -> tuple[bool, str]:
     return True, f"飞书已发送 message_id={resp.get('data', {}).get('message_id', '')}"
 
 
-def build_success_brief(bvid: str, yt_link: str, posted_at: str = "", song_count: int = 0, profile: str = "") -> str:
-    """发送成功通知：B站链接、油管链接、评论时间、歌曲数量，中间都用回车。时间用北京时间。"""
+def build_success_brief(
+    bvid: str,
+    yt_link: str,
+    posted_at: str = "",
+    song_count: int = 0,
+    profile: str = "",
+    source_lines: str = "",
+    final_message: str = "",
+) -> str:
+    """发送成功通知：链接/时间/数量/主播 + 源时间戳全量（未过滤）+ 清理后发布时间轴，供人工对比。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
     lines = [
         "✅评论发送成功",
@@ -80,6 +88,12 @@ def build_success_brief(bvid: str, yt_link: str, posted_at: str = "", song_count
     ]
     if profile:
         lines.append(profile)
+    if source_lines:
+        lines.append("——源时间戳（原始未过滤）——")
+        lines.append(source_lines)
+    if final_message:
+        lines.append("——发布（清理后）——")
+        lines.append(final_message)
     return "\n".join(lines)
 
 

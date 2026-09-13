@@ -53,6 +53,7 @@ class VideoResult:
     error: str = ""
     detail: str = ""
     desc_profile: str = ""  # 简介提取的「主播 + 原标题」，随成功通知发送
+    source_lines: str = ""  # 原始抓取来源中全部含时间戳的行（未过滤），随成功通知发送用于对比
 
 
 @dataclass
@@ -404,6 +405,16 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                 logger.info("[%s] 评论区无歌单，简介含 SETLIST，用简介喂 AI", video.bvid)
                 break
 
+    # 源时间戳行（未过滤全量）：原始抓取评论+简介中所有含时间戳的行，随飞书通知供人工对比
+    _ts_line_re = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")
+    _src_lines: list[str] = []
+    for _src in list(dict.fromkeys(comments + [x for x in (description, desc) if x])):
+        for _ln in _src.splitlines():
+            _ln = _ln.strip()
+            if _ln and _ts_line_re.search(_ln):
+                _src_lines.append(_ln)
+    result.source_lines = chr(10).join(_src_lines)
+
     # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考；两个简介一并参与）
     local_source_text = description + ("\n" + desc if desc else "")
     local_items = clean.build_comment_songlist(songlist_comments, local_source_text)
@@ -668,6 +679,8 @@ def run_pipeline(
                     posted_at=notify.beijing_now(),
                     song_count=result.song_count,
                     profile=result.desc_profile,
+                    source_lines=result.source_lines,
+                    final_message=result.message,
                 )
                 ok, note = notify.send_feishu_message(brief)
                 logger.info("  飞书通知: %s %s", ok, note)
