@@ -734,9 +734,7 @@ def _strip_leading_numbered_marker(text: str) -> str:
 
 # 无歌手歌名接受的排除词（简介/闲聊常见，避免宽松解析收脏）
 _BARE_TITLE_EXCLUDE = re.compile(
-    r"(www+|w{2,}|[！!]{2,}|好き|すごい|やば|面白|楽し|めっ+ちゃ|おつ|"
-    r"https?://|@|＠|谢谢|关注|販売|発送|グッズ|チケット|発売|"
-    r"\d{1,2}月\d{1,2}日|配信開始|ホームページ|公式サイト|ハーモニカ|口琴|あくび|声入り|声だし|マイク調整|チューニング)",
+    r"(https?://|@|＠|\d{1,2}月\d{1,2}日)",
     re.IGNORECASE,
 )
 
@@ -803,6 +801,9 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
     t = strip_transliteration_parens_from_line(t)
     t = strip_trailing_latin_annotation_suffix(t)
     if not t or is_obviously_non_song_text(t):
+        return None
+    # 行内含 URL：链接不是歌名/歌手，整行跳过（防 https 被分隔符拆成歌名）
+    if re.search(r"https?://", t):
         return None
     parsed = extract_song_artist_core(t)
     if parsed and (is_bad_field(parsed["song"]) or is_bad_field(parsed["artist"])):

@@ -446,7 +446,6 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         # 条数多但全是人名，会被语义判定剔光），此时逐个次优来源尝试。
         for cand in clean.build_comment_songlist_ranked(songlist_comments, local_source_text):
             cand = [it for it in cand if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
-            cand = [it for it in cand if it.artist or not clean.is_bare_title_excluded(it.song)]
             if not cand:
                 continue
             if config.opencode_api_key() and any(not it.artist.strip() for it in cand):
@@ -468,13 +467,8 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         items = [it for it in items if it.artist and it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
     else:
         items = [it for it in items if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
-    # 无歌手条目过滤（口琴间奏/开场标记等被当歌名；带歌手的真歌不受影响）：
-    # 第一道：黑名单免费过滤已知词；第二道：AI 语义判定兜底（开放集合，无需持续加词）。
-    bare_blocked = lambda it: (
-        not it.artist.strip()
-        and (clean.is_bare_title_excluded(it.song) or _NON_SONG_TS_MARKERS.search(it.song.strip()))
-    )
-    items = [it for it in items if not bare_blocked(it)]
+    # 无歌手条目全走 AI 语义判定（不设黑名单——枚举式词表会误杀真歌名，
+    # 且非歌标记是开放集合；带歌手条目不受影响）。AI 失败时 fail-open 全保留。
     if any(not it.artist.strip() for it in items) and config.opencode_api_key():
         try:
             items, ai_dropped = ai.filter_bare_titles_with_ai(items)
