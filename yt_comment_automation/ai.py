@@ -164,6 +164,32 @@ def filter_bare_titles_with_ai(items: list, timeout: int = 120) -> tuple[list, l
     return kept, dropped
 
 
+CLEANUP_EXPLAIN_PROMPT = """一段直播 SETLIST 原始时间轴被自动管线清理后，只保留了极少条目。
+
+原始时间轴（含全部标记行）：
+{source}
+
+清理后保留：
+{kept}
+
+请用 2-3 句中文说明：为什么只保留了这些（其余被剔的原因，如开场/间奏/闲聊/人名/判定存疑等）。只输出说明本身，不要寒暄。
+"""
+
+
+def explain_cleanup(source: str, kept: str, timeout: int = 120) -> str:
+    """保留条目过少时生成清理理由，供飞书通知人工核查。失败返回空串。"""
+    if not config.opencode_api_key():
+        return ""
+    resp, err = _call_opencode_chat(
+        CLEANUP_EXPLAIN_PROMPT.format(source=(source or "")[:3000], kept=(kept or "")[:1500]),
+        config.opencode_check_model(),
+        timeout=timeout,
+    )
+    if err or not resp:
+        return ""
+    return resp.strip()[:500]
+
+
 def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[str], str]:
     """生产主路径：OpenCode 主提取(omen-alpha) → glm-5.3-flash 复核 → 最终文本。
 

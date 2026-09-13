@@ -54,6 +54,7 @@ class VideoResult:
     detail: str = ""
     desc_profile: str = ""  # 简介提取的「主播 + 原标题」，随成功通知发送
     source_lines: str = ""  # 原始抓取来源中全部含时间戳的行（未过滤），随成功通知发送用于对比
+    clean_reason: str = ""  # 保留条目过少时 AI 生成的清理说明
 
 
 @dataclass
@@ -671,6 +672,16 @@ def run_pipeline(
             # 立即落盘：防止本轮后续处理崩溃（如 YouTube/B站接口异常）导致
             # save_processed 不执行，下轮 cron 重新发布同一视频（重复评论事故）
             save_processed(data_dir, posted)
+            # 保留条目过少时让 AI 给出清理理由，附飞书通知供人工核查
+            src_count = len([x for x in (result.source_lines or "").splitlines() if x.strip()])
+            if result.status == "posted" and config.opencode_api_key() and (
+                result.song_count <= 3 or (src_count >= 10 and result.song_count * 3 <= src_count)
+            ):
+                try:
+                    result.clean_reason = ai.explain_cleanup(result.source_lines, result.message)
+                    logger.info("[%s] 清理说明: %s", result.bvid, result.clean_reason[:120])
+                except Exception as err:  # noqa: BLE001
+                    logger.warning("[%s] 清理说明生成失败（忽略）: %s", result.bvid, err)
             if result.status == "posted":
                 # 飞书通知（仅新投稿发布时；无新增/缺歌单不播报）
                 brief = notify.build_success_brief(
@@ -681,6 +692,7 @@ def run_pipeline(
                     profile=result.desc_profile,
                     source_lines=result.source_lines,
                     final_message=result.message,
+                    clean_reason=result.clean_reason,
                 )
                 ok, note = notify.send_feishu_message(brief)
                 logger.info("  飞书通知: %s %s", ok, note)

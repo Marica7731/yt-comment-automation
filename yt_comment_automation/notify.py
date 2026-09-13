@@ -76,8 +76,9 @@ def build_success_brief(
     profile: str = "",
     source_lines: str = "",
     final_message: str = "",
+    clean_reason: str = "",
 ) -> str:
-    """发送成功通知：链接/时间/数量/主播 + 源时间戳全量（未过滤）+ 清理后发布时间轴，供人工对比。"""
+    """发送成功通知：链接/时间/数量/主播 + 源时间戳全量（未过滤）+ 清理后发布时间轴 + AI 清理说明。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
     lines = [
         "✅评论发送成功",
@@ -94,6 +95,9 @@ def build_success_brief(
     if final_message:
         lines.append("——发布（清理后）——")
         lines.append(final_message)
+    if clean_reason:
+        lines.append("——AI 清理说明——")
+        lines.append(clean_reason)
     return "\n".join(lines)
 
 
