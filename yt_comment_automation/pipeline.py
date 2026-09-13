@@ -376,6 +376,18 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     comments = [c.get("text", "") for c in raw.get("comments", [])]
     description = raw.get("description", "")
 
+    # 合并 history 轮转的历次抓取：YouTube 评论返回内容有波动（同一视频不同轮
+    # 抓到不同评论子集），真歌单可能只出现在某一次抓取里，合并积累才能不漏。
+    try:
+        for hist_path in sorted((cache_dir / "history" / yt_id).glob("*.info.json")):
+            hist = json.loads(hist_path.read_text(encoding="utf-8"))
+            comments.extend(c.get("text", "") for c in hist.get("comments", []) if c.get("text"))
+            if not description and hist.get("description"):
+                description = hist.get("description", "")
+    except Exception as merge_err:  # noqa: BLE001
+        logger.warning("[%s] 合并 history 缓存失败（忽略）: %s", video.bvid, merge_err)
+    comments = list(dict.fromkeys(comments))
+
     # 3b. 只保留「结构化歌单评论」，零散感想评论（夹 1 个时间戳的聊天）不喂给 DS/本地，
     #    避免 DS 把「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」这类感想当歌单、
     #    还把 UP 主昵称当歌手（BV1eYgV6WEq3 的错误根源）。
