@@ -102,9 +102,10 @@ BARE_TITLE_CHECK_PROMPT = """你在判定一组「候选歌曲标题」是否真
 背景：这些标题来自直播 SETLIST 的无歌手条目，混有非歌的杂项标记（开场/间奏/设备/闲聊类，如「声入り」「ハーモニカ」「エンドカード」「あくび」这类），也有真正的歌名（如「すずめ」「ブルーバード」「夜に駆ける」）。
 
 判定标准：
-- 是歌名：明确的乐曲/单曲名（含惯用缩写、外文歌名）。
-- 不是歌名：开场标记、结束标记、间奏/乐器段落（口琴、钢琴独奏等）、设备/环境说明、闲聊词、章节标记、MC、送礼/宣伝相关。
+- 是歌名：明确的乐曲/单曲名（含惯用缩写、外文歌名）。「ありがとう」「おかえり」等问候词出现在连续 SETLIST 中段（前后都是歌名）时通常是感谢曲名，判"是"。
+- 不是歌名：开场标记、结束标记、间奏/乐器段落（口琴、钢琴独奏等）、设备/环境说明、闲聊词、章节标记、MC、送礼/宣伝相关、人名/组合名。
 - 拿不准的一律算"不是歌名"（宁可漏收一首，不发脏数据）。
+- 每一行都必须判定并输出，不能省略。
 
 只输出每行的判定结果，格式（禁止任何其他文字）：
 <N>是 / <N>否
@@ -130,16 +131,23 @@ def filter_bare_titles_with_ai(items: list, timeout: int = 120) -> tuple[list, l
     )
     if err or not resp:
         return items, []
-    # 解析判定：<N>是 / <N>否
+    # 解析判定：<N>是 / <N>否（兼容 1是 / 1.是 / 1、是 等写法）
     keep_ids: set[int] = set()
+    parsed_count = 0
     for line in resp.splitlines():
         m = re.match(r"^(\d{1,3})\s*[.、）)]?\s*(是|否)", line.strip())
         if m:
+            parsed_count += 1
             idx = int(m.group(1))
             if 1 <= idx <= len(targets) and m.group(2) == "是":
                 keep_ids.add(idx)
-    kept = [it for it in items if (it.artist or "").strip() or (targets.index(it) + 1) in keep_ids]
-    dropped = [it for it in targets if (targets.index(it) + 1) not in keep_ids]
+    # fail-open：响应覆盖率不足（截断/闲聊/格式漂移）判定不可信，全保留。
+    # （判"全否"只在覆盖完整时才执行，避免真歌单被一次坏响应清空。）
+    if parsed_count < max(1, int(len(targets) * 0.9)):
+        return items, []
+    pos_of = {id(it): i + 1 for i, it in enumerate(targets)}
+    kept = [it for it in items if (it.artist or "").strip() or pos_of.get(id(it)) in keep_ids]
+    dropped = [it for it in targets if pos_of.get(id(it)) not in keep_ids]
     return kept, dropped
 
 
