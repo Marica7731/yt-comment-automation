@@ -672,10 +672,10 @@ def run_pipeline(
             # 立即落盘：防止本轮后续处理崩溃（如 YouTube/B站接口异常）导致
             # save_processed 不执行，下轮 cron 重新发布同一视频（重复评论事故）
             save_processed(data_dir, posted)
-            # 保留条目过少时让 AI 给出清理理由，附飞书通知供人工核查
+            # 非满额发布（保留数 < 原始源行数）都生成清理理由，附飞书通知供人工核查
             src_count = len([x for x in (result.source_lines or "").splitlines() if x.strip()])
             if result.status == "posted" and config.opencode_api_key() and (
-                result.song_count <= 3 or (src_count >= 10 and result.song_count * 3 <= src_count)
+                src_count == 0 or result.song_count < src_count
             ):
                 try:
                     result.clean_reason = ai.explain_cleanup(result.source_lines, result.message)
