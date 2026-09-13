@@ -429,9 +429,17 @@ def fetch_youtube_raw(
 
     if cache_dir:
         cache_dir.mkdir(parents=True, exist_ok=True)
-        (cache_dir / f"{video_id}.info.json").write_text(
-            json.dumps(raw_info, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        cache_path = cache_dir / f"{video_id}.info.json"
+        # 短期留存：覆盖前把旧缓存轮转到 history（无歌单视频每轮 force 重抓，
+        # 不留存的话"cron 当时抓到了什么"无法回看，排查 AI 判定问题要重抓）
+        if cache_path.is_file():
+            hist_dir = cache_dir / "history" / video_id
+            hist_dir.mkdir(parents=True, exist_ok=True)
+            olds = sorted(hist_dir.glob("*.info.json"))
+            while len(olds) >= 3:
+                olds.pop(0).unlink()
+            cache_path.rename(hist_dir / f"{time.strftime('%Y%m%d_%H%M%S')}.info.json")
+        cache_path.write_text(json.dumps(raw_info, ensure_ascii=False, indent=2), encoding="utf-8")
     return raw_info
 
 
