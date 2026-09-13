@@ -442,8 +442,23 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     else:
         ai_detail = "评论区/简介均无结构化歌单（不调 AI）"
     if not items:
-        items = local_items
-        source = "local"
+        # AI 失败 → 本地兜底。最优来源可能整体是非歌（如活动成员时段表，
+        # 条数多但全是人名，会被语义判定剔光），此时逐个次优来源尝试。
+        for cand in clean.build_comment_songlist_ranked(songlist_comments, local_source_text):
+            cand = [it for it in cand if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
+            cand = [it for it in cand if it.artist or not clean.is_bare_title_excluded(it.song)]
+            if not cand:
+                continue
+            if config.opencode_api_key() and any(not it.artist.strip() for it in cand):
+                try:
+                    cand, _dropped = ai.filter_bare_titles_with_ai(cand)
+                except Exception as cand_err:  # noqa: BLE001
+                    logger.warning("[%s] 候选来源语义判定失败（保留）: %s", video.bvid, cand_err)
+            if cand:
+                items = cand
+                source = "local"
+                logger.info("[%s] 本地兜底采用次优来源（%d 首）", video.bvid, len(items))
+                break
         if ai_detail:
             ai_detail = f"本地兜底（{ai_detail}）"
 

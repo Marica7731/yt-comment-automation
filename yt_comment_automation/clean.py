@@ -1188,11 +1188,11 @@ def format_song_items(items: list[ParsedSong], include_timestamps: bool = False)
     return "\n".join(lines)
 
 
-def build_comment_songlist(comment_texts: list[str], description: str = "") -> list[ParsedSong]:
-    """多来源提取 + 择优：返回最优来源的歌曲列表。
+def build_comment_songlist_ranked(comment_texts: list[str], description: str = "") -> list[list[ParsedSong]]:
+    """多来源提取，按「条数 + 带歌手数」降序返回全部候选来源。
 
-    与 song_serch_lyrics 的 _select_best_comment_songs 相同策略：
-    无 EDL 时选「条数最多 + 带歌手最多」的来源。
+    最优来源可能整体是非歌（如活动成员时段表，条数多但全是人名），
+    上层需要逐个候选尝试（语义判定后非空才采用）。
     """
     all_texts = [t for t in comment_texts if t and t.strip()] + ([description] if description and description.strip() else [])
     sources: list[list[ParsedSong]] = []
@@ -1200,6 +1200,15 @@ def build_comment_songlist(comment_texts: list[str], description: str = "") -> l
         songs = dedupe_song_items_by_timestamp_and_identity(extract_plain_songs_from_source_timeline(text))
         if songs:
             sources.append(songs)
-    if not sources:
-        return []
-    return max(sources, key=lambda songs: (len(songs), sum(1 for s in songs if s.artist)))
+    sources.sort(key=lambda songs: (len(songs), sum(1 for s in songs if s.artist)), reverse=True)
+    return sources
+
+
+def build_comment_songlist(comment_texts: list[str], description: str = "") -> list[ParsedSong]:
+    """多来源提取 + 择优：返回最优来源的歌曲列表。
+
+    与 song_serch_lyrics 的 _select_best_comment_songs 相同策略：
+    无 EDL 时选「条数最多 + 带歌手最多」的来源。
+    """
+    ranked = build_comment_songlist_ranked(comment_texts, description)
+    return ranked[0] if ranked else []
