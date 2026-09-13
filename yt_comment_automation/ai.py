@@ -146,8 +146,8 @@ def filter_bare_titles_with_ai(items: list, timeout: int = 120) -> tuple[list, l
 def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[str], str]:
     """生产主路径：OpenCode 主提取(omen-alpha) → glm-5.3-flash 复核 → 最终文本。
 
-    返回 (最终文本, 错误, source)。source ∈ {opencode, deepseek, ""}。
-    - OpenCode key 未配/失败 → 回退 DeepSeek（原路径）
+    返回 (最终文本, 错误, source)。source ∈ {opencode, ""}。
+    - 主模型失败 → 备用模型（check 模型互换）→ 两者都失败则返回错误（上层走本地兜底）
     - 复核失败 → 用主提取结果（仍可发布）
     """
     def _has_valid_lines(text: str) -> bool:
@@ -185,11 +185,10 @@ def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[
                     timeout=timeout,
                 )
                 return (check2 if not check_err2 else primary2), None, source
-        # 双模型都失败 → 回退 DeepSeek
-    text, ds_err = call_deepseek(user_text, timeout=timeout, retries=1)
-    if ds_err:
-        return "", f"OpenCode 失败({err})，DeepSeek 也失败: {ds_err}", ""
-    return text, None, "deepseek"
+        # 双模型都失败（err2 覆盖为备用模型的错误，便于诊断）
+        if err2:
+            err = f"主: {err}; 备用: {err2}"
+    return "", f"OpenCode 失败: {err}", ""
 
 PROMPT_TEMPLATE = """你现在要根据我提供的一段 YouTube 评论区时间轴，整理出歌曲命名列表。
 
