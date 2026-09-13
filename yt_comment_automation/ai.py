@@ -97,20 +97,25 @@ def _call_opencode_chat(user_text: str, model: str, timeout: int = 240, retries:
     return "", last_err
 
 
-BARE_TITLE_CHECK_PROMPT = """下面是一段直播 SETLIST 的候选标题（按时间顺序编号）。绝大多数是歌曲名，少数可能是非歌杂项。
+BARE_TITLE_CHECK_PROMPT = """你在判定一组「候选歌曲标题」是否真的是歌曲名。
 
-请只挑出【不是歌曲】的条目编号。非歌包括：开场/结束标记（声入り、エンドカード等）、间奏/乐器段落（ハーモニカ、口琴等）、设备/环境说明（マイク調整等）、闲聊词、章节标记、MC、宣伝/商品相关、人名或组合名。
-注意：「ありがとう」「おかえり」等问候词在连续 SETLIST 中段通常是感谢曲名，不算非歌。
+背景：这些标题来自直播 SETLIST 的无歌手条目，混有非歌的杂项（开场/间奏/设备/闲聊类，如「声入り」「ハーモニカ」「エンドカード」「あくび」），也有人名/组合名（如「CYBILL」「からくりんね」），以及真正的歌名（如「すずめ」「夜に駆ける」）。
 
-只输出非歌条目的编号，每行一个，格式：
-N
+判定标准：
+- 是歌名：明确的乐曲/单曲名。「ありがとう」等问候词出现在连续列表中段（前后都是歌名）时通常是感谢曲名。
+- 不是歌名：开场/结束标记、间奏/乐器段落、设备/环境说明、闲聊词、章节标记、MC、宣伝/商品相关、人名或组合名。
+- 每一行都必须判定，不能省略。
 
-没有非歌条目时只输出：无
-不要输出编号以外的任何内容（不要复述标题、不要解释）。
+只输出每行判定结果，格式（每行：编号+判定，禁止其他内容）：
+N 是
+或
+N 否
+（用中文"是/否"回答）
 
 候选列表：
 {titles}
 """
+
 
 def filter_bare_titles_with_ai(items: list, timeout: int = 120) -> tuple[list, list]:
     """对无歌手条目做语义判定，剔除非歌杂项（黑名单的兜底层，无需持续加词）。
@@ -128,22 +133,34 @@ def filter_bare_titles_with_ai(items: list, timeout: int = 120) -> tuple[list, l
     )
     if err or not resp:
         return items, []
-    # 解析：只收集"非歌编号"（任务为挑非歌，漏挑=保留，安全方向；语言无关）
-    drop_ids: set[int] = set()
+    # 解析：<N>是/<N>否，兼容日语 はい/いいえ 与 yes/no（模型输出语言会漂移）
+    YES = {"是", "はい", "yes", "y"}
+    NO = {"否", "いいえ", "no", "n"}
+    keep_ids: set[int] = set()
+    parsed_count = 0
     for line in resp.splitlines():
         line = line.strip()
         if not line:
             continue
-        if "无" in line and not line[0].isdigit():
+        m = re.match(r"^(\d{1,3})\s*[.、）)]?\s*(.+)$", line)
+        if not m:
             continue
-        m = re.match(r"^(\d{1,3})", line)
-        if m:
-            idx = int(m.group(1))
-            if 1 <= idx <= len(targets):
-                drop_ids.add(idx)
+        verdict = m.group(2).strip().lower()
+        idx = int(m.group(1))
+        if not (1 <= idx <= len(targets)):
+            continue
+        first = re.split(r"[\s，,、.。/（）()]", verdict)[0]
+        if first in YES:
+            parsed_count += 1
+            keep_ids.add(idx)
+        elif first in NO:
+            parsed_count += 1
+    # fail-open：覆盖率不足（截断/闲聊/未知格式）判定不可信，全保留
+    if parsed_count < max(1, int(len(targets) * 0.9)):
+        return items, []
     pos_of = {id(it): i + 1 for i, it in enumerate(targets)}
-    kept = [it for it in items if (it.artist or "").strip() or pos_of.get(id(it)) not in drop_ids]
-    dropped = [it for it in targets if pos_of.get(id(it)) in drop_ids]
+    kept = [it for it in items if (it.artist or "").strip() or pos_of.get(id(it)) in keep_ids]
+    dropped = [it for it in targets if pos_of.get(id(it)) not in keep_ids]
     return kept, dropped
 
 
