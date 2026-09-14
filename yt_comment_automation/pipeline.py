@@ -463,6 +463,10 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             if config.opencode_api_key() and any(not it.artist.strip() for it in cand):
                 try:
                     cand, _dropped = ai.filter_bare_titles_with_ai(cand)
+                    if _dropped:
+                        _restored, _dropped = ai.recheck_dropped_titles(_dropped)
+                        if _restored:
+                            cand = sorted(cand + _restored, key=lambda it: (it.timestamp_seconds is None, it.timestamp_seconds or 0))
                 except Exception as cand_err:  # noqa: BLE001
                     logger.warning("[%s] 候选来源语义判定失败（保留）: %s", video.bvid, cand_err)
             if cand:
@@ -484,6 +488,13 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     if any(not it.artist.strip() for it in items) and config.opencode_api_key():
         try:
             items, ai_dropped = ai.filter_bare_titles_with_ai(items)
+            # 自检闭环：反向复核被剔条目，恢复误剔真歌（双视角交集才真剔）
+            if ai_dropped:
+                restored, still_dropped = ai.recheck_dropped_titles(ai_dropped)
+                if restored:
+                    logger.info("[%s] 反向复核恢复误剔条目: %s", video.bvid, [it.song for it in restored])
+                    items = sorted(items + restored, key=lambda it: (it.timestamp_seconds is None, it.timestamp_seconds or 0))
+                ai_dropped = still_dropped
             if ai_dropped:
                 logger.info(
                     "[%s] AI 语义判定剔除无歌手非歌条目: %s",

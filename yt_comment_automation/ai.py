@@ -117,6 +117,47 @@ N 否
 """
 
 
+DROPPED_RECHECK_PROMPT = """以下标题刚被自动管线判定为「非歌曲」而剔除。
+
+请反向复核：其中哪些**其实是歌曲名**（明确乐曲/单曲名，含感谢曲如「ありがとう」、外文歌、缩写）？
+- 只有明确是歌名的才列出；杂项/人名/标记/拿不准的不要列。
+- 只输出歌名编号，每行一个；没有则只输出：无
+
+被剔除的候选：
+{titles}
+"""
+
+
+def recheck_dropped_titles(dropped: list, timeout: int = 120) -> tuple[list, list]:
+    """对语义判定剔除的条目做反向复核（第二视角），恢复其中真歌名。
+
+    双视角交集才真剔：主判定剔 + 反向复核也认同非歌 → 保留剔除状态；
+    反向复核认为是歌 → 恢复（fail-safe 方向，宁可多留）。
+    AI 失败时全部恢复。
+    """
+    if not dropped:
+        return [], []
+    titles_block = chr(10).join(f"{i+1}. {it.song.strip()}" for i, it in enumerate(dropped))
+    resp, err = _call_opencode_chat(
+        DROPPED_RECHECK_PROMPT.format(titles=titles_block),
+        config.opencode_check_model(),
+        timeout=timeout,
+    )
+    if err or not resp:
+        return list(dropped), []
+    restore_ids: set[int] = set()
+    for line in resp.splitlines():
+        m = re.match(r"^(\d{1,3})", line.strip())
+        if m and "无" not in line:
+            idx = int(m.group(1))
+            if 1 <= idx <= len(dropped):
+                restore_ids.add(idx)
+    pos_of = {id(it): i + 1 for i, it in enumerate(dropped)}
+    restored = [it for it in dropped if pos_of.get(id(it)) in restore_ids]
+    still_dropped = [it for it in dropped if pos_of.get(id(it)) not in restore_ids]
+    return restored, still_dropped
+
+
 def filter_bare_titles_with_ai(items: list, timeout: int = 120) -> tuple[list, list]:
     """对无歌手条目做语义判定，剔除非歌杂项（黑名单的兜底层，无需持续加词）。
 
