@@ -518,14 +518,15 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         result.detail = f"未提取到有效歌曲（{result.detail or '本地与 AI 均无结果'}）"
         return result
 
-    # 6c. 升级判定：已发低质量评论时，只有"更全"才升级（避免 1→2 首抖动刷屏）
+    # 6c. 升级判定：已发低质量评论时，新歌单须严格多于已发、且至少达绝对下限
+    #     （1 首散歌先发、完整 3 首歌单后来出现 → 直接升级，不再要求 +3）
     if upgrade_mode:
         existing_count = _count_own_songlist_lines(existing.message) if existing else 0
-        if len(items) < existing_count + UPGRADE_THRESHOLD:
+        if len(items) <= existing_count or len(items) < UPGRADE_THRESHOLD:
             result.status = "already_posted"
             result.detail = (
                 f"rpid={existing_rpid} 升级检查：新提取 {len(items)} 首 vs 已发 {existing_count} 首，"
-                f"未达升级阈值（需 +{UPGRADE_THRESHOLD}），保留原评论"
+                f"未达升级条件（需多于已发且≥{UPGRADE_THRESHOLD} 首），保留原评论"
             )
             return result
         logger.info(

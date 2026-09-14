@@ -49,15 +49,41 @@ def cookie_file() -> str:
     return get("BILI_COOKIE_FILE", str(ROOT / "runtime" / "biliup_cookies.json"))
 
 
+_feishu_bridge_loaded = False
+
+
+def _load_feishu_bridge() -> None:
+    """手动运行时环境变量缺飞书凭据，尝试从既有 feishupy 部署补载（cron 由 run.sh 加载）。"""
+    global _feishu_bridge_loaded
+    if _feishu_bridge_loaded:
+        return
+    _feishu_bridge_loaded = True
+    if get("FEISHU_APP_ID") and get("FEISHU_APP_SECRET") and get("MY_FEISHU_OPEN_ID"):
+        return
+    bridge = get("FEISHU_BRIDGE_ENV", "/opt/feishupy-vps-jp/runtime/bridge.env")
+    try:
+        for line in Path(bridge).read_text(encoding="utf-8").splitlines():
+            m = None
+            import re as _re
+            m = _re.match(r"^(FEISHU_APP_ID|FEISHU_APP_SECRET|MY_FEISHU_OPEN_ID)=(.*)$", line.strip())
+            if m and not get(m.group(1)):
+                os.environ.setdefault(m.group(1), m.group(2).strip('"'))
+    except OSError:
+        pass
+
+
 def feishu_app_id() -> str:
+    _load_feishu_bridge()
     return get("FEISHU_APP_ID")
 
 
 def feishu_app_secret() -> str:
+    _load_feishu_bridge()
     return get("FEISHU_APP_SECRET")
 
 
 def feishu_open_id() -> str:
+    _load_feishu_bridge()
     return get("MY_FEISHU_OPEN_ID", get("FEISHU_OPEN_ID"))
 
 
