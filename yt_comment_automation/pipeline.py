@@ -719,6 +719,17 @@ def run_pipeline(
                 notify.send_feishu_message(brief)
             except Exception:  # noqa: BLE001
                 pass
+        # 0 首未发布的视频：本轮缓存内容无效（可能评论后到/抓取波动/闲聊表误判
+        # "有歌单"导致长期不重抓），删缓存让下轮 cron 必然重抓最新评论区
+        if not dry_run:
+            for r in results:
+                if r.status == "skipped_no_songs" and r.yt_id:
+                    try:
+                        (cache_dir / f"{r.yt_id}.info.json").unlink()
+                    except FileNotFoundError:
+                        pass
+                    except Exception as del_err:  # noqa: BLE001
+                        logger.warning("[%s] 清理无效缓存失败（忽略）: %s", r.bvid, del_err)
         time.sleep(1)
 
     # 保存快照与处理记录
