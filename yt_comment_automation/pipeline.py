@@ -29,6 +29,11 @@ logger = logging.getLogger("yt_comment_automation")
 
 # 质量升级阈值：已发歌单首数 + 该阈值以上，YouTube 出现更全歌单时才升级（避免 1→2 首抖动刷屏）
 UPGRADE_THRESHOLD = 3
+# 升级复查 TTL（秒）：超过一周的老投稿降频为 2 小时抓一次（避免无限期高频重抓）
+UPGRADE_CHECK_TTL = 7200
+# 新投稿认定窗口（天）：B站发布时间在该窗口内的升级复查保持每轮 force 重抓
+UPGRADE_FRESH_DAYS = 7
+
 # 本地规则结果可信的下限：低于此数量时触发 DeepSeek 兜底
 MIN_CONFIDENT_SONGS = 5
 
@@ -352,9 +357,21 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    - 升级模式：缓存按 TTL 过期（避免每次 cron 都重抓已发视频）
     try:
         if upgrade_mode:
-            # 已发低质量评论的复查必须每轮看最新评论区（force）：
-            # 若信缓存（TTL 内读旧数据），清洗结果永远不变，already_posted 死循环
-            raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
+            # 已发低质量评论的复查必须看最新评论区（否则读旧数据 → already_posted 死循环）。
+            # 频率按 B站发布时间分级（part_date 已有，零额外请求）：
+            # 一周内新投稿歌单常延迟出现 → 每轮 force 重抓；更早的老投稿 → 2 小时一次。
+            import datetime as _dt
+
+            fresh = False
+            if video.part_date:
+                try:
+                    fresh = (_dt.date.today() - _dt.date.fromisoformat(video.part_date)).days <= UPGRADE_FRESH_DAYS
+                except ValueError:
+                    fresh = False
+            if fresh:
+                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
+            else:
+                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, max_age_seconds=UPGRADE_CHECK_TTL)
         else:
             raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
             if not raw_has_timestamp_songlist(raw):
