@@ -29,9 +29,6 @@ logger = logging.getLogger("yt_comment_automation")
 
 # 质量升级阈值：已发歌单首数 + 该阈值以上，YouTube 出现更全歌单时才升级（避免 1→2 首抖动刷屏）
 UPGRADE_THRESHOLD = 3
-# 已发视频的缓存复查 TTL（秒）：缓存超过该时间才 force 重抓检查是否有更全歌单，控制已发视频流量
-UPGRADE_CHECK_TTL = 3600
-
 # 本地规则结果可信的下限：低于此数量时触发 DeepSeek 兜底
 MIN_CONFIDENT_SONGS = 5
 
@@ -355,7 +352,9 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    - 升级模式：缓存按 TTL 过期（避免每次 cron 都重抓已发视频）
     try:
         if upgrade_mode:
-            raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, max_age_seconds=UPGRADE_CHECK_TTL)
+            # 已发低质量评论的复查必须每轮看最新评论区（force）：
+            # 若信缓存（TTL 内读旧数据），清洗结果永远不变，already_posted 死循环
+            raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
         else:
             raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
             if not raw_has_timestamp_songlist(raw):
