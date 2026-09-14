@@ -427,11 +427,15 @@ def fetch_youtube_raw(
         },
     }
 
+    # 抓取结果无歌单时不落缓存：存了也会被判"有歌单"而长期不重抓（死循环根源）；
+    # 调用方每轮会重新抓最新评论区，直到出现歌单为止。
+    if not any(c.get("text") for c in raw_info["comments"]):
+        return raw_info
+
     if cache_dir:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / f"{video_id}.info.json"
-        # 短期留存：覆盖前把旧缓存轮转到 history（无歌单视频每轮 force 重抓，
-        # 不留存的话"cron 当时抓到了什么"无法回看，排查 AI 判定问题要重抓）
+        # 短期留存：覆盖前把旧缓存轮转到 history（回看"cron 当时抓到了什么"用于排查）
         if cache_path.is_file():
             hist_dir = cache_dir / "history" / video_id
             hist_dir.mkdir(parents=True, exist_ok=True)
