@@ -83,4 +83,24 @@ for it in items:
     time.sleep(6)  # 频控：每分钟最多 10 个点赞，6 秒/个最稳
 
 print(flush=True)
-print(f"汇总: 点赞 {len(liked)} | 已赞跳过 {len(skipped_liked)} | 自己排除 {len(skipped_self)} | 失败 {len(failed)}", flush=True)
+summary = f"汇总: 点赞 {len(liked)} | 已赞跳过 {len(skipped_liked)} | 自己排除 {len(skipped_self)} | 失败 {len(failed)}"
+print(summary, flush=True)
+
+# 飞书通知（有点赞动作才发；纯跳过不打扰）
+if liked:
+    try:
+        from yt_comment_automation import notify
+        detail = chr(10).join(f"· {c}" for _, c in liked[:10])
+        more = chr(10) + f"…等共 {len(liked)} 条" if len(liked) > 10 else ""
+        if failed:
+            detail += chr(10) + f"⚠️失败 {len(failed)} 条"
+        brief = chr(10).join([
+            "❤️粉丝回复点赞",
+            f"{summary}",
+            detail + more,
+            f"时间：{notify.beijing_now()}",
+        ])
+        ok, note = notify.send_feishu_message(brief)
+        print(f"飞书: {ok} {note}", flush=True)
+    except Exception as err:  # noqa: BLE001
+        print(f"飞书通知失败: {err}", flush=True)
