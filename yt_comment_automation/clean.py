@@ -768,8 +768,14 @@ def _looks_like_bare_song_title(text: str, source_line: str = "") -> bool:
     # 1-3 字符纯平假名是助词/残片（まで、から），不是歌名
     if re.fullmatch(r"[ぁ-ん]{1,3}", t):
         return False
-    # 纯数字/符号/单字符假名不算（点分数字歌名「8.8」算）
-    if not re.search(r"[A-Za-z0-9][.．。]?[A-Za-z0-9]|[A-Za-zぁ-んァ-ヶ一-龯々]{2,}", t):
+    # 纯数字/符号/单字符假名不算（点分数字歌名「8.8」算）；
+    # 单个汉字可以是真歌名（奏/虹/桜/星/花），不得因长度为 1 被洗掉
+    if not re.search(
+        r"[A-Za-z0-9][.．。]?[A-Za-z0-9]"    # 点分数字/缩写
+        r"|[A-Za-zぁ-んァ-ヶ一-龯々]{2,}"     # 2+ 字符正常歌名
+        r"|[一-龯々]",                        # 单字汉字歌名
+        t,
+    ):
         return False
     return True
 
