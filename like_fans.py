@@ -1,5 +1,6 @@
 """给消息中心「回复我的」第一页粉丝回复点赞（已赞跳过，自己回复排除）。"""
 import json
+import re
 import sys
 import time
 import urllib.parse
@@ -22,6 +23,7 @@ csrf = cookies.get("bili_jct", "")
 # 点赞成功即落盘，硬防重复。
 import pathlib as _pl
 STATE_PATH = _pl.Path("/opt/yt-comment-automation/data/liked_rpids.json")
+our_root_rpid_cache = {}  # oid → 我们主评论 rpid（楼中楼 root）
 try:
     liked_set = set(json.loads(STATE_PATH.read_text(encoding="utf-8")))
 except (OSError, ValueError):
@@ -51,23 +53,33 @@ for it in items:
         continue
     rpid = item.get("source_id")
     if item.get("like_state", 0) != 0 or rpid in liked_set:
-        # like_state 有缓存延迟（误报已赞导致漏赞），用 detail 接口查服务端真实状态
+        # like_state 有缓存延迟（误报已赞导致漏赞）。这些回复是对我们主评论的楼中楼，
+        # 查真实状态必须以「我们主评论的 rpid」为 root（消息里的 root_id=0 无效，
+        # 用它查 detail 返回的是顶层评论列表，永远找不到楼中楼 → 全部误跳过漏赞）。
         real_liked = None
         try:
-            root_id = item.get("root_id") or 0
-            detail_url = (
-                f"https://api.bilibili.com/x/v2/reply/detail?type=1"
-                f"&oid={item.get('subject_id')}&root={root_id}&ps=20&pn=1"
-            )
-            req_d = urllib.request.Request(detail_url, headers=headers)
-            with urllib.request.urlopen(req_d, timeout=30) as resp_d:
-                dd = json.loads(resp_d.read().decode("utf-8"))
-            replies = ((dd.get("data") or {}).get("replies")) or []
-            for rp in replies:
-                if rp.get("rpid") == rpid:
-                    reaction = (rp.get("reaction") or {})
-                    real_liked = reaction.get("status") == 1
-                    break
+            oid = item.get("subject_id")
+            root = our_root_rpid_cache.get(oid)
+            if not root:
+                m_bv = re.search(r"/video/(BV[0-9A-Za-z]{10})", item.get("uri", ""))
+                if m_bv:
+                    own_c = bili_comment.find_own_comment(m_bv.group(1), cookies)
+                    if own_c:
+                        root = our_root_rpid_cache[oid] = own_c.rpid
+            if root:
+                detail_url = (
+                    f"https://api.bilibili.com/x/v2/reply/reply?type=1"
+                    f"&oid={oid}&root={root}&ps=49&pn=1"
+                )
+                req_d = urllib.request.Request(detail_url, headers=headers)
+                with urllib.request.urlopen(req_d, timeout=30) as resp_d:
+                    dd = json.loads(resp_d.read().decode("utf-8"))
+                for rp in ((dd.get("data") or {}).get("replies")) or []:
+                    if rp.get("rpid") == rpid:
+                        real_liked = ((rp.get("reaction") or {}).get("status") == 1) or (
+                            rp.get("action") == 1
+                        )
+                        break
         except Exception as detail_err:  # noqa: BLE001
             print(f"  ⚠️状态复核失败 rpid={rpid}: {detail_err}", flush=True)
         if real_liked is False and rpid not in liked_set:
