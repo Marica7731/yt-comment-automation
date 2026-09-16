@@ -769,6 +769,8 @@ def run_pipeline(
                 "detail": r.detail,
                 "error": r.error,
                 "desc_profile": r.desc_profile,
+                # 发布内容落盘：每日清洗复盘用它对比源时间戳行，无需回读 B 站
+                "message": getattr(r, "message", ""),
             }
             for r in results
         ],
