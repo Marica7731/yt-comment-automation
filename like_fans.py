@@ -1,5 +1,13 @@
-"""给消息中心「回复我的」第一页粉丝回复点赞（已赞跳过，自己回复排除）。"""
+"""给消息中心「回复我的」第一页粉丝回复点赞。
+
+规则（用户规格）：
+- 只取 msgfeed 第一页；已赞跳过（跳过明细只进日志，不发飞书）；自己的回复排除。
+- reply/action 是 toggle：只有确认「当前未赞」才发 action，绝不盲发（盲发会把赞取消）。
+- 接口里 mid 是字符串：比较一律 str() 归一，否则自己排除永不生效。
+- 飞书通知只有标题一个 👍，明细行纯文本。
+"""
 import json
+import pathlib
 import re
 import sys
 import time
@@ -9,8 +17,7 @@ import urllib.request
 sys.path.insert(0, '/opt/yt-comment-automation')
 from yt_comment_automation import bili_comment
 
-OWNER_MID = 3546597260528367
-MY_MID = OWNER_MID  # 排除自己
+OWNER_MID = "3546597260528367"
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -19,20 +26,79 @@ UA = (
 cookies = bili_comment.load_cookie_map()
 csrf = cookies.get("bili_jct", "")
 
-# 本地已赞集合：reply/action 是 toggle，重复发会把赞取消；like_state 有缓存延迟不可靠。
-# 点赞成功即落盘，硬防重复。
-import pathlib as _pl
-STATE_PATH = _pl.Path("/opt/yt-comment-automation/data/liked_rpids.json")
-our_root_rpid_cache = {}  # oid → 我们主评论 rpid（楼中楼 root）
+# 本地已赞集合：点赞成功即落盘，防重复。
+STATE_PATH = pathlib.Path("/opt/yt-comment-automation/data/liked_rpids.json")
 try:
     liked_set = set(json.loads(STATE_PATH.read_text(encoding="utf-8")))
 except (OSError, ValueError):
     liked_set = set()
+
 headers = {
     "User-Agent": UA,
     "Referer": "https://message.bilibili.com/",
     "Cookie": bili_comment.cookie_header(cookies),
 }
+our_root_rpid_cache = {}  # oid → 我们主评论 rpid（查楼中楼真实状态的 root）
+
+
+def save_liked_set():
+    try:
+        STATE_PATH.write_text(json.dumps(sorted(liked_set)), encoding="utf-8")
+    except OSError as err:
+        print(f"  ⚠️已赞集合写盘失败（不影响本次点赞）: {err}", flush=True)
+
+
+def resolve_real_liked(oid, rpid):
+    """以我们主评论的 rpid 为 root 查楼中楼，读该条的真实点赞状态。
+
+    返回 True=已赞 False=未赞 None=查不到（复核失败宁漏勿撤）。
+    msgfeed 条目里的 root_id=0 无效，直接查 detail 会拿到顶层列表而漏掉楼中楼。
+    """
+    try:
+        root = our_root_rpid_cache.get(oid)
+        if not root:
+            m_bv = re.search(r"/video/(BV[0-9A-Za-z]{10})", item_uri.get(oid, ""))
+            if not m_bv:
+                return None
+            own_c = bili_comment.find_own_comment(m_bv.group(1), cookies)
+            if not own_c:
+                return None
+            root = our_root_rpid_cache[oid] = own_c.rpid
+        detail_url = (
+            f"https://api.bilibili.com/x/v2/reply/reply?type=1"
+            f"&oid={oid}&root={root}&ps=49&pn=1"
+        )
+        req_d = urllib.request.Request(detail_url, headers=headers)
+        with urllib.request.urlopen(req_d, timeout=30) as resp_d:
+            dd = json.loads(resp_d.read().decode("utf-8"))
+        for rp in ((dd.get("data") or {}).get("replies")) or []:
+            if rp.get("rpid") == rpid:
+                return ((rp.get("reaction") or {}).get("status") == 1) or (rp.get("action") == 1)
+        return None
+    except Exception as detail_err:  # noqa: BLE001
+        print(f"  ⚠️状态复核失败 rpid={rpid}: {detail_err}", flush=True)
+        return None
+
+
+def send_like(oid, rpid):
+    payload = {"oid": oid, "type": 1, "rpid": rpid, "action": 1, "csrf": csrf}
+    body = urllib.parse.urlencode(payload).encode()
+    req2 = urllib.request.Request(
+        "https://api.bilibili.com/x/v2/reply/action",
+        data=body,
+        headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req2, timeout=30) as resp2:
+        return json.loads(resp2.read().decode("utf-8"))
+
+
+try:
+    from yt_comment_automation import notify
+    RUN_TS = notify.beijing_now()
+except Exception:  # noqa: BLE001
+    RUN_TS = time.strftime("%Y-%m-%d %H:%M:%S")
+print(f"==== 点赞任务 run {RUN_TS} ====", flush=True)
 
 # 1. 消息中心「回复我的」第一页
 req = urllib.request.Request(
@@ -44,107 +110,80 @@ with urllib.request.urlopen(req, timeout=30) as resp:
 items = (data.get("data") or {}).get("items") or []
 print(f"第一页消息: {len(items)} 条", flush=True)
 
+item_uri = {}
+for it in items:
+    ii = it.get("item") or {}
+    if ii.get("subject_id") is not None:
+        item_uri[ii["subject_id"]] = ii.get("uri", "")
+
 liked, skipped_liked, skipped_self, failed = [], [], [], []
 for it in items:
-    replyer = (it.get("user") or {}).get("mid")
+    replyer = str((it.get("user") or {}).get("mid") or "")
     item = it.get("item") or {}
-    if replyer == MY_MID:
-        skipped_self.append(item.get("source_content", ""))
-        continue
+    content = item.get("source_content", "")
     rpid = item.get("source_id")
-    if item.get("like_state", 0) != 0 or rpid in liked_set:
-        # like_state 有缓存延迟（误报已赞导致漏赞）。这些回复是对我们主评论的楼中楼，
-        # 查真实状态必须以「我们主评论的 rpid」为 root（消息里的 root_id=0 无效，
-        # 用它查 detail 返回的是顶层评论列表，永远找不到楼中楼 → 全部误跳过漏赞）。
-        real_liked = None
-        try:
-            oid = item.get("subject_id")
-            root = our_root_rpid_cache.get(oid)
-            if not root:
-                m_bv = re.search(r"/video/(BV[0-9A-Za-z]{10})", item.get("uri", ""))
-                if m_bv:
-                    own_c = bili_comment.find_own_comment(m_bv.group(1), cookies)
-                    if own_c:
-                        root = our_root_rpid_cache[oid] = own_c.rpid
-            if root:
-                detail_url = (
-                    f"https://api.bilibili.com/x/v2/reply/reply?type=1"
-                    f"&oid={oid}&root={root}&ps=49&pn=1"
-                )
-                req_d = urllib.request.Request(detail_url, headers=headers)
-                with urllib.request.urlopen(req_d, timeout=30) as resp_d:
-                    dd = json.loads(resp_d.read().decode("utf-8"))
-                for rp in ((dd.get("data") or {}).get("replies")) or []:
-                    if rp.get("rpid") == rpid:
-                        real_liked = ((rp.get("reaction") or {}).get("status") == 1) or (
-                            rp.get("action") == 1
-                        )
-                        break
-        except Exception as detail_err:  # noqa: BLE001
-            print(f"  ⚠️状态复核失败 rpid={rpid}: {detail_err}", flush=True)
-        if real_liked is False and rpid not in liked_set:
-            # 仅在服务端确认未赞时才补赞（复核失败/找不到时跳过——
-            # toggle 机制下对已赞条目再发 action 会取消赞，宁漏勿撤）
-            print(f"  ↻复核发现漏赞 rpid={rpid}，补赞", flush=True)
-        else:
-            skipped_liked.append(item.get("source_content", ""))
-            if real_liked is True and rpid not in liked_set:
-                liked_set.add(rpid)  # 同步服务端真实已赞状态进本地集合
-                try:
-                    STATE_PATH.write_text(json.dumps(sorted(liked_set)), encoding="utf-8")
-                except OSError:
-                    pass
-    payload = {
-        "oid": item.get("subject_id"),
-        "type": 1,
-        "rpid": rpid,
-        "action": 1,
-        "csrf": csrf,
-    }
-    body = urllib.parse.urlencode(payload).encode()
-    req2 = urllib.request.Request(
-        "https://api.bilibili.com/x/v2/reply/action",
-        data=body,
-        headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
+    oid = item.get("subject_id")
+
+    # 自己的回复：排除并落日志（mid 一律按字符串比较）
+    if replyer == OWNER_MID:
+        skipped_self.append(content)
+        print(f"  ⊘自己排除 mid={replyer} {content[:30]!r}", flush=True)
+        continue
+
+    if rpid in liked_set or item.get("like_state", 0) != 0:
+        # 可能已赞：先复核真实状态，确认未赞才补，其余跳过（绝不盲发 action）
+        real = resolve_real_liked(oid, rpid)
+        if real is True:
+            skipped_liked.append(content)
+            if rpid not in liked_set:
+                liked_set.add(rpid)
+                save_liked_set()
+            print(f"  =已赞跳过 rpid={rpid} {content[:30]!r}", flush=True)
+            continue
+        if real is None:
+            skipped_liked.append(content)
+            print(f"  ?复核不到按跳过(宁漏勿撤) rpid={rpid} {content[:30]!r}", flush=True)
+            continue
+        print(f"  ↻复核确认未赞，补赞 rpid={rpid} {content[:30]!r}", flush=True)
+
+    # 真正点赞（新回复，或复核确认未赞）
     try:
-        with urllib.request.urlopen(req2, timeout=30) as resp2:
-            r = json.loads(resp2.read().decode("utf-8"))
+        r = send_like(oid, rpid)
         if r.get("code") == 0:
-            liked.append((payload["rpid"], item.get("source_content", "")[:40]))
-            liked_set.add(payload["rpid"])
-            try:
-                STATE_PATH.write_text(json.dumps(sorted(liked_set)), encoding="utf-8")
-            except OSError as state_err:  # noqa: BLE001
-                print(f"  ⚠️已赞集合写盘失败（不影响本次点赞）: {state_err}", flush=True)
-            print(f"  ✓赞 rpid={payload['rpid']} {item.get('source_content','')[:30]!r}", flush=True)
+            liked.append((rpid, content[:40]))
+            liked_set.add(rpid)
+            save_liked_set()
+            print(f"  ✓赞 rpid={rpid} {content[:30]!r}", flush=True)
         else:
-            failed.append((payload["rpid"], r.get("code"), r.get("message")))
-            print(f"  ✗失败 rpid={payload['rpid']} code={r.get('code')} {r.get('message')}", flush=True)
+            failed.append((rpid, r.get("code"), r.get("message")))
+            print(f"  ✗失败 rpid={rpid} code={r.get('code')} {r.get('message')}", flush=True)
     except Exception as err:  # noqa: BLE001
-        failed.append((payload.get("rpid"), "EXC", str(err)[:60]))
+        failed.append((rpid, "EXC", str(err)[:60]))
         print(f"  ✗异常 {err}", flush=True)
-    time.sleep(8)  # 频控：后两条曾失败，8 秒/个
+    time.sleep(8)  # 频控：每个真实点赞间隔 8 秒（跳过的不消耗间隔）
 
 print(flush=True)
 summary = f"汇总: 点赞 {len(liked)} | 已赞跳过 {len(skipped_liked)} | 自己排除 {len(skipped_self)} | 失败 {len(failed)}"
 print(summary, flush=True)
+print("-- 已赞跳过明细（仅日志）--", flush=True)
+for c in skipped_liked:
+    print(f"   {c[:40]!r}", flush=True)
+print("-- 自己排除明细（仅日志）--", flush=True)
+for c in skipped_self:
+    print(f"   {c[:40]!r}", flush=True)
 
 # 飞书通知（有点赞动作才发；纯跳过不打扰）
 if liked:
     try:
-        from yt_comment_automation import notify
-        detail = chr(10).join(f"👍 {c}" for _, c in liked)
+        detail = chr(10).join(c for _, c in liked)
         if failed:
             detail += chr(10) + f"⚠️失败 {len(failed)} 条"
-        brief_lines = [
+        brief = chr(10).join([
             "👍粉丝回复点赞",
-            f"{summary}",
+            summary,
             detail,
             f"时间：{notify.beijing_now()}",
-        ]
-        brief = chr(10).join(brief_lines)
+        ])
         ok, note = notify.send_feishu_message(brief)
         print(f"飞书: {ok} {note}", flush=True)
     except Exception as err:  # noqa: BLE001
