@@ -1,6 +1,7 @@
 """给消息中心「回复我的」第一页粉丝回复点赞（已赞跳过，自己回复排除）。"""
 import json
 import sys
+import time
 import urllib.parse
 import urllib.request
 
@@ -72,7 +73,10 @@ for it in items:
         if r.get("code") == 0:
             liked.append((payload["rpid"], item.get("source_content", "")[:40]))
             liked_set.add(payload["rpid"])
-            STATE_PATH.write_text(json.dumps(sorted(liked_set)), encoding="utf-8")
+            try:
+                STATE_PATH.write_text(json.dumps(sorted(liked_set)), encoding="utf-8")
+            except OSError as state_err:  # noqa: BLE001
+                print(f"  ⚠️已赞集合写盘失败（不影响本次点赞）: {state_err}", flush=True)
             print(f"  ✓赞 rpid={payload['rpid']} {item.get('source_content','')[:30]!r}", flush=True)
         else:
             failed.append((payload["rpid"], r.get("code"), r.get("message")))
