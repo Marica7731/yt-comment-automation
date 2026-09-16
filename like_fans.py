@@ -51,8 +51,32 @@ for it in items:
         continue
     rpid = item.get("source_id")
     if item.get("like_state", 0) != 0 or rpid in liked_set:
-        skipped_liked.append(item.get("source_content", ""))
-        continue
+        # like_state 有缓存延迟（误报已赞导致漏赞），用 detail 接口查服务端真实状态
+        real_liked = None
+        try:
+            root_id = item.get("root_id") or 0
+            detail_url = (
+                f"https://api.bilibili.com/x/v2/reply/detail?type=1"
+                f"&oid={item.get('subject_id')}&root={root_id}&ps=20&pn=1"
+            )
+            req_d = urllib.request.Request(detail_url, headers=headers)
+            with urllib.request.urlopen(req_d, timeout=30) as resp_d:
+                dd = json.loads(resp_d.read().decode("utf-8"))
+            replies = ((dd.get("data") or {}).get("replies")) or []
+            for rp in replies:
+                if rp.get("rpid") == rpid:
+                    reaction = (rp.get("reaction") or {})
+                    real_liked = reaction.get("status") == 1
+                    break
+        except Exception as detail_err:  # noqa: BLE001
+            print(f"  ⚠️状态复核失败 rpid={rpid}: {detail_err}", flush=True)
+        if real_liked is False and rpid not in liked_set:
+            # 仅在服务端确认未赞时才补赞（复核失败/找不到时跳过——
+            # toggle 机制下对已赞条目再发 action 会取消赞，宁漏勿撤）
+            print(f"  ↻复核发现漏赞 rpid={rpid}，补赞", flush=True)
+        else:
+            skipped_liked.append(item.get("source_content", ""))
+            continue
     payload = {
         "oid": item.get("subject_id"),
         "type": 1,
@@ -84,7 +108,7 @@ for it in items:
     except Exception as err:  # noqa: BLE001
         failed.append((payload.get("rpid"), "EXC", str(err)[:60]))
         print(f"  ✗异常 {err}", flush=True)
-    time.sleep(6)  # 频控：每分钟最多 10 个点赞，6 秒/个最稳
+    time.sleep(8)  # 频控：后两条曾失败，8 秒/个
 
 print(flush=True)
 summary = f"汇总: 点赞 {len(liked)} | 已赞跳过 {len(skipped_liked)} | 自己排除 {len(skipped_self)} | 失败 {len(failed)}"
@@ -94,16 +118,16 @@ print(summary, flush=True)
 if liked:
     try:
         from yt_comment_automation import notify
-        detail = chr(10).join(f"· {c}" for _, c in liked[:10])
-        more = chr(10) + f"…等共 {len(liked)} 条" if len(liked) > 10 else ""
+        detail = chr(10).join(f"👍 {c}" for _, c in liked)
         if failed:
             detail += chr(10) + f"⚠️失败 {len(failed)} 条"
-        brief = chr(10).join([
-            "❤️粉丝回复点赞",
+        brief_lines = [
+            "👍粉丝回复点赞",
             f"{summary}",
-            detail + more,
+            detail,
             f"时间：{notify.beijing_now()}",
-        ])
+        ]
+        brief = chr(10).join(brief_lines)
         ok, note = notify.send_feishu_message(brief)
         print(f"飞书: {ok} {note}", flush=True)
     except Exception as err:  # noqa: BLE001
