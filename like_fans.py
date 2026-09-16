@@ -76,7 +76,12 @@ for it in items:
             print(f"  ↻复核发现漏赞 rpid={rpid}，补赞", flush=True)
         else:
             skipped_liked.append(item.get("source_content", ""))
-            continue
+            if real_liked is True and rpid not in liked_set:
+                liked_set.add(rpid)  # 同步服务端真实已赞状态进本地集合
+                try:
+                    STATE_PATH.write_text(json.dumps(sorted(liked_set)), encoding="utf-8")
+                except OSError:
+                    pass
     payload = {
         "oid": item.get("subject_id"),
         "type": 1,
