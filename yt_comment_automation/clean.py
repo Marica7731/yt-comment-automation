@@ -326,6 +326,9 @@ def strip_leading_song_context_marker(text: str) -> str:
 def strip_leading_serial_marker(text: str) -> str:
     t = normalize_timeline_marker_chars(text or "").strip()
     patterns = [
+        # 原文自带编号剥除（防双重编号「14.14.歌名」）：编号后（可隔空格）须紧跟文字，
+        # 「8.8」「4.3.2.1」这类数字歌名（编号后是数字）不受影响。
+        re.compile(r"^\d{1,3}[.)．。]\s*(?=(?:\d{1,3}[.)．。]\s*)?[A-Za-zぁ-んァ-ヶ一-龯々])"),
         re.compile(r"^Re\s*[:：]\s*(?![A-Za-z])", re.IGNORECASE),
         re.compile(r"^【\s*\d{1,3}\s*】\s*"),
         re.compile(r"^[⟦〚]\s*\d{1,3}\s*[⟧〛]\s*"),
@@ -765,8 +768,8 @@ def _looks_like_bare_song_title(text: str, source_line: str = "") -> bool:
     # 1-3 字符纯平假名是助词/残片（まで、から），不是歌名
     if re.fullmatch(r"[ぁ-ん]{1,3}", t):
         return False
-    # 纯数字/符号/单字符假名不算
-    if not re.search(r"[A-Za-z0-9ぁ-んァ-ヶ一-龯々]{2,}", t):
+    # 纯数字/符号/单字符假名不算（点分数字歌名「8.8」算）
+    if not re.search(r"[A-Za-z0-9][.．。]?[A-Za-z0-9]|[A-Za-zぁ-んァ-ヶ一-龯々]{2,}", t):
         return False
     return True
 

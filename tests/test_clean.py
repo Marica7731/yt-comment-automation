@@ -188,3 +188,15 @@ def test_fullwidth_bracket_timestamp_setlist():
     assert items[0].song == "clock lock works"
     assert items[0].artist == "ハチ"
     assert items[0].timestamp_seconds == 910  # 15:10
+
+
+def test_dotted_numeric_song_names():
+    """点分数字歌名（8.8/4.3.2.1）正确保留；原文自带编号剥除不误伤数字歌名。"""
+    a = clean.parse_song_line_after_timestamp("0:03:55 8.8")
+    assert a is not None and a.song == "8.8"
+    b = clean.parse_song_line_after_timestamp("0:03:55 4.3.2.1")
+    assert b is not None and b.song == "4.3.2.1"
+    c = clean.parse_song_line_after_timestamp("1:50:07　14.あなたの夜が明けるまで(-5キー)")
+    assert c is not None and c.song == "あなたの夜が明けるまで(-5キー)"
+    d = clean.parse_song_line_after_timestamp("1:50:07 14. 14.あなたの夜が明けるまで(-5キー)")
+    assert d is not None and d.song == "あなたの夜が明けるまで(-5キー)"
