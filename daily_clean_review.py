@@ -63,31 +63,52 @@ def load_source_lines(yt_id: str) -> list[str]:
     return list(dict.fromkeys(lines))
 
 
+def _norm(s: str) -> str:
+    """归一：去空白、去掉分隔符（源用 / 发布用 - 等）、casefold。"""
+    s = re.sub(r"\s+", "", s or "")
+    s = re.sub(r"[-–—/／｜|]", "", s)
+    return s.casefold()
+
+
 def dropped_source_lines(source_lines: list[str], message: str) -> list[str]:
-    """源行的时间戳与行内文字都未出现在发布内容中 → 视为被洗掉。"""
+    """源行的时间戳与歌名文字都未出现在发布内容中 → 视为被洗掉。
+
+    缓存可能合并同一 SETLIST 的多个版本（同歌不同时间戳、/ 与 - 分隔符差异），
+    所以歌名（含歌手整体、或仅歌名段）命中即算保留，时间戳只作兜底。
+    """
     if not message:
         return []
     msg_ts = msg_seconds_set(message)
-    msg_flat = re.sub(r"\s+", "", message)
+    msg_norm = _norm(message)
     dropped = []
     for ln in source_lines:
         m = TS_RE.search(ln)
-        rest = TS_RE.sub("", ln, count=1)
+        rest = TS_RE.sub("", ln, count=0)
+        rest = re.sub(r"^\s*[;；,，]?\s*", "", rest)
         rest = re.sub(r"^\s*\d{1,3}[.．。、)]\s*", "", rest).strip()  # 去序号
-        rest_flat = re.sub(r"\s+", "", rest)
-        ts_hit = m and ts_to_seconds(m.group()) in msg_ts
-        text_hit = len(rest_flat) >= 2 and rest_flat in msg_flat
-        short_hit = len(rest_flat) < 2 and rest_flat and rest_flat in msg_flat  # 单字歌名按字面找
-        if not ts_hit and not text_hit and not short_hit:
+        rest_norm = _norm(rest)
+        title_norm = _norm(re.split(r"[-–—/／｜|]", rest)[0])
+        ts_hit = bool(m) and ts_to_seconds(m.group()) in msg_ts
+        full_hit = len(rest_norm) >= 2 and rest_norm in msg_norm
+        title_hit = len(title_norm) >= 1 and title_norm in msg_norm
+        if not ts_hit and not full_hit and not title_hit:
             dropped.append(ln)
     return dropped
 
 
 def main() -> int:
-    since = datetime.now() - timedelta(hours=24)
+    since = datetime.now() - timedelta(hours=25)
     posted_rows: dict[str, dict] = {}  # bvid → 最新一条 posted 记录
     checked, run_files = 0, 0
     for path in sorted(glob.glob(os.path.join(DATA_DIR, "run_*.json"))):
+        # 文件名 run_YYYY-MM-DDT...：早于窗口的直接跳过（文件多时不必全读）
+        m_date = re.search(r"run_(\d{4}-\d{2}-\d{2})", os.path.basename(path))
+        if m_date:
+            try:
+                if datetime.strptime(m_date.group(1), "%Y-%m-%d") < since:
+                    continue
+            except ValueError:
+                pass
         try:
             rec = json.load(open(path, encoding="utf-8"))
         except (OSError, ValueError):
@@ -127,7 +148,9 @@ def main() -> int:
                 print(f"⚠️ {bvid} 读自己评论失败: {err}", flush=True)
         src = load_source_lines(yt_id) if yt_id else []
         dropped = dropped_source_lines(src, message)
-        head = f"[{bvid}] {row.get('title', '')[:40]}（源{len(src)}行 → 发{row.get('song_count', '?')}首）"
+        # 显示用发布首数：优先实际发布内容的行数，run json 的 song_count 可能滞后
+        actual_count = len([x for x in (message or "").splitlines() if TS_RE.search(x)])
+        head = f"[{bvid}] {row.get('title', '')[:40]}（源{len(src)}行 → 发{actual_count or row.get('song_count', '?')}首）"
         if dropped:
             issues.append((head, dropped))
             print(f"⚠️ {head} 缺失 {len(dropped)} 行", flush=True)
