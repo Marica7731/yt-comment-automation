@@ -49,31 +49,45 @@ def save_liked_set():
 
 
 def resolve_real_liked(oid, rpid):
-    """以我们主评论的 rpid 为 root 查楼中楼，读该条的真实点赞状态。
+    """读该条评论的真实点赞状态。
 
-    返回 True=已赞 False=未赞 None=查不到（复核失败宁漏勿撤）。
-    msgfeed 条目里的 root_id=0 无效，直接查 detail 会拿到顶层列表而漏掉楼中楼。
+    粉丝回复多为视频顶层评论（msgfeed 聚合只显示最新一条），所以先查视频
+    顶层评论列表（action/reaction 是活字段），查不到再兜底查我们主评论楼中楼。
+    返回 True=已赞 False=未赞 None=两处都查不到（复核失败宁漏勿撤）。
     """
     try:
+        for pn in (1, 2, 3):
+            list_url = (
+                f"https://api.bilibili.com/x/v2/reply?type=1&oid={oid}"
+                f"&sort=2&ps=20&pn={pn}"
+            )
+            req_d = urllib.request.Request(list_url, headers=headers)
+            with urllib.request.urlopen(req_d, timeout=30) as resp_d:
+                dd = json.loads(resp_d.read().decode("utf-8"))
+            replies = (dd.get("data") or {}).get("replies") or []
+            for rp in replies:
+                if rp.get("rpid") == rpid:
+                    return ((rp.get("reaction") or {}).get("status") == 1) or (rp.get("action") == 1)
+            if len(replies) < 20:
+                break
         root = our_root_rpid_cache.get(oid)
         if not root:
             m_bv = re.search(r"/video/(BV[0-9A-Za-z]{10})", item_uri.get(oid, ""))
-            if not m_bv:
-                return None
-            own_c = bili_comment.find_own_comment(m_bv.group(1), cookies)
-            if not own_c:
-                return None
-            root = our_root_rpid_cache[oid] = own_c.rpid
-        detail_url = (
-            f"https://api.bilibili.com/x/v2/reply/reply?type=1"
-            f"&oid={oid}&root={root}&ps=49&pn=1"
-        )
-        req_d = urllib.request.Request(detail_url, headers=headers)
-        with urllib.request.urlopen(req_d, timeout=30) as resp_d:
-            dd = json.loads(resp_d.read().decode("utf-8"))
-        for rp in ((dd.get("data") or {}).get("replies")) or []:
-            if rp.get("rpid") == rpid:
-                return ((rp.get("reaction") or {}).get("status") == 1) or (rp.get("action") == 1)
+            if m_bv:
+                own_c = bili_comment.find_own_comment(m_bv.group(1), cookies)
+                if own_c:
+                    root = our_root_rpid_cache[oid] = own_c.rpid
+        if root:
+            detail_url = (
+                f"https://api.bilibili.com/x/v2/reply/reply?type=1"
+                f"&oid={oid}&root={root}&ps=49&pn=1"
+            )
+            req_d = urllib.request.Request(detail_url, headers=headers)
+            with urllib.request.urlopen(req_d, timeout=30) as resp_d:
+                dd = json.loads(resp_d.read().decode("utf-8"))
+            for rp in ((dd.get("data") or {}).get("replies")) or []:
+                if rp.get("rpid") == rpid:
+                    return ((rp.get("reaction") or {}).get("status") == 1) or (rp.get("action") == 1)
         return None
     except Exception as detail_err:  # noqa: BLE001
         print(f"  ⚠️状态复核失败 rpid={rpid}: {detail_err}", flush=True)
