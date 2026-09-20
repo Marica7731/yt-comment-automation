@@ -177,6 +177,56 @@ for it in items:
     time.sleep(8)  # 频控：每个真实点赞间隔 8 秒（跳过的不消耗间隔）
 
 print(flush=True)
+
+# 2. 评论区补扫：折叠评论（纯表情等）可能不进消息列表，msgfeed 聚合也只显示
+#    同会话最新一条——对涉及视频的评论区直接扫一遍，未赞的粉丝评论补赞。
+video_oids = {}
+for it in items:
+    ii = it.get("item") or {}
+    m_bv = re.search(r"/video/(BV[0-9A-Za-z]{10})", ii.get("uri", ""))
+    if m_bv and ii.get("subject_id") is not None:
+        video_oids[m_bv.group(1)] = ii["subject_id"]
+for bvid, oid in video_oids.items():
+    for pn in (1, 2, 3):
+        try:
+            sweep_url = (
+                f"https://api.bilibili.com/x/v2/reply?type=1&oid={oid}"
+                f"&sort=2&ps=20&pn={pn}"
+            )
+            req3 = urllib.request.Request(sweep_url, headers=headers)
+            with urllib.request.urlopen(req3, timeout=30) as resp3:
+                d3 = json.loads(resp3.read().decode("utf-8"))
+        except Exception as sweep_err:  # noqa: BLE001
+            print(f"  ⚠️评论区读取失败 {bvid} pn={pn}: {sweep_err}", flush=True)
+            break
+        replies = (d3.get("data") or {}).get("replies") or []
+        for rp in replies:
+            mid2 = str((rp.get("member") or {}).get("mid") or "")
+            rpid2 = rp.get("rpid")
+            content2 = (rp.get("content") or {}).get("message", "")
+            if mid2 == OWNER_MID:
+                continue
+            if rpid2 in liked_set or rp.get("action") == 1:
+                continue
+            try:
+                r = send_like(oid, rpid2)
+            except Exception as err2:  # noqa: BLE001
+                failed.append((rpid2, "EXC", str(err2)[:60]))
+                print(f"  ✗异常(评论区补扫 {bvid}) {err2}", flush=True)
+                time.sleep(8)
+                continue
+            if r.get("code") == 0:
+                liked.append((rpid2, content2[:40]))
+                liked_set.add(rpid2)
+                save_liked_set()
+                print(f"  ✓赞(评论区补扫 {bvid}) rpid={rpid2} {content2[:30]!r}", flush=True)
+            else:
+                failed.append((rpid2, r.get("code"), r.get("message")))
+                print(f"  ✗失败(评论区补扫 {bvid}) rpid={rpid2} code={r.get('code')} {r.get('message')}", flush=True)
+            time.sleep(8)
+        if len(replies) < 20:
+            break
+
 summary = f"汇总: 点赞 {len(liked)} | 已赞跳过 {len(skipped_liked)} | 自己排除 {len(skipped_self)} | 失败 {len(failed)}"
 print(summary, flush=True)
 print("-- 已赞跳过明细（仅日志）--", flush=True)
