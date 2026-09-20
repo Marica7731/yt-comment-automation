@@ -1199,10 +1199,11 @@ def format_song_items(items: list[ParsedSong], include_timestamps: bool = False)
 
 
 def build_comment_songlist_ranked(comment_texts: list[str], description: str = "") -> list[list[ParsedSong]]:
-    """多来源提取，按「条数 + 带歌手数」降序返回全部候选来源。
+    """多来源提取，按歌曲信号强度降序返回全部候选来源。
 
-    最优来源可能整体是非歌（如活动成员时段表，条数多但全是人名），
-    上层需要逐个候选尝试（语义判定后非空才采用）。
+    排序依据：带歌手数 > 秒级时间戳数（H:MM:SS 两条时间轴特征）> 条数。
+    活动接力时段表（18:00〜18:30　出场者）条数多但没有歌手、时间戳是钟点格式，
+    信号最弱——之前按条数排它反而压过真歌单（BV1KUez6kEzN 事故）。
     """
     all_texts = [t for t in comment_texts if t and t.strip()] + ([description] if description and description.strip() else [])
     sources: list[list[ParsedSong]] = []
@@ -1210,7 +1211,14 @@ def build_comment_songlist_ranked(comment_texts: list[str], description: str = "
         songs = dedupe_song_items_by_timestamp_and_identity(extract_plain_songs_from_source_timeline(text))
         if songs:
             sources.append(songs)
-    sources.sort(key=lambda songs: (len(songs), sum(1 for s in songs if s.artist)), reverse=True)
+    sources.sort(
+        key=lambda songs: (
+            sum(1 for s in songs if s.artist),
+            sum(1 for s in songs if (s.timestamp_label or "").count(":") >= 2),
+            len(songs),
+        ),
+        reverse=True,
+    )
     return sources
 
 
