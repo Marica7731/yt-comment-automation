@@ -195,6 +195,34 @@ def _looks_like_song_line_rest(rest: str) -> bool:
     return True
 
 
+# 同一视频重抓间隔控制（按"两次抓取的间隔"，不是轮次间隔——YouTube 风控
+# 看的是同一视频被反复请求的频率）：
+NEW_VIDEO_DAYS = 2  # B站投稿 ≤2 天 = 新视频，保持每轮抓（歌单常延迟出现）
+OLD_VIDEO_REFETCH_HOURS = 12  # 老视频同一视频至少间隔 12 小时才再抓
+
+
+def _refetch_gate(cache_dir, yt_id: str, part_date: str) -> tuple[float, float]:
+    """返回 (该视频要求的最小重抓间隔秒数, 距上次抓取的秒数)。
+
+    新视频 → (0, 0) 不设限；老视频 → 12 小时。上次抓取时间取缓存文件
+    mtime（只用元数据算间隔，不用缓存内容顶替抓取）。没抓过 → age=inf 必抓。
+    """
+    if part_date:
+        try:
+            import datetime as _dt
+
+            new = (_dt.date.today() - _dt.date.fromisoformat(part_date)).days <= NEW_VIDEO_DAYS
+        except ValueError:
+            new = False
+        if new:
+            return 0.0, 0.0
+    cache_path = Path(cache_dir) / f"{yt_id}.info.json"
+    if not cache_path.is_file():
+        return OLD_VIDEO_REFETCH_HOURS * 3600.0, float("inf")
+    age = time.time() - cache_path.stat().st_mtime
+    return OLD_VIDEO_REFETCH_HOURS * 3600.0, age
+
+
 def is_junk_song_title(song: str) -> bool:
     """是否脏歌名：直播拟声/碎片（ｺｯ、ﾋﾟﾖ、ｳﾝ、単音 コ/ッ）被误当歌。
 
@@ -357,12 +385,21 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     result.desc_profile = notify.extract_desc_profile(desc)
 
     # 3. 抓取 YouTube 评论 + 简介
-    #    缓存策略：
-    #    - 未发布：读缓存 → 无歌单则 force 重抓（直到评论区出现歌单）
-    #    - 升级模式：缓存按 TTL 过期（避免每次 cron 都重抓已发视频）
-    #    - 429 冷却：命中限流后 30 分钟内跳过抓取（不读缓存顶替——缓存会盖住
-    #      歌单刚出现的窗口，违背"抓新内容"的使命；本轮直接跳过，下轮再抓）
+    #    抓取频率按"同一视频两次抓取的间隔"控制（不是轮次间隔）：
+    #    - 新视频（B站投稿 ≤2 天）：保持每轮抓（歌单常延迟出现）
+    #    - 老视频：同一视频至少间隔 12 小时（上次抓取时间=缓存 mtime，只用
+    #      元数据算间隔，不用缓存内容顶替）
+    #    - 429 冷却：命中限流后 30 分钟内跳过抓取（紧急刹车）
     try:
+        gate_interval, gate_age = _refetch_gate(cache_dir, yt_id, video.part_date)
+        if gate_interval and gate_age < gate_interval:
+            logger.info(
+                "[%s] 老视频距上次抓取 %.1f 小时（ <%d 小时），本轮跳过",
+                video.bvid, gate_age / 3600, gate_interval // 3600,
+            )
+            result.status = "skipped_no_songs"
+            result.error = f"老视频距上次抓取不足 {gate_interval // 3600} 小时，本轮跳过"
+            return result
         cooldown_s = yt_fetch.cooldown_remaining(cache_dir)
         if cooldown_s > 0:
             logger.info("[%s] YouTube 429 冷却中（剩 %.0f 秒），本轮跳过抓取", video.bvid, cooldown_s)
