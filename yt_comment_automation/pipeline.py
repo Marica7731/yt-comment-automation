@@ -389,7 +389,8 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    - 新视频（B站投稿 ≤2 天）：保持每轮抓（歌单常延迟出现）
     #    - 老视频：同一视频至少间隔 12 小时（上次抓取时间=缓存 mtime，只用
     #      元数据算间隔，不用缓存内容顶替）
-    #    - 429 冷却：命中限流后 30 分钟内跳过抓取（紧急刹车）
+    #    请求节奏：全局任意两次 YouTube 请求间隔 ≥2 秒（yt_fetch 内置节流）；
+    #    429 重试最多 5 次，任一次成功直接放行，全失败报错跳过该视频。
     try:
         gate_interval, gate_age = _refetch_gate(cache_dir, yt_id, video.part_date)
         if gate_interval and gate_age < gate_interval:
@@ -400,13 +401,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             result.status = "skipped_no_songs"
             result.error = f"老视频距上次抓取不足 {gate_interval // 3600} 小时，本轮跳过"
             return result
-        cooldown_s = yt_fetch.cooldown_remaining(cache_dir)
-        if cooldown_s > 0:
-            logger.info("[%s] YouTube 429 冷却中（剩 %.0f 秒），本轮跳过抓取", video.bvid, cooldown_s)
-            result.status = "skipped_no_songs"
-            result.error = f"YouTube 429 冷却中（剩 {cooldown_s:.0f} 秒），本轮跳过抓取"
-            return result
-        elif upgrade_mode:
+        if upgrade_mode:
             # 已发低质量评论的复查必须看最新评论区（否则读旧数据 → already_posted 死循环）。
             # 频率按 B站发布时间分级（part_date 已有，零额外请求）：
             # 一周内新投稿歌单常延迟出现 → 每轮 force 重抓；更早的老投稿 → 2 小时一次。
@@ -430,9 +425,8 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     except Exception as err:  # noqa: BLE001
         result.status = "error"
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"
-        # YouTube 限流（429）→ 标记 30 分钟冷却 + 飞书提醒（一轮只提醒一次）
+        # 429 重试 5 次后仍失败 → 飞书提醒（一轮只提醒一次）
         if yt_fetch.is_rate_limited_error(err):
-            yt_fetch.mark_cooldown(cache_dir)
             if not _yt_rate_limited_notified:
                 _yt_rate_limited_notified.add(video.bvid)
                 try:

@@ -48,46 +48,53 @@ def _headers() -> dict[str, str]:
     }
 
 
-def _urlopen_with_retry(req: urllib.request.Request, retries: int = 2):
+# 全局请求节流：任意两次对 YouTube 的请求之间至少隔这个秒数。
+# 风控看的是请求突发速率——之前视频内 7 个请求、视频之间零间隔连发，
+# 100 秒 50-70 发必触发 429。
+REQUEST_MIN_GAP_SECONDS = 2.0
+_last_request_at = [0.0]
+
+
+def _throttle():
+    wait = REQUEST_MIN_GAP_SECONDS - (time.time() - _last_request_at[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last_request_at[0] = time.time()
+
+
+def _urlopen_with_retry(req: urllib.request.Request, retries: int = 5):
+    """请求前全局节流；429/5xx 最多重试 retries 次，任一次成功直接放行。
+
+    退避：有 Retry-After 按它（上限 60 秒），否则指数 2/4/8/16/30 秒。
+    重试次数用尽仍失败 → 抛出最后一个异常（该视频本轮报错，不连坐其他视频）。
+    """
+    backoff = [2.0, 4.0, 8.0, 16.0, 30.0]
+    last_exc: Exception | None = None
     for attempt in range(retries + 1):
+        _throttle()
         try:
             return urllib.request.urlopen(req, timeout=20)
         except urllib.error.HTTPError as exc:  # noqa: PERF203
-            if exc.code == 429:
-                # 429 立即上抛：几秒内重试只会加深限流，冷却交给上层（pipeline 标记 30 分钟）
+            if exc.code not in {429, 500, 502, 503, 504} or attempt >= retries:
                 raise
-            if attempt >= retries or exc.code not in {500, 502, 503, 504}:
-                raise
+            last_exc = exc
             retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            delay = None
             if retry_after:
                 try:
-                    time.sleep(min(max(float(retry_after), 0.0), 30.0))
-                    continue
+                    delay = min(max(float(retry_after), 0.0), 60.0)
                 except ValueError:
-                    pass
-            time.sleep(min(2.0 * (attempt + 1), 10.0))
-    raise YtFetchError("unreachable urlopen retry state")
-
-
-COOLDOWN_MINUTES = 30
-_COOLDOWN_FILE = "yt_429_cooldown.json"
-
-
-def mark_cooldown(cache_dir: str | Path, minutes: int = COOLDOWN_MINUTES) -> None:
-    """记录 429 冷却截止时间：期间 pipeline 只读缓存不发起抓取，给出口 IP 降温。"""
-    try:
-        payload = json.dumps({"until": time.time() + minutes * 60})
-        (Path(cache_dir) / _COOLDOWN_FILE).write_text(payload, encoding="utf-8")
-    except OSError:
-        pass
-
-
-def cooldown_remaining(cache_dir: str | Path) -> float:
-    try:
-        data = json.loads((Path(cache_dir) / _COOLDOWN_FILE).read_text(encoding="utf-8"))
-        return max(0.0, float(data.get("until", 0)) - time.time())
-    except (OSError, ValueError):
-        return 0.0
+                    delay = None
+            if delay is None:
+                delay = backoff[min(attempt, len(backoff) - 1)]
+            time.sleep(delay)
+        except urllib.error.URLError as exc:  # noqa: PERF203
+            # 网络抖动也纳入重试预算
+            if attempt >= retries:
+                raise
+            last_exc = exc
+            time.sleep(backoff[min(attempt, len(backoff) - 1)])
+    raise last_exc if last_exc else YtFetchError("unreachable urlopen retry state")
 
 
 def _http_get(url: str) -> str:
