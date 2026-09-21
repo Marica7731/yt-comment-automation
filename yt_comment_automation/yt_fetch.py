@@ -53,7 +53,10 @@ def _urlopen_with_retry(req: urllib.request.Request, retries: int = 2):
         try:
             return urllib.request.urlopen(req, timeout=20)
         except urllib.error.HTTPError as exc:  # noqa: PERF203
-            if attempt >= retries or exc.code not in {429, 500, 502, 503, 504}:
+            if exc.code == 429:
+                # 429 立即上抛：几秒内重试只会加深限流，冷却交给上层（pipeline 标记 30 分钟）
+                raise
+            if attempt >= retries or exc.code not in {500, 502, 503, 504}:
                 raise
             retry_after = exc.headers.get("Retry-After") if exc.headers else None
             if retry_after:
@@ -64,6 +67,27 @@ def _urlopen_with_retry(req: urllib.request.Request, retries: int = 2):
                     pass
             time.sleep(min(2.0 * (attempt + 1), 10.0))
     raise YtFetchError("unreachable urlopen retry state")
+
+
+COOLDOWN_MINUTES = 30
+_COOLDOWN_FILE = "yt_429_cooldown.json"
+
+
+def mark_cooldown(cache_dir: str | Path, minutes: int = COOLDOWN_MINUTES) -> None:
+    """记录 429 冷却截止时间：期间 pipeline 只读缓存不发起抓取，给出口 IP 降温。"""
+    try:
+        payload = json.dumps({"until": time.time() + minutes * 60})
+        (Path(cache_dir) / _COOLDOWN_FILE).write_text(payload, encoding="utf-8")
+    except OSError:
+        pass
+
+
+def cooldown_remaining(cache_dir: str | Path) -> float:
+    try:
+        data = json.loads((Path(cache_dir) / _COOLDOWN_FILE).read_text(encoding="utf-8"))
+        return max(0.0, float(data.get("until", 0)) - time.time())
+    except (OSError, ValueError):
+        return 0.0
 
 
 def _http_get(url: str) -> str:

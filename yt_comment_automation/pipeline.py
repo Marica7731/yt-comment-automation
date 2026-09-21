@@ -360,8 +360,20 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    缓存策略：
     #    - 未发布：读缓存 → 无歌单则 force 重抓（直到评论区出现歌单）
     #    - 升级模式：缓存按 TTL 过期（避免每次 cron 都重抓已发视频）
+    #    - 429 冷却：命中限流后 30 分钟内只读缓存不抓取，防止硬砸加深限流
     try:
-        if upgrade_mode:
+        cooldown_s = yt_fetch.cooldown_remaining(cache_dir)
+        if cooldown_s > 0:
+            logger.info("[%s] YouTube 429 冷却中（剩 %.0f 秒），本轮只用缓存", video.bvid, cooldown_s)
+            cache_path = Path(cache_dir) / f"{yt_id}.info.json"
+            if cache_path.is_file():
+                raw = json.loads(cache_path.read_text(encoding="utf-8"))
+            else:
+                result.status = "skipped_no_songs"
+                result.error = "YouTube 429 冷却中且无缓存，本轮跳过抓取"
+                logger.info("[%s] %s", video.bvid, result.error)
+                return result
+        elif upgrade_mode:
             # 已发低质量评论的复查必须看最新评论区（否则读旧数据 → already_posted 死循环）。
             # 频率按 B站发布时间分级（part_date 已有，零额外请求）：
             # 一周内新投稿歌单常延迟出现 → 每轮 force 重抓；更早的老投稿 → 2 小时一次。
@@ -385,15 +397,17 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     except Exception as err:  # noqa: BLE001
         result.status = "error"
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"
-        # YouTube 限流（429）→ 飞书提醒；同一次运行只提醒一次，避免多个视频同时限流刷屏
-        if yt_fetch.is_rate_limited_error(err) and video.bvid not in _yt_rate_limited_notified:
-            _yt_rate_limited_notified.add(video.bvid)
-            try:
-                brief = notify.build_yt_rate_limit_brief(video.bvid, result.error)
-                ok, note = notify.send_feishu_message(brief)
-                logger.info("[%s] 飞书 YouTube 429 通知: %s %s", video.bvid, ok, note)
-            except Exception as notify_err:  # noqa: BLE001
-                logger.warning("[%s] 飞书 YouTube 429 通知失败: %s", video.bvid, notify_err)
+        # YouTube 限流（429）→ 标记 30 分钟冷却 + 飞书提醒（一轮只提醒一次）
+        if yt_fetch.is_rate_limited_error(err):
+            yt_fetch.mark_cooldown(cache_dir)
+            if not _yt_rate_limited_notified:
+                _yt_rate_limited_notified.add(video.bvid)
+                try:
+                    brief = notify.build_yt_rate_limit_brief(video.bvid, result.error)
+                    ok, note = notify.send_feishu_message(brief)
+                    logger.info("[%s] 飞书 YouTube 429 通知: %s %s", video.bvid, ok, note)
+                except Exception as notify_err:  # noqa: BLE001
+                    logger.warning("[%s] 飞书 YouTube 429 通知失败: %s", video.bvid, notify_err)
         return result
 
     comments = [c.get("text", "") for c in raw.get("comments", [])]
