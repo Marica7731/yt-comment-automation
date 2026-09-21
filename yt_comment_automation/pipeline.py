@@ -206,6 +206,11 @@ def is_junk_song_title(song: str) -> bool:
     s = (song or "").strip()
     if not s:
         return True
+    # 超长"歌名"是标题/预告文残片：真歌名几乎不可能超过 40 字符。
+    # （BV1ALha63EuK：YT 简介预告文「…24:00にリベンジします同接555耐久歌枠🔥…/
+    #   アニソン / vsinger / karaoke」整句被解析成 55+ 字的"歌名+歌手"）
+    if len(s) > 40:
+        return True
     base = re.sub(r"[ﾞﾟ]", "", s)
     if re.fullmatch(r"[ｦ-ﾟ]+", s) and len(base) <= 2:
         return True
