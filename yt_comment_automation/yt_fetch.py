@@ -458,6 +458,23 @@ def fetch_youtube_raw(
         },
     }
 
+    # 抓取时间账本：无歌单的抓取不落主缓存（见下），但"同一视频重抓间隔"
+    # 需要知道上次真实抓取时刻——与缓存文件是否存在解耦。
+    if cache_dir:
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            ledger = cache_dir / "fetch_times.json"
+            try:
+                times = json.loads(ledger.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                times = {}
+            times[video_id] = time.time()
+            if len(times) > 500:  # 防无限增长：只留最近 500 个
+                times = dict(sorted(times.items(), key=lambda kv: kv[1], reverse=True)[:500])
+            ledger.write_text(json.dumps(times), encoding="utf-8")
+        except OSError:
+            pass
+
     # 抓取结果无歌单时不落缓存：存了也会被判"有歌单"而长期不重抓（死循环根源）；
     # 调用方每轮会重新抓最新评论区，直到出现歌单为止。
     if not any(c.get("text") for c in raw_info["comments"]):

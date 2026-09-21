@@ -201,11 +201,27 @@ NEW_VIDEO_DAYS = 2  # B站投稿 ≤2 天 = 新视频，保持每轮抓（歌单
 OLD_VIDEO_REFETCH_HOURS = 12  # 老视频同一视频至少间隔 12 小时才再抓
 
 
+def _last_fetch_age(cache_dir, yt_id: str) -> float:
+    """距上次真实抓取的秒数：优先查抓取时间账本（无歌单的抓取不落主缓存，
+    mtime 永远缺失，靠账本才能算出间隔）；无账本记录时回退主缓存 mtime；
+    都没有 = 从没抓过 = inf。"""
+    ledger = Path(cache_dir) / "fetch_times.json"
+    try:
+        ts = json.loads(ledger.read_text(encoding="utf-8")).get(yt_id)
+        if ts:
+            return time.time() - float(ts)
+    except (OSError, ValueError):
+        pass
+    f = Path(cache_dir) / f"{yt_id}.info.json"
+    if f.is_file():
+        return time.time() - f.stat().st_mtime
+    return float("inf")
+
+
 def _refetch_gate(cache_dir, yt_id: str, part_date: str) -> tuple[float, float]:
     """返回 (该视频要求的最小重抓间隔秒数, 距上次抓取的秒数)。
 
-    新视频 → (0, 0) 不设限；老视频 → 12 小时。上次抓取时间取缓存文件
-    mtime（只用元数据算间隔，不用缓存内容顶替抓取）。没抓过 → age=inf 必抓。
+    新视频 → (0, 0) 不设限；老视频 → 12 小时。没抓过 → age=inf 必抓。
     """
     if part_date:
         try:
@@ -216,11 +232,7 @@ def _refetch_gate(cache_dir, yt_id: str, part_date: str) -> tuple[float, float]:
             new = False
         if new:
             return 0.0, 0.0
-    cache_path = Path(cache_dir) / f"{yt_id}.info.json"
-    if not cache_path.is_file():
-        return OLD_VIDEO_REFETCH_HOURS * 3600.0, float("inf")
-    age = time.time() - cache_path.stat().st_mtime
-    return OLD_VIDEO_REFETCH_HOURS * 3600.0, age
+    return OLD_VIDEO_REFETCH_HOURS * 3600.0, _last_fetch_age(cache_dir, yt_id)
 
 
 def is_junk_song_title(song: str) -> bool:
