@@ -259,12 +259,20 @@ def strip_trailing_latin_annotation_suffix(text: str) -> str:
     raw = (text or "").strip()
     if not raw:
         return raw
+
+    def _paren_owner_segment(before: str) -> str:
+        """括号归属判断只看「最后一个歌名/歌手分隔符之后」的段：
+        メルト(2007年)／ryo(supercell) 的 (supercell) 属于拉丁歌手名 ryo 本体，
+        不能因为整行含日文（歌名部分）就当罗马字注音删掉。"""
+        parts = re.split(r"\s*[／/]\s*", before or "")
+        return parts[-1] if parts else (before or "")
+
     trailing = find_trailing_bracket_suffix(raw)
     if trailing and trailing["before"] and normalize_duplicate_annotation_comparable(
         trailing["before"]
     ) == normalize_duplicate_annotation_comparable(trailing["content"]):
         return trailing["before"]
-    if trailing and trailing["before"] and contains_japanese(trailing["before"]) and looks_like_latin_annotation(
+    if trailing and trailing["before"] and contains_japanese(_paren_owner_segment(trailing["before"])) and looks_like_latin_annotation(
         trailing["content"]
     ):
         return trailing["before"]
@@ -278,7 +286,7 @@ def strip_trailing_latin_annotation_suffix(text: str) -> str:
         if matched.get(close_b) == open_b and before:
             if normalize_duplicate_annotation_comparable(before) == normalize_duplicate_annotation_comparable(content):
                 return before
-            if contains_japanese(before) and looks_like_latin_annotation(content):
+            if contains_japanese(_paren_owner_segment(before)) and looks_like_latin_annotation(content):
                 return before
 
     def repl(match: re.Match) -> str:
@@ -292,7 +300,7 @@ def strip_trailing_latin_annotation_suffix(text: str) -> str:
             content
         ):
             return ""
-        if before and contains_japanese(before) and looks_like_latin_annotation(content):
+        if before and contains_japanese(_paren_owner_segment(before)) and looks_like_latin_annotation(content):
             return ""
         return match.group(0)
 
@@ -633,6 +641,14 @@ def extract_song_artist_core(text: str) -> Optional[dict]:
     if m:
         song = clean_song_or_artist_part(m.group(1))
         artist = _clean_artist_with_optional_metadata(m.group(2))
+        if not is_bad_field(song) and not is_bad_field(artist):
+            return {"song": song, "artist": artist}
+
+    # 全角 ／ 优先于半角 /：日文歌名内常含半角 /（ハロ/ハワユ），全角 ／ 是刻意的歌名/歌手分隔
+    fw = raw.find("／")
+    if fw > 0 and fw < len(raw) - 1:
+        song = clean_song_or_artist_part(raw[:fw])
+        artist = _clean_artist_with_optional_metadata(raw[fw + 1 :])
         if not is_bad_field(song) and not is_bad_field(artist):
             return {"song": song, "artist": artist}
 

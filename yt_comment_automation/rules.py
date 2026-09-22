@@ -11,6 +11,12 @@ from typing import Optional
 
 # --- R01 / R10 全角数字/字母转半角 ---
 FULLWIDTH_DIGITS_RE = re.compile(r"[０-９]")
+
+_JP_CHAR_RE = re.compile(r"[ぁ-んァ-ヶ一-龯々〆〤]")
+
+
+def _is_japanese_char(ch: str) -> bool:
+    return bool(ch) and bool(_JP_CHAR_RE.match(ch))
 FULLWIDTH_ASCII_RE = re.compile(r"[０-９Ａ-Ｚａ-ｚ]")
 
 # --- R02 行首数字序号剥离（点后非数字才剥离，保护 8.32）---
@@ -160,6 +166,11 @@ def apply_song_cleanup(text: str) -> str:
         if depth != 0:
             continue
         if ch in "/／" and (i == 0 or t[i - 1] not in "/／") and (i + 1 >= len(t) or t[i + 1] not in "/／"):
+            prev_ch = t[i - 1] if i > 0 else ""
+            next_ch = t[i + 1] if i + 1 < len(t) else ""
+            # 两侧都是假名/汉字的无空格斜杠是歌名本体（ハロ/ハワユ），不是分隔符
+            if _is_japanese_char(prev_ch) and _is_japanese_char(next_ch):
+                continue
             slash_idx = i
             break
     if slash_idx > 0:
