@@ -244,9 +244,15 @@ def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[
 
     source = ""
     if config.opencode_api_key():
-        primary, err = _call_opencode_chat(user_text, config.opencode_primary_model(), timeout=timeout)
-        if not err and not _has_valid_lines(primary):
-            err = "主模型输出无效（无时间戳条目，疑似闲聊）"
+        # 主模型输出无效多为偶发漂移（同输入重摇即可成功，实证 100 曲树形歌单
+        # 失败轮后重摇即 100/100），先原模型重试一次再换备用模型
+        primary, err = "", ""
+        for _attempt in range(2):
+            primary, err = _call_opencode_chat(user_text, config.opencode_primary_model(), timeout=timeout)
+            if not err and not _has_valid_lines(primary):
+                err = "主模型输出无效（无时间戳条目，疑似闲聊）"
+            if not err:
+                break
         if not err:
             source = "opencode"
             # 复核：剔除幻觉/补漏，输出最终列表
@@ -259,12 +265,16 @@ def call_songlist_ai(user_text: str, timeout: int = 300) -> tuple[str, Optional[
                 return check_text, None, source
             # 复核失败 → 退回主提取结果
             return primary, f"复核失败用主结果: {check_err}", source
-        # 主模型失败 → 尝试另一个候选模型（glm 主 / omen 主互换）
+        # 主模型（含重试）失败 → 尝试另一个候选模型（glm 主 / omen 主互换），同样重试一次
         alt = config.opencode_check_model() if config.opencode_primary_model() != config.opencode_check_model() else ""
         if alt:
-            primary2, err2 = _call_opencode_chat(user_text, alt, timeout=timeout)
-            if not err2 and not _has_valid_lines(primary2):
-                err2 = "备用模型输出无效（无时间戳条目）"
+            primary2, err2 = "", ""
+            for _attempt in range(2):
+                primary2, err2 = _call_opencode_chat(user_text, alt, timeout=timeout)
+                if not err2 and not _has_valid_lines(primary2):
+                    err2 = "备用模型输出无效（无时间戳条目）"
+                if not err2:
+                    break
             if not err2:
                 source = "opencode"
                 check2, check_err2 = _call_opencode_chat(
@@ -312,6 +322,13 @@ PROMPT_TEMPLATE = """你现在要根据我提供的一段 YouTube 评论区时�
    的行是节目单排期（钟点范围+出场者/环节名），严禁从里面提取任何条目，也严禁把
    时段范围（18:00、23:00 这类钟点）当成视频时间戳。真实演唱时间轴的时间戳是
    0:MM:SS / M:SS 且逐条递增。
+
+【树形表格歌单】有些歌单是表格制式，每行「序号 + TAB + 时间戳(可空) + TAB + 歌名/歌手」，
+还可能拆成多条评论（セトリ(1/2)、(2/2)），所有部分都要解析：
+1. 序号列（01.、02.）是曲序，不是歌名的一部分，输出时剥掉。
+2. 时间戳列为空的行表示该歌接续上方区块连续演唱——沿用其上方最近的时间戳作为
+   该歌的开始时间输出，**不要因为该行缺时间戳而跳过**。
+3. 表格行的「歌名/歌手」以最后一个 / 分隔（歌名自身可能含 /）；表头（セトリ(1/2) 等）与空行跳过。
    例：「0:05:27 開始」「0:30:00 スクショタイム」「0:14:55 MC」都不得输出。
 7. 标题行/分隔说明（如 "本日のSet List"、"タイムスタンプ" 单独成行的）不得输出。
 
