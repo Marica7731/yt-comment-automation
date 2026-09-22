@@ -1236,14 +1236,14 @@ def build_comment_songlist_ranked(comment_texts: list[str], description: str = "
         reverse=True,
     )
     # 同一歌单可能被 YouTube 评论长度限制拆成多条（BV1h6hn6sEMM 100曲分两条）：
-    # 两段时间轴不重叠（前段末尾 < 后段开头）时是互补关系，合并成完整歌单，
-    # 不能当竞争版本二选一。已按时间升序排好再回填。
+    # 两段时间轴不重叠（无论先后顺序）时是互补关系，合并成完整歌单，
+    # 不能当竞争版本二选一。合并后按时间升序排好。
     merged: list[list[ParsedSong]] = []
     for songs in sources:
         if merged:
             prev_ts = [s.timestamp_seconds for s in merged[-1] if s.timestamp_seconds is not None]
             cur_ts = [s.timestamp_seconds for s in songs if s.timestamp_seconds is not None]
-            if prev_ts and cur_ts and max(prev_ts) < min(cur_ts):
+            if prev_ts and cur_ts and (max(prev_ts) < min(cur_ts) or max(cur_ts) < min(prev_ts)):
                 merged[-1] = sorted(
                     merged[-1] + songs, key=lambda s: s.timestamp_seconds or 0
                 )
