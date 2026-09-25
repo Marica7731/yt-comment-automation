@@ -528,6 +528,17 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     else:
         ai_detail = "评论区/简介均无结构化歌单（不调 AI）"
     if not items:
+        # 兜底闸门：没有任何结构化歌单评论时，简介必须"像真歌单"才允许本地提取——
+        # 至少含 2 个秒级时间戳（H:MM:SS）。接力时段表/预告文的钟点时间（19:00）
+        # 没有秒，直接拦掉（BV1gthU6TEsX 两行 SZNO、BV1ALha63EuK 预告文残片两起）；
+        # 有歌单评论时不设此限（评论歌单的 M:SS 格式合法）。
+        if not songlist_comments:
+            desc_ts_seconds = len(re.findall(r"\d{1,2}:\d{2}:\d{2}", local_source_text or ""))
+            if desc_ts_seconds < 2:
+                result.status = "skipped_no_songs"
+                result.detail = "未提取到有效歌曲（无结构化歌单评论，简介无秒级时间轴，跳过本地兜底）"
+                logger.info("[%s] %s", video.bvid, result.detail)
+                return result
         # AI 失败 → 本地兜底。最优来源可能整体是非歌（如活动成员时段表，
         # 条数多但全是人名，会被语义判定剔光），此时逐个次优来源尝试。
         for cand in clean.build_comment_songlist_ranked(songlist_comments, local_source_text):
