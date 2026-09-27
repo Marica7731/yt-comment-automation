@@ -250,15 +250,26 @@ def _fetch_youtube_continuation(api_key: str, client_version: str, continuation:
 
 
 def _extract_comment_texts(data: dict[str, Any]) -> list[str]:
-    comments: list[str] = []
+    return [e["text"] for e in _extract_comment_entries(data)]
+
+
+def _extract_comment_entries(data: dict[str, Any]) -> list[dict[str, str]]:
+    """提取评论条目 [{id, text}]。id 优先 commentId，缺失回退文本哈希（保证跨抓取可对账）。"""
+    import hashlib
+
+    entries: list[dict[str, str]] = []
     for item in _walk_dicts(data):
         payload = item.get("commentEntityPayload")
         if not isinstance(payload, dict):
             continue
         content = payload.get("properties", {}).get("content", {}).get("content")
-        if isinstance(content, str):
-            comments.append(content)
-    return comments
+        if not isinstance(content, str) or not content:
+            continue
+        cid = payload.get("properties", {}).get("commentId") or payload.get("key") or ""
+        if not cid:
+            cid = "sha1:" + hashlib.sha1(content.encode("utf-8")).hexdigest()
+        entries.append({"id": cid, "text": content})
+    return entries
 
 
 def _extract_comment_reply_continuation_tokens(data: Any) -> list[str]:
@@ -305,17 +316,53 @@ def _extract_comment_page_continuation_tokens(data: Any) -> list[str]:
     return tokens
 
 
+def _load_known_comment_ids(cache_dir: Path | None, video_id: str) -> set[str]:
+    """读评论 id 账本（fetch_times 同款思路：与主缓存解耦，无歌单抓取也有对账依据）。"""
+    if not cache_dir:
+        return set()
+    try:
+        data = json.loads((Path(cache_dir) / "yt_comment_ids.json").read_text(encoding="utf-8"))
+        return set(data.get(video_id) or [])
+    except (OSError, ValueError):
+        return set()
+
+
+def _save_comment_ids(cache_dir: Path | None, video_id: str, ids_in_order: list[str]) -> None:
+    """账本按 encounter 顺序（最新在前）合并去重，每视频保留最近 500 条。"""
+    if not cache_dir:
+        return
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        path = Path(cache_dir) / "yt_comment_ids.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        merged = list(dict.fromkeys(ids_in_order + list(data.get(video_id) or [])))[:500]
+        data[video_id] = merged
+        if len(data) > 1000:  # 防账本无限增长：最多留 1000 个视频
+            data = dict(sorted(data.items(), key=lambda kv: len(kv[1]), reverse=True)[:1000])
+        path.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def _fetch_comment_pages(
     api_key: str,
     client_version: str,
     first_response: dict[str, Any],
     max_pages: int = 5,
+    known_ids: set[str] | None = None,
+    seen_ids: list[str] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    """翻评论区「下一页」，把主评论列表抓全（不只第一页）。
+    """翻评论区「下一页」（自适应）。
 
-    第一页评论已由调用方从 first_response 提取；这里从每页响应里找下一页
-    continuation token 继续抓，直到没有下一页或达上限。
+    第一页评论已由调用方从 first_response 提取；从每页响应里找下一页
+    continuation token 继续抓。**某页贡献 0 条新评论（id 全部见过）即停**——
+    最新排序下整页都是旧评论说明已追平，后续页不可能有新歌单；
+    有新评论期间继续翻（歌单可能被闲聊顶到后面页）。上限仍 max_pages。
     """
+    known = known_ids or set()
     comments: list[str] = []
     responses: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -327,7 +374,16 @@ def _fetch_comment_pages(
         seen.add(token)
         response = _fetch_youtube_continuation(api_key, client_version, token)
         responses.append(response)
-        comments.extend(_extract_comment_texts(response))
+        entries = _extract_comment_entries(response)
+        new_count = 0
+        for e in entries:
+            comments.append(e["text"])
+            if seen_ids is not None:
+                seen_ids.append(e["id"])
+            if e["id"] not in known:
+                new_count += 1
+        if new_count == 0:
+            break
         for next_token in _extract_comment_page_continuation_tokens(response):
             if next_token not in seen:
                 pending.append(next_token)
@@ -431,12 +487,22 @@ def fetch_youtube_raw(
     comments: list[str] = []
     comments_response: dict[str, Any] | None = None
     reply_responses: list[dict[str, Any]] = []
+    # 自适应翻页：id 账本记录见过的评论，某页全旧即停（追平后每轮只花 1 个请求）
+    known_ids = _load_known_comment_ids(cache_dir, video_id)
+    fetched_ids: list[str] = []
     if continuation:
         comments_response = _fetch_youtube_continuation(api_key, client_version, continuation)
-        comments.extend(_extract_comment_texts(comments_response))
-        # 评论列表分页：抓第一页后继续翻「下一页」，避免漏掉后续评论里的置顶歌单
-        more_comments, _page_responses = _fetch_comment_pages(api_key, client_version, comments_response)
-        comments.extend(more_comments)
+        first_entries = _extract_comment_entries(comments_response)
+        for e in first_entries:
+            comments.append(e["text"])
+            fetched_ids.append(e["id"])
+        first_new = sum(1 for e in first_entries if e["id"] not in known_ids)
+        if first_new > 0:
+            # 评论列表分页：第一页有新评论才继续翻「下一页」
+            more_comments, _page_responses = _fetch_comment_pages(
+                api_key, client_version, comments_response, known_ids=known_ids, seen_ids=fetched_ids
+            )
+            comments.extend(more_comments)
         # 楼中楼回复（每页的回复折叠区）
         reply_texts, reply_responses = _fetch_comment_reply_texts_with_responses(
             api_key,
@@ -444,6 +510,7 @@ def fetch_youtube_raw(
             comments_response,
         )
         comments.extend(reply_texts)
+    _save_comment_ids(cache_dir, video_id, fetched_ids)
 
     descriptions = _extract_description_candidates(initial_data)
     raw_info = {
