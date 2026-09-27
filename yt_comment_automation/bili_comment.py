@@ -76,6 +76,11 @@ def cookie_header(cookies: dict[str, str]) -> str:
 
 
 def _request_json(url: str, cookies: dict[str, str], referer: str, data: dict | None = None) -> dict:
+    # 跨进程共享节流：与 YouTube 抓取、点赞脚本共用同一个最小间隔时钟
+    # （风控看的是出口 IP 的对外请求总速率，不是单进程速率）
+    from .req_pace import pace
+
+    pace(2.0)
     headers = {
         "User-Agent": UA,
         "Referer": referer,

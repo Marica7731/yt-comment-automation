@@ -16,6 +16,7 @@ import urllib.request
 
 sys.path.insert(0, '/opt/yt-comment-automation')
 from yt_comment_automation import bili_comment
+from yt_comment_automation.req_pace import pace
 
 OWNER_MID = "3546597260528367"
 UA = (
@@ -57,6 +58,7 @@ def resolve_real_liked(oid, rpid):
     """
     try:
         for pn in (1, 2, 3):
+            pace(2.0)
             list_url = (
                 f"https://api.bilibili.com/x/v2/reply?type=1&oid={oid}"
                 f"&sort=2&ps=20&pn={pn}"
@@ -78,6 +80,7 @@ def resolve_real_liked(oid, rpid):
                 if own_c:
                     root = our_root_rpid_cache[oid] = own_c.rpid
         if root:
+            pace(2.0)
             detail_url = (
                 f"https://api.bilibili.com/x/v2/reply/reply?type=1"
                 f"&oid={oid}&root={root}&ps=49&pn=1"
@@ -95,6 +98,7 @@ def resolve_real_liked(oid, rpid):
 
 
 def send_like(oid, rpid):
+    pace(2.0)
     payload = {"oid": oid, "type": 1, "rpid": rpid, "action": 1, "csrf": csrf}
     body = urllib.parse.urlencode(payload).encode()
     req2 = urllib.request.Request(
@@ -115,6 +119,7 @@ except Exception:  # noqa: BLE001
 print(f"==== 点赞任务 run {RUN_TS} ====", flush=True)
 
 # 1. 消息中心「回复我的」第一页
+pace(2.0)
 req = urllib.request.Request(
     "https://api.bilibili.com/x/msgfeed/reply?platform=web&build=0&mobi_app=web&web_location=0.0",
     headers=headers,
@@ -189,6 +194,7 @@ for it in items:
 for bvid, oid in video_oids.items():
     for pn in (1, 2, 3):
         try:
+            pace(2.0)
             sweep_url = (
                 f"https://api.bilibili.com/x/v2/reply?type=1&oid={oid}"
                 f"&sort=2&ps=20&pn={pn}"
