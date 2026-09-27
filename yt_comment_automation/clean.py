@@ -839,7 +839,7 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
         if not _looks_like_bare_song_title(t, line):
             return None
         return ParsedSong(
-            song=t,
+            song=strip_loose_edge_title_quotes(t),
             artist="",
             timestamp_label=timestamp_info["label"],
             timestamp_seconds=timestamp_info["seconds"],
