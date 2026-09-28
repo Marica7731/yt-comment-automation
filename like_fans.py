@@ -1,10 +1,12 @@
-"""给消息中心「回复我的」第一页粉丝回复点赞。
+"""给消息中心「回复我的」粉丝回复点赞（带游标翻页）。
 
 规则（用户规格）：
-- 只取 msgfeed 第一页；已赞跳过（跳过明细只进日志，不发飞书）；自己的回复排除。
-- reply/action 是 toggle：只有确认「当前未赞」才发 action，绝不盲发（盲发会把赞取消）。
-- 接口里 mid 是字符串：比较一律 str() 归一，否则自己排除永不生效。
-- 飞书通知只有标题一个 👍，明细行纯文本。
+- 从 msgfeed 第一页开始；**整页都是已赞/重复才停止翻页**，页内出现新赞就继续
+  请求下一页（游标参数 id/reply_time 来自用户 HAR 实录），安全上限 10 页；
+- 已赞跳过（跳过明细只进日志，不发飞书）；自己的回复排除；
+- reply/action 是 toggle：只有确认「当前未赞」才发 action，绝不盲发（盲发会把赞取消）；
+- 接口里 mid 是字符串：比较一律 str() 归一，否则自己排除永不生效；
+- 飞书通知只有标题一个 👍，明细行纯文本；另含评论区补扫（折叠评论不进 msgfeed）。
 """
 import json
 import pathlib
@@ -40,6 +42,11 @@ headers = {
     "Cookie": bili_comment.cookie_header(cookies),
 }
 our_root_rpid_cache = {}  # oid → 我们主评论 rpid（查楼中楼真实状态的 root）
+item_uri = {}  # oid → 视频页 uri（楼中楼兜底时反查 bvid 用）
+
+BASE_MSGFEED = (
+    "https://api.bilibili.com/x/msgfeed/reply?platform=web&build=0&mobi_app=web&web_location=0.0"
+)
 
 
 def save_liked_set():
@@ -47,6 +54,19 @@ def save_liked_set():
         STATE_PATH.write_text(json.dumps(sorted(liked_set)), encoding="utf-8")
     except OSError as err:
         print(f"  ⚠️已赞集合写盘失败（不影响本次点赞）: {err}", flush=True)
+
+
+def fetch_msgfeed_page(cursor_id=None, cursor_time=None):
+    """拉一页「回复我的」；带游标参数即翻下一页（参数名来自用户 HAR 实录）。"""
+    pace(2.0)
+    url = BASE_MSGFEED
+    if cursor_id:
+        url += f"&id={cursor_id}&reply_time={cursor_time}"
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    d = data.get("data") or {}
+    return d.get("items") or [], d.get("cursor") or {}
 
 
 def resolve_real_liked(oid, rpid):
@@ -118,72 +138,88 @@ except Exception:  # noqa: BLE001
     RUN_TS = time.strftime("%Y-%m-%d %H:%M:%S")
 print(f"==== 点赞任务 run {RUN_TS} ====", flush=True)
 
-# 1. 消息中心「回复我的」第一页
-pace(2.0)
-req = urllib.request.Request(
-    "https://api.bilibili.com/x/msgfeed/reply?platform=web&build=0&mobi_app=web&web_location=0.0",
-    headers=headers,
-)
-with urllib.request.urlopen(req, timeout=30) as resp:
-    data = json.loads(resp.read().decode("utf-8"))
-items = (data.get("data") or {}).get("items") or []
-print(f"第一页消息: {len(items)} 条", flush=True)
-
-item_uri = {}
-for it in items:
-    ii = it.get("item") or {}
-    if ii.get("subject_id") is not None:
-        item_uri[ii["subject_id"]] = ii.get("uri", "")
-
 liked, skipped_liked, skipped_self, failed = [], [], [], []
-for it in items:
-    replyer = str((it.get("user") or {}).get("mid") or "")
-    item = it.get("item") or {}
-    content = item.get("source_content", "")
-    rpid = item.get("source_id")
-    oid = item.get("subject_id")
 
-    # 自己的回复：排除并落日志（mid 一律按字符串比较）
-    if replyer == OWNER_MID:
-        skipped_self.append(content)
-        print(f"  ⊘自己排除 mid={replyer} {content[:30]!r}", flush=True)
-        continue
 
-    if rpid in liked_set or item.get("like_state", 0) != 0:
-        # 可能已赞：先复核真实状态，确认未赞才补，其余跳过（绝不盲发 action）
-        real = resolve_real_liked(oid, rpid)
-        if real is True:
-            skipped_liked.append(content)
-            if rpid not in liked_set:
+def process_items(items):
+    """处理一页 msgfeed 条目，返回本页新增点赞数。"""
+    new_likes = 0
+    for it in items:
+        replyer = str((it.get("user") or {}).get("mid") or "")
+        item = it.get("item") or {}
+        content = item.get("source_content", "")
+        rpid = item.get("source_id")
+        oid = item.get("subject_id")
+
+        # 自己的回复：排除并落日志（mid 一律按字符串比较）
+        if replyer == OWNER_MID:
+            skipped_self.append(content)
+            print(f"  ⊘自己排除 mid={replyer} {content[:30]!r}", flush=True)
+            continue
+
+        if rpid in liked_set or item.get("like_state", 0) != 0:
+            # 可能已赞：先复核真实状态，确认未赞才补，其余跳过（绝不盲发 action）
+            real = resolve_real_liked(oid, rpid)
+            if real is True:
+                skipped_liked.append(content)
+                if rpid not in liked_set:
+                    liked_set.add(rpid)
+                    save_liked_set()
+                print(f"  =已赞跳过 rpid={rpid} {content[:30]!r}", flush=True)
+                continue
+            if real is None:
+                skipped_liked.append(content)
+                print(f"  ?复核不到按跳过(宁漏勿撤) rpid={rpid} {content[:30]!r}", flush=True)
+                continue
+            print(f"  ↻复核确认未赞，补赞 rpid={rpid} {content[:30]!r}", flush=True)
+
+        # 真正点赞（新回复，或复核确认未赞）
+        try:
+            r = send_like(oid, rpid)
+            if r.get("code") == 0:
+                liked.append((rpid, content[:40]))
                 liked_set.add(rpid)
                 save_liked_set()
-            print(f"  =已赞跳过 rpid={rpid} {content[:30]!r}", flush=True)
-            continue
-        if real is None:
-            skipped_liked.append(content)
-            print(f"  ?复核不到按跳过(宁漏勿撤) rpid={rpid} {content[:30]!r}", flush=True)
-            continue
-        print(f"  ↻复核确认未赞，补赞 rpid={rpid} {content[:30]!r}", flush=True)
+                new_likes += 1
+                print(f"  ✓赞 rpid={rpid} {content[:30]!r}", flush=True)
+            else:
+                failed.append((rpid, r.get("code"), r.get("message")))
+                print(f"  ✗失败 rpid={rpid} code={r.get('code')} {r.get('message')}", flush=True)
+        except Exception as err:  # noqa: BLE001
+            failed.append((rpid, "EXC", str(err)[:60]))
+            print(f"  ✗异常 {err}", flush=True)
+        time.sleep(8)  # 频控：每个真实点赞间隔 8 秒（跳过的不消耗间隔）
+    return new_likes
 
-    # 真正点赞（新回复，或复核确认未赞）
-    try:
-        r = send_like(oid, rpid)
-        if r.get("code") == 0:
-            liked.append((rpid, content[:40]))
-            liked_set.add(rpid)
-            save_liked_set()
-            print(f"  ✓赞 rpid={rpid} {content[:30]!r}", flush=True)
-        else:
-            failed.append((rpid, r.get("code"), r.get("message")))
-            print(f"  ✗失败 rpid={rpid} code={r.get('code')} {r.get('message')}", flush=True)
-    except Exception as err:  # noqa: BLE001
-        failed.append((rpid, "EXC", str(err)[:60]))
-        print(f"  ✗异常 {err}", flush=True)
-    time.sleep(8)  # 频控：每个真实点赞间隔 8 秒（跳过的不消耗间隔）
 
-print(flush=True)
+# 1. 游标翻页：整页都是已赞/重复才停；页内有新赞就继续下一页（安全上限 10 页）
+cursor_id = cursor_time = None
+page = 0
+total_items = 0
+while True:
+    items, cursor = fetch_msgfeed_page(cursor_id, cursor_time)
+    page += 1
+    total_items += len(items)
+    print(f"第{page}页消息: {len(items)} 条", flush=True)
+    for it in items:
+        ii = it.get("item") or {}
+        if ii.get("subject_id") is not None:
+            item_uri[ii["subject_id"]] = ii.get("uri", "")
+    new_likes = process_items(items)
+    cur = cursor or {}
+    if new_likes == 0:
+        print(f"第{page}页无新增点赞，停止翻页", flush=True)
+        break
+    if cur.get("is_end"):
+        print("已到末页", flush=True)
+        break
+    if page >= 10:
+        print("达安全页数上限（10 页），停止", flush=True)
+        break
+    cursor_id, cursor_time = cur.get("id"), cur.get("time")
+    time.sleep(2)
 
-# 2. 评论区补扫：折叠评论（纯表情等）可能不进消息列表，msgfeed 聚合也只显示
+# 2. 评论区补扫：折叠评论（纯表情等）可能不进 msgfeed，msgfeed 聚合也只显示
 #    同会话最新一条——对涉及视频的评论区直接扫一遍，未赞的粉丝评论补赞。
 video_oids = {}
 for it in items:
@@ -233,8 +269,10 @@ for bvid, oid in video_oids.items():
         if len(replies) < 20:
             break
 
+print(flush=True)
 summary = f"汇总: 点赞 {len(liked)} | 已赞跳过 {len(skipped_liked)} | 自己排除 {len(skipped_self)} | 失败 {len(failed)}"
 print(summary, flush=True)
+print(f"翻页: {page} 页 / {total_items} 条", flush=True)
 print("-- 已赞跳过明细（仅日志）--", flush=True)
 for c in skipped_liked:
     print(f"   {c[:40]!r}", flush=True)
