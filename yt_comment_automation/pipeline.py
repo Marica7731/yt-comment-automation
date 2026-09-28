@@ -425,10 +425,11 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                     fresh = (_dt.date.today() - _dt.date.fromisoformat(video.part_date)).days <= UPGRADE_FRESH_DAYS
                 except ValueError:
                     fresh = False
+            # 已发布视频的复查：新内容必在最新排序第1页，某页全旧可提前停
             if fresh:
-                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
+                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True, early_stop=True)
             else:
-                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, max_age_seconds=UPGRADE_CHECK_TTL)
+                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, max_age_seconds=UPGRADE_CHECK_TTL, early_stop=True)
         else:
             raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
             if not raw_has_timestamp_songlist(raw):

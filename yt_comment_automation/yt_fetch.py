@@ -355,6 +355,7 @@ def _fetch_comment_pages(
     max_pages: int = 5,
     known_ids: set[str] | None = None,
     seen_ids: list[str] | None = None,
+    early_stop: bool = False,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """翻评论区「下一页」（自适应）。
 
@@ -383,7 +384,10 @@ def _fetch_comment_pages(
                 seen_ids.append(e["id"])
             if e["id"] not in known:
                 new_count += 1
-        if new_count == 0:
+        if new_count == 0 and early_stop:
+            # 提前停仅用于已发布视频的升级复查（新内容必在第1页）；
+            # 未发布视频必须抓满——歌单被闲聊顶到后面页时，第1页全旧
+            # 但歌单在第2页，提前停会让它永远抓不回来
             break
         for next_token in _extract_comment_page_continuation_tokens(response):
             if next_token not in seen:
@@ -455,6 +459,7 @@ def fetch_youtube_raw(
     cache_dir: str | Path | None = None,
     force: bool = False,
     max_age_seconds: int | None = None,
+    early_stop: bool = False,
 ) -> dict[str, Any]:
     """抓取视频评论区 + 简介原始 JSON，返回 dict。
 
@@ -501,7 +506,8 @@ def fetch_youtube_raw(
         if first_new > 0:
             # 评论列表分页：第一页有新评论才继续翻「下一页」
             more_comments, _page_responses = _fetch_comment_pages(
-                api_key, client_version, comments_response, known_ids=known_ids, seen_ids=fetched_ids
+                api_key, client_version, comments_response, known_ids=known_ids,
+                seen_ids=fetched_ids, early_stop=early_stop,
             )
             comments.extend(more_comments)
         # 楼中楼回复（每页的回复折叠区）
