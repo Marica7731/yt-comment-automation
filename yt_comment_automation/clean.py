@@ -103,9 +103,15 @@ def should_keep_inline_setlist_range_line(line: str) -> bool:
         return True
     # 普通区间行：0:12:01 - 0:16:36 コネクト / ClariS（起止时间+歌名/歌手）
     # 必须整行保留——按时间戳切分会把歌名跟到结束时间上（BV1syaV6aEB1 全部错成结束时间）
+    if re.search(
+        r"^\d{1,2}:\d{2}(?::\d{2})?\s*[~～〜\-－—–−]\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:[「『｢《〈【]|[\s\S]*[\/／|｜￤∣丨])[\s\S]+$",
+        source,
+    ):
+        return True
+    # 纯区间行（歌名在下一行）：0:12:01 - 0:16:36 ⏎ コネクト / ClariS
     return bool(
-        re.search(
-            r"^\d{1,2}:\d{2}(?::\d{2})?\s*[~～〜\-－—–−]\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:[「『｢《〈【]|[\s\S]*[\/／|｜￤∣丨])[\s\S]+$",
+        re.match(
+            r"^\d{1,2}:\d{2}(?::\d{2})?\s*[~～〜\-－—–−]\s*\d{1,2}:\d{2}(?::\d{2})?$",
             source,
         )
     )
@@ -610,6 +616,7 @@ class ParsedSong:
     artist: str
     timestamp_label: str = ""
     timestamp_seconds: Optional[int] = None
+    timestamp_end_seconds: Optional[int] = None  # 区间行（起-止 歌名）的结束时间；普通行 None
 
 
 def extract_song_artist_core(text: str) -> Optional[dict]:
@@ -1034,7 +1041,7 @@ def _normalize_artist_honorifics(items: list[ParsedSong]) -> list[ParsedSong]:
     result = []
     for it in items:
         if it.artist and re.search(r"(?:さん|様|氏)\s*$", it.artist):
-            it = ParsedSong(it.song, re.sub(r"(?:さん|様|氏)\s*$", "", it.artist).strip(), it.timestamp_label, it.timestamp_seconds)
+            it = ParsedSong(it.song, re.sub(r"(?:さん|様|氏)\s*$", "", it.artist).strip(), it.timestamp_label, it.timestamp_seconds, it.timestamp_end_seconds)
         result.append(it)
     return result
 
@@ -1045,13 +1052,75 @@ def _normalize_kanji_artist_spacing(items: list[ParsedSong]) -> list[ParsedSong]
     for it in items:
         if it.artist:
             artist = re.sub(r"(?<=[\u3400-\u9FFF\uF900-\uFAFF])\s+(?=[\u3400-\u9FFF\uF900-\uFAFF])", "", it.artist).strip()
-            it = ParsedSong(it.song, artist, it.timestamp_label, it.timestamp_seconds)
+            it = ParsedSong(it.song, artist, it.timestamp_label, it.timestamp_seconds, it.timestamp_end_seconds)
         result.append(it)
     return result
 
 
 def _normalize_artist_display(items: list[ParsedSong]) -> list[ParsedSong]:
     return _normalize_kanji_artist_spacing(_normalize_artist_honorifics(items))
+
+
+def _extract_plain_range_item(lines: list[str], i: int) -> tuple[Optional[ParsedSong], int]:
+    """解析普通区间行（起-止 歌名/歌手），起止时间都保留。
+
+    支持三种形态（源作者写了首尾就都输出，只有尾巴根本看不了）：
+    A 同行：0:12:01 - 0:16:36 コネクト / ClariS
+    B 跨行：0:12:01 - 0:16:36 ⏎ コネクト / ClariS
+    C 跨行（结束时间在下一行）：0:12:01 - ⏎ 0:16:36 コネクト / ClariS
+    返回 (ParsedSong|None, 下一索引)；不匹配返回 (None, i+1) 走默认解析。
+    """
+    line = strip_weird_leading_chars(lines[i] if i < len(lines) else "")
+    m = re.match(
+        r"^(\d{1,2}:\d{2}(?::\d{2})?)\s*[-－—–−~～〜]\s*(?:(\d{1,2}:\d{2}(?::\d{2})?))?(\s+.*)?$",
+        line,
+    )
+    if not m:
+        return None, i + 1
+    t1, t2, content = m.group(1), m.group(2), (m.group(3) or "").strip()
+    s1 = timestamp_to_seconds(t1)
+    if s1 is None:
+        return None, i + 1
+    consumed = i
+    if not t2 and not content:
+        # C：下一行以结束时间开头
+        nxt = strip_weird_leading_chars(lines[i + 1] if i + 1 < len(lines) else "")
+        m2 = re.match(r"^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$", nxt or "")
+        if not m2:
+            return None, i + 1
+        t2, content = m2.group(1), m2.group(2).strip()
+        consumed = i + 1
+    elif not content and t2:
+        # B：歌名在下一行（无时间戳）
+        nxt = strip_weird_leading_chars(lines[i + 1] if i + 1 < len(lines) else "")
+        if not nxt or is_obviously_non_song_text(nxt) or extract_first_timestamp_info(nxt)["label"]:
+            return None, i + 1
+        content = nxt
+        consumed = i + 1
+    if not t2 or not content:
+        return None, i + 1
+    s2 = timestamp_to_seconds(t2)
+    if s2 is None or s2 <= s1:
+        return None, i + 1  # 结束≤开始，不是区间
+    if is_obviously_non_song_text(content):
+        return None, i + 1
+    parsed = extract_song_artist_core(content)
+    if not parsed:
+        if not _looks_like_bare_song_title(content, line):
+            return None, i + 1
+        parsed = {"song": strip_loose_edge_title_quotes(content), "artist": ""}
+    if is_bad_field(parsed["song"]):
+        return None, i + 1
+    return (
+        ParsedSong(
+            song=parsed["song"],
+            artist=parsed.get("artist") or "",
+            timestamp_label=f"{t1}-{t2}",
+            timestamp_seconds=s1,
+            timestamp_end_seconds=s2,
+        ),
+        consumed + 1,
+    )
 
 
 def extract_plain_songs_from_source_timeline(text: str) -> list[ParsedSong]:
@@ -1066,6 +1135,7 @@ def extract_plain_songs_from_source_timeline(text: str) -> list[ParsedSong]:
         for line in split_collapsed_timeline_lines(normalized)
         if strip_weird_leading_chars(line)
     ]
+    range_items: list[ParsedSong] = []  # 区间行直接产 ParsedSong（带结束时间）
     merged_lines: list[str] = []
     i = 0
     while i < len(raw_lines):
@@ -1078,6 +1148,13 @@ def extract_plain_songs_from_source_timeline(text: str) -> list[ParsedSong]:
         if inline_range:
             merged_lines.append(f"{inline_range.timestamp_label} {inline_range.song} / {inline_range.artist}")
             i += 1
+            continue
+
+        # 普通区间行（起-止都保留）：同行/歌名换行/结束时间换行三种形态
+        plain_range, nxt_i = _extract_plain_range_item(raw_lines, i)
+        if plain_range:
+            range_items.append(plain_range)
+            i = nxt_i
             continue
 
         title_parsed = _extract_song_artist_from_setlist_title_line(line)
@@ -1143,6 +1220,7 @@ def extract_plain_songs_from_source_timeline(text: str) -> list[ParsedSong]:
         parsed = parse_song_line_after_timestamp(line)
         if parsed:
             items.append(parsed)
+    items.extend(range_items)
     return _normalize_artist_display(items)
 
 
@@ -1179,7 +1257,9 @@ def dedupe_song_items_by_timestamp_and_identity(items: list[ParsedSong]) -> list
 # ---------- 输出 ----------
 
 
-def format_timestamp_for_output(label: str, seconds: Optional[int], force_hours: bool = False) -> str:
+def format_timestamp_for_output(
+    label: str, seconds: Optional[int], force_hours: bool = False, end_seconds: Optional[int] = None
+) -> str:
     if seconds is None:
         label_seconds = timestamp_to_seconds(label or "")
         if label_seconds is None:
@@ -1192,7 +1272,14 @@ def format_timestamp_for_output(label: str, seconds: Optional[int], force_hours:
     mm = f"{minutes:02d}"
     ss = f"{rest:02d}"
     # 参考已发布评论格式：始终带小时位 0:03:55（1 小时以上则正常 H:MM:SS）
-    return f"{hours}:{mm}:{ss}"
+    start = f"{hours}:{mm}:{ss}"
+    # 区间行源作者写了起止就都输出（0:12:01-0:16:36）
+    if end_seconds is not None and end_seconds > seconds:
+        e_h = end_seconds // 3600
+        e_m = f"{(end_seconds % 3600) // 60:02d}"
+        e_s = f"{end_seconds % 60:02d}"
+        return f"{start}-{e_h}:{e_m}:{e_s}"
+    return start
 
 
 def format_song_items(items: list[ParsedSong], include_timestamps: bool = False) -> str:
@@ -1219,7 +1306,9 @@ def format_song_items(items: list[ParsedSong], include_timestamps: bool = False)
         else:
             line = f"{str(idx).zfill(width)}. {item.song}"
         if include_timestamps:
-            ts = format_timestamp_for_output(item.timestamp_label, item.timestamp_seconds, force_hours)
+            ts = format_timestamp_for_output(
+                item.timestamp_label, item.timestamp_seconds, force_hours, item.timestamp_end_seconds
+            )
             if ts:
                 line = f"{ts} {line}"
         lines.append(line)
