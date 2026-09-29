@@ -96,9 +96,16 @@ def should_keep_inline_setlist_range_line(line: str) -> bool:
     if not source:
         return False
     # 1曲目 38:12~43:24「ガーネット／奥華子」
+    if re.search(
+        r"^第?\s*\d{1,3}\s*(?:曲目|曲)\s*[：:\s\u3000]*\d{1,2}:\d{2}(?::\d{2})?\s*[~～〜\-－—–−]\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:[「『｢《〈【]|[\s\S]*[\/／|｜￤∣丨])[\s\S]+$",
+        source,
+    ):
+        return True
+    # 普通区间行：0:12:01 - 0:16:36 コネクト / ClariS（起止时间+歌名/歌手）
+    # 必须整行保留——按时间戳切分会把歌名跟到结束时间上（BV1syaV6aEB1 全部错成结束时间）
     return bool(
         re.search(
-            r"^第?\s*\d{1,3}\s*(?:曲目|曲)\s*[：:\s\u3000]*\d{1,2}:\d{2}(?::\d{2})?\s*[~～〜\-－—–−]\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:[「『｢《〈【]|[\s\S]*[\/／|｜￤∣丨])[\s\S]+$",
+            r"^\d{1,2}:\d{2}(?::\d{2})?\s*[~～〜\-－—–−]\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:[「『｢《〈【]|[\s\S]*[\/／|｜￤∣丨])[\s\S]+$",
             source,
         )
     )
@@ -685,6 +692,9 @@ def is_obviously_non_song_text(text: str) -> bool:
         return True
     if re.match(r"^編集中です", t):
         return True
+    # 社交账号/推文行（X：handle/status/123…、@handle）不是歌名
+    if re.search(r"\bX\s*[：:]\s*\S+", t) or re.search(r"status/\d{5,}", t):
+        return True
     return False
 
 
@@ -1046,7 +1056,9 @@ def _normalize_artist_display(items: list[ParsedSong]) -> list[ParsedSong]:
 
 def extract_plain_songs_from_source_timeline(text: str) -> list[ParsedSong]:
     """从评论/简介文本中提取歌曲列表（时间戳 + 歌名 + 歌手）。"""
-    normalized = normalize_text(text)
+    import html as _html
+
+    normalized = normalize_text(_html.unescape(text or ""))
     if not normalized:
         return []
     raw_lines = [
