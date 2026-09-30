@@ -702,6 +702,9 @@ def is_obviously_non_song_text(text: str) -> bool:
     # 社交账号/推文行（X：handle/status/123…、@handle）不是歌名
     if re.search(r"\bX\s*[：:]\s*\S+", t) or re.search(r"status/\d{5,}", t):
         return True
+    # 直播环节行：バンドメンバー紹介/誕生日グッズ紹介/アンコール待ち 这类结尾
+    if re.search(r"(?:紹介|説明|コーナー|待ち|コール)\s*$", t):
+        return True
     return False
 
 
@@ -821,6 +824,17 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
     - 行尾罗马字/译文括号（先删再拆，避免其内部 " - " 被误当分隔符）
     """
     t = strip_weird_leading_chars(line)
+    # 🎸01. 0:05:03 … / 🎸EN. 1:01:08 …：剥「emoji装饰+序号」组合前缀直到时间戳开头。
+    # 剥完序号必须剩时间戳开头才生效（保护 8.8 等数字歌名与无时间戳行）
+    for _ in range(3):
+        t2 = re.sub(r"^[^\dA-Za-zぁ-んァ-ヶ一-龯々〆〤]+", "", t).strip()
+        if t2 == t:
+            break
+        t = t2
+        t2 = re.sub(r"^(?:\d{1,3}|EN|en)\s*[.、.．]\s*", "", t).strip()
+        if t2 == t or not re.match(r"^\d{1,2}:\d{2}(?::\d{2})?", t2):
+            break
+        t = t2
     # 兼容带包裹符的时间戳：『15:10』、[15:10]、15:10 等
     ts_prefixed = re.match(r"^[\[【(（『]\s*\d{1,2}:\d{2}(?::\d{2})?\s*[\]】)）』]\s*", t)
     if not re.match(r"^\d{1,2}:\d{2}(?::\d{2})?\s*", t):
