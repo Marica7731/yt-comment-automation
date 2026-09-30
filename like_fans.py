@@ -44,6 +44,31 @@ headers = {
 our_root_rpid_cache = {}  # oid → 我们主评论 rpid（查楼中楼真实状态的 root）
 item_uri = {}  # oid → 视频页 uri（楼中楼兜底时反查 bvid 用）
 
+# 自家视频集合：自动发布记录 ∪ 合集快照。用户规格：只赞自己视频下的回复，
+# 别人视频下回复我们评论的条目一律跳过（10-01 误赞 死了啦😭/转生踢我 事故）。
+OWN_BVIDS: set[str] = set()
+try:
+    _p = json.loads(pathlib.Path("/opt/yt-comment-automation/data/processed.json").read_text(encoding="utf-8"))
+    OWN_BVIDS.update(_p.get("posted") or [])
+except (OSError, ValueError):
+    pass
+try:
+    _snap = json.loads(pathlib.Path("/opt/yt-comment-automation/data/collections_snapshot.json").read_text(encoding="utf-8"))
+    for _v in (_snap.get("videos") if isinstance(_snap, dict) else []) or []:
+        if isinstance(_v, dict) and _v.get("bvid"):
+            OWN_BVIDS.add(_v["bvid"])
+except (OSError, ValueError):
+    pass
+
+
+def _bvid_from_uri(uri: str) -> str | None:
+    m = re.search(r"/video/(BV[0-9A-Za-z]{10})", uri or "")
+    return m.group(1) if m else None
+
+
+def is_own_video(bvid: str | None) -> bool:
+    return bool(bvid) and bvid in OWN_BVIDS
+
 BASE_MSGFEED = (
     "https://api.bilibili.com/x/msgfeed/reply?platform=web&build=0&mobi_app=web&web_location=0.0"
 )
@@ -151,6 +176,11 @@ def process_items(items):
         rpid = item.get("source_id")
         oid = item.get("subject_id")
 
+        # 非自家视频下的回复（别人视频里回复我们评论的）不赞
+        if not is_own_video(_bvid_from_uri(item.get("uri") or "")):
+            print(f"  ⊘非自家视频跳过 rpid={rpid} {content[:30]!r}", flush=True)
+            continue
+
         # 自己的回复：排除并落日志（mid 一律按字符串比较）
         if replyer == OWNER_MID:
             skipped_self.append(content)
@@ -224,9 +254,9 @@ while True:
 video_oids = {}
 for it in items:
     ii = it.get("item") or {}
-    m_bv = re.search(r"/video/(BV[0-9A-Za-z]{10})", ii.get("uri", ""))
-    if m_bv and ii.get("subject_id") is not None:
-        video_oids[m_bv.group(1)] = ii["subject_id"]
+    bvid = _bvid_from_uri(ii.get("uri", ""))
+    if bvid and is_own_video(bvid) and ii.get("subject_id") is not None:
+        video_oids[bvid] = ii["subject_id"]
 for bvid, oid in video_oids.items():
     for pn in (1, 2, 3):
         try:

@@ -34,19 +34,19 @@ fake_pace_mod.pace = lambda gap=2.0: None
 sys.modules["yt_comment_automation.req_pace"] = fake_pace_mod
 
 
-def _item(sid, content, state):
+def _item(sid, content, state, bvid="/video/BV1abcdefghi"):
     return {
         "user": {"mid": str(880 + sid)},
         "item": {"source_id": sid, "source_content": content, "subject_id": 100,
-                 "uri": "/video/BV1x", "like_state": state},
+                 "uri": bvid, "like_state": state},
     }
 
 
 # 页1：2 条新赞 → 继续翻页；页2：1 新赞（触发翻页）+1 已赞；页3：全已赞 → 停
 PAGES = [
-    [_item(1, "新1", 0), _item(2, "新2", 0)],
-    [_item(3, "翻页新1", 0), _item(4, "已赞旧", 1)],
-    [_item(5, "全旧A", 1), _item(6, "全旧B", 1)],
+    [_item(1, "新1", 0), _item(2, "外站回复", 0, "/video/BV1zzzzzzzzzz"), _item(3, "新2", 0)],
+    [_item(4, "翻页新1", 0), _item(5, "已赞旧", 1)],
+    [_item(6, "全旧A", 1), _item(7, "全旧B", 1)],
 ]
 STATE = {"page": 0}
 ACTIONS = []
@@ -85,14 +85,25 @@ import urllib.request
 urllib.request.urlopen = fake_urlopen
 _time.sleep = lambda *a: None  # type: ignore
 
-import importlib.util
-spec = importlib.util.spec_from_file_location("like_fans_paginated", r"G:/codex-work/yt-comment-automation/like_fans.py")
-mod = importlib.util.module_from_spec(spec)
+import pathlib as _pl, json as _json
+_opt = _pl.Path(r"G:/codex-work/yt-comment-automation/dev/_opt_stub")
+(_opt / "data").mkdir(parents=True, exist_ok=True)
+(_opt / "data" / "processed.json").write_text(_json.dumps({"posted": ["BV1abcdefghi"]}), encoding="utf-8")
+(_opt / "data" / "collections_snapshot.json").write_text(_json.dumps({"videos": [{"bvid": "BV1abcdefghi"}]}), encoding="utf-8")
+
+lf_src = open(r"G:/codex-work/yt-comment-automation/like_fans.py", encoding="utf-8").read()
+lf_src = lf_src.replace("/opt/yt-comment-automation/data/processed.json",
+                        r"G:/codex-work/yt-comment-automation/dev/_opt_stub/data/processed.json")
+lf_src = lf_src.replace("/opt/yt-comment-automation/data/collections_snapshot.json",
+                        r"G:/codex-work/yt-comment-automation/dev/_opt_stub/data/collections_snapshot.json")
+mod = types.ModuleType("like_fans_paginated")
+mod.__dict__["__name__"] = "like_fans_paginated"
 buf = io.StringIO()
 with redirect_stdout(buf):
-    spec.loader.exec_module(mod)
+    exec(compile(lf_src, "like_fans.py", "exec"), mod.__dict__)
 out = buf.getvalue()
 print(out)
+print("======== OWN_BVIDS =", mod.OWN_BVIDS, "| is_own_video(BV1x):", mod.is_own_video("BV1abcdefghi"), "| bvid_from:", mod._bvid_from_uri("/video/BV1abcdefghi"), "========")
 print("======== 断言 ========")
 failures = []
 
@@ -103,12 +114,13 @@ def check(name, cond):
         failures.append(name)
 
 
-check("页1两条新回复被赞", ACTIONS[:2] == [1, 2])
-check("页2新赞触发翻页并赞到第3条", ACTIONS == [1, 2, 3])
-check("页3全旧→停止翻页（只处理3页）", mod.page == 3)
+check("页1自家新回复被赞、外站跳过", ACTIONS[:2] == [1, 3])
+check("页2新赞触发翻页并赞到rpid4", ACTIONS == [1, 3, 4] and mod.page == 3)
+check("页3全旧→停止翻页", mod.page == 3)
 check("已赞跳过进日志", "=已赞跳过" in out or "?复核不到按跳过" in out)
 check("飞书含翻页新赞明细", FEISHU_BRIEF is not None and "翻页新1" in FEISHU_BRIEF)
 check("飞书仅标题一个👍", FEISHU_BRIEF is not None and FEISHU_BRIEF.count("👍") == 1)
+check("外站条目进日志", "⊘非自家视频跳过" in out)
 
 print()
 print("ACTIONS =", ACTIONS)
