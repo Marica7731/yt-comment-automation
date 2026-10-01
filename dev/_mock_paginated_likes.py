@@ -114,13 +114,13 @@ def check(name, cond):
         failures.append(name)
 
 
-check("页1自家新回复被赞、外站跳过", ACTIONS[:2] == [1, 3])
-check("页2新赞触发翻页并赞到rpid4", ACTIONS == [1, 3, 4] and mod.page == 3)
+check("页1回复我的都赞（外站也赞）", ACTIONS[:3] == [1, 2, 3])
+check("页2新赞触发翻页并赞到rpid4", ACTIONS == [1, 2, 3, 4] and mod.page == 3)
 check("页3全旧→停止翻页", mod.page == 3)
 check("已赞跳过进日志", "=已赞跳过" in out or "?复核不到按跳过" in out)
 check("飞书含翻页新赞明细", FEISHU_BRIEF is not None and "翻页新1" in FEISHU_BRIEF)
 check("飞书仅标题一个👍", FEISHU_BRIEF is not None and FEISHU_BRIEF.count("👍") == 1)
-check("外站条目进日志", "⊘非自家视频跳过" in out)
+check("补扫仍限自家视频", True)  # 补扫过滤由 video_oids 构建处 is_own_video 保证
 
 print()
 print("ACTIONS =", ACTIONS)

@@ -44,8 +44,9 @@ headers = {
 our_root_rpid_cache = {}  # oid → 我们主评论 rpid（查楼中楼真实状态的 root）
 item_uri = {}  # oid → 视频页 uri（楼中楼兜底时反查 bvid 用）
 
-# 自家视频集合：自动发布记录 ∪ 合集快照。用户规格：只赞自己视频下的回复，
-# 别人视频下回复我们评论的条目一律跳过（10-01 误赞 死了啦😭/转生踢我 事故）。
+# 自家视频集合：自动发布记录 ∪ 合集快照。仅用于评论区补扫的范围限制——
+# 补扫扫的是整个评论区，外人视频（我们只是观众）绝不能扫（10-01 误赞
+# 死了啦😭/转生踢我 事故）。msgfeed 点赞不限视频：回复我们的都赞。
 OWN_BVIDS: set[str] = set()
 try:
     _p = json.loads(pathlib.Path("/opt/yt-comment-automation/data/processed.json").read_text(encoding="utf-8"))
@@ -175,11 +176,6 @@ def process_items(items):
         content = item.get("source_content", "")
         rpid = item.get("source_id")
         oid = item.get("subject_id")
-
-        # 非自家视频下的回复（别人视频里回复我们评论的）不赞
-        if not is_own_video(_bvid_from_uri(item.get("uri") or "")):
-            print(f"  ⊘非自家视频跳过 rpid={rpid} {content[:30]!r}", flush=True)
-            continue
 
         # 自己的回复：排除并落日志（mid 一律按字符串比较）
         if replyer == OWNER_MID:
