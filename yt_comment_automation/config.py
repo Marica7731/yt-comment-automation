@@ -2,8 +2,9 @@
 
 敏感配置：
 - BILI_COOKIE_FILE: biliup 格式 cookie JSON（SESSDATA/bili_jct/DedeUserID）
-- FEISHU_APP_ID / FEISHU_APP_SECRET / MY_FEISHU_OPEN_ID: 飞书自建应用
+- FEISHU_APP_ID / FEISHU_APP_SECRET / MY_FEISHU_OPEN_ID: 当前项目飞书机器人
 - 发布和点赞均走 Codex 审核队列；生产不读取任何外部模型凭据
+- 飞书凭据只从当前进程环境或本项目 private.env 读取，禁止回退旧机器人/桥接文件
 - SONG_SERCH_LYRICS_ROOT: song_serch_lyrics 仓库根目录（复用其评论抓取实现）
 
 优先从环境变量读取；未设置时尝试读取同目录私有文件 ../private.env（gitignore）。
@@ -49,41 +50,15 @@ def cookie_file() -> str:
     return get("BILI_COOKIE_FILE", str(ROOT / "runtime" / "biliup_cookies.json"))
 
 
-_feishu_bridge_loaded = False
-
-
-def _load_feishu_bridge() -> None:
-    """手动运行时环境变量缺飞书凭据，尝试从既有 feishupy 部署补载（cron 由 run.sh 加载）。"""
-    global _feishu_bridge_loaded
-    if _feishu_bridge_loaded:
-        return
-    _feishu_bridge_loaded = True
-    if get("FEISHU_APP_ID") and get("FEISHU_APP_SECRET") and get("MY_FEISHU_OPEN_ID"):
-        return
-    bridge = get("FEISHU_BRIDGE_ENV", "/opt/feishupy-vps-jp/runtime/bridge.env")
-    try:
-        for line in Path(bridge).read_text(encoding="utf-8").splitlines():
-            m = None
-            import re as _re
-            m = _re.match(r"^(FEISHU_APP_ID|FEISHU_APP_SECRET|MY_FEISHU_OPEN_ID)=(.*)$", line.strip())
-            if m and not get(m.group(1)):
-                os.environ.setdefault(m.group(1), m.group(2).strip('"'))
-    except OSError:
-        pass
-
-
 def feishu_app_id() -> str:
-    _load_feishu_bridge()
     return get("FEISHU_APP_ID")
 
 
 def feishu_app_secret() -> str:
-    _load_feishu_bridge()
     return get("FEISHU_APP_SECRET")
 
 
 def feishu_open_id() -> str:
-    _load_feishu_bridge()
     return get("MY_FEISHU_OPEN_ID", get("FEISHU_OPEN_ID"))
 
 

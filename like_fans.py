@@ -190,11 +190,12 @@ try:
             "count": counts.get("pending", 0),
             "total": counts.get("total", 0),
             "counts": counts,
+            "candidates": list(review_candidates.values()),
         }
 
-    def apply_approved_likes(path: str) -> tuple[int, int, int]:
+    def apply_approved_likes(path: str) -> dict:
         """执行 Codex 审核通过的点赞；每次 action 前重新确认当前未赞。"""
-        result = like_review.apply_approved(
+        return like_review.apply_approved(
             resolve_real_liked,
             send_like,
             path,
@@ -202,18 +203,25 @@ try:
             save_liked_set=save_liked_set,
             sleep=time.sleep,
         )
-        return result.get("liked", 0), result.get("skipped", 0), result.get("failed", 0)
 
     RUN_TS = notify.beijing_now()
 except Exception:  # noqa: BLE001
     RUN_TS = time.strftime("%Y-%m-%d %H:%M:%S")
 if len(sys.argv) >= 3 and sys.argv[1] == "--apply":
-    liked_n, skipped_n, failed_n = apply_approved_likes(sys.argv[2])
+    apply_result = apply_approved_likes(sys.argv[2])
+    liked_n = apply_result.get("liked", 0)
+    skipped_n = apply_result.get("skipped", 0)
+    failed_n = apply_result.get("failed", 0)
     summary = f"汇总: 点赞 {liked_n} | 已赞跳过 {skipped_n} | 失败 {failed_n}"
     print(summary, flush=True)
     if liked_n or failed_n:
         try:
-            notify.send_feishu_message(chr(10).join(["👍Codex 审核点赞执行", summary, f"时间：{notify.beijing_now()}" ]))
+            notify.send_feishu_message(
+                notify.build_like_action_brief(
+                    apply_result.get("executed", []),
+                    summary=summary,
+                )
+            )
         except Exception as err:  # noqa: BLE001
             print(f"飞书通知失败: {err}", flush=True)
     raise SystemExit(0 if failed_n == 0 else 1)
@@ -337,6 +345,8 @@ print(review_summary, flush=True)
 print(f"翻页: {page} 页 / {total_items} 条", flush=True)
 if review_payload["count"]:
     try:
-        notify.send_feishu_message(chr(10).join(["👍点赞候选待审核", review_summary, f"时间：{notify.beijing_now()}" ]))
+        notify.send_feishu_message(
+            notify.build_like_review_brief(review_payload.get("candidates", []))
+        )
     except Exception as err:  # noqa: BLE001
         print(f"飞书通知失败: {err}", flush=True)

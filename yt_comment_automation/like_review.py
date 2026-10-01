@@ -256,5 +256,12 @@ def apply_approved(
     payload["last_applied_at"] = _now()
     _write(target, payload)
     result = summarize(payload)
-    result.update({"liked": liked_count, "skipped": skipped_count, "failed": failed_count})
+    result.update(
+        {
+            "liked": liked_count,
+            "skipped": skipped_count,
+            "failed": failed_count,
+            "executed": [dict(item) for item in approved],
+        }
+    )
     return result

@@ -19,10 +19,6 @@ RUN_EXIT=$?
 # 运行异常（Python 崩溃已由 cli 发飞书；这里兜底 timeout 超时/SIGTERM 等进程级退出）
 if [ $RUN_EXIT -ne 0 ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') run exited with $RUN_EXIT" >> "$LOGFILE"
-  # 从既有 feishupy 部署读取飞书凭据后再发通知
-  export FEISHU_APP_ID="$(grep -E '^FEISHU_APP_ID=' /opt/feishupy-vps-jp/runtime/bridge.env 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
-  export FEISHU_APP_SECRET="$(grep -E '^FEISHU_APP_SECRET=' /opt/feishupy-vps-jp/runtime/bridge.env 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
-  export MY_FEISHU_OPEN_ID="$(grep -E '^MY_FEISHU_OPEN_ID=' /opt/feishupy-vps-jp/runtime/bridge.env 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
   PYTHONPATH=/opt/yt-comment-automation python3 -c "
 import sys
 sys.path.insert(0, '/opt/yt-comment-automation')

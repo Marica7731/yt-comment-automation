@@ -203,3 +203,83 @@ def test_cli_crash_sends_notify(mocker=None):
 
     b = notify.build_crash_brief(tb)
     assert "RuntimeError: boom" in b
+
+
+def test_detailed_success_brief_includes_cleanup_and_verification():
+    from yt_comment_automation import notify
+
+    brief = notify.build_success_brief(
+        "BV1Detail",
+        "https://youtu.be/detail",
+        posted_at="2026-10-02 04:00:00",
+        song_count=2,
+        source_text="0:01:00 A\n0:02:00 MC\n0:03:00 B",
+        source_lines="0:01:00 A\n0:02:00 MC\n0:03:00 B",
+        draft_messages=["0:01:00 01. A - X\n0:03:00 02. B - Y"],
+        approved_messages=["0:01:00 01. A - X\n0:03:00 02. B - Y"],
+        note="Codex corrected numbering",
+        verification={"ok": True, "detail": "回读通过 1 条顶层评论"},
+        rpids=["111", "222"],
+        segments=3,
+        failures=[],
+        status="applied",
+        commit="abc1234",
+    )
+    assert "原始时间戳行：3 → 本地草稿行：2 → 最终发布行：2" in brief
+    assert "节目/谈话标记" in brief
+    assert "本地草稿" in brief
+    assert "最终发布" in brief
+    assert "回读通过" in brief
+    assert "rpids：111,222" in brief
+    assert "commit：abc1234" in brief
+
+
+def test_code_fix_brief_is_auditable():
+    from yt_comment_automation import notify
+
+    brief = notify.build_code_fix_brief(
+        summary="移除旧 Feishu bridge fallback",
+        root_cause="config.py 仍从旧机器人文件补载凭据",
+        changes=["只读取当前项目 private.env/环境变量"],
+        tests=["pytest -q", "python3 -m py_compile ..."],
+        commit="def5678",
+        files=["yt_comment_automation/config.py"],
+    )
+    assert "根因：config.py 仍从旧机器人文件补载凭据" in brief
+    assert "yt_comment_automation/config.py" in brief
+    assert "pytest -q" in brief
+    assert "commit：def5678" in brief
+
+
+def test_like_action_brief_lists_candidates():
+    from yt_comment_automation import notify
+
+    brief = notify.build_like_action_brief(
+        [
+            {
+                "rpid": "901",
+                "oid": "77",
+                "source": "msgfeed",
+                "content": "ありがとう！",
+                "result": "liked",
+                "error": "",
+            }
+        ],
+        summary="点赞 1 | 失败 0",
+        commit="aaa1111",
+    )
+    assert "rpid=901" in brief
+    assert "oid=77" in brief
+    assert "source=msgfeed" in brief
+    assert "result=liked" in brief
+    assert "commit：aaa1111" in brief
+
+
+def test_config_has_no_legacy_feishu_bridge_loader():
+    import inspect
+
+    from yt_comment_automation import config
+
+    source = inspect.getsource(config)
+    assert "_load_feishu_bridge" not in source
+    assert "FEISHU_BRIDGE_ENV" not in source

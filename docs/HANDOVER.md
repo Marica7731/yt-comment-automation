@@ -18,7 +18,7 @@
 | 粉丝点赞 | 无 cron，由 Codex heartbeat 直接触发 | `flock -n /tmp/like-fans.lock python3 like_fans.py` | `logs/like_fans.log` |
 | 每日清洗复盘 | `0 0 * * *`(UTC)=北京 8:00 | `flock -n /tmp/daily-review.lock python3 daily_clean_review.py` | `logs/daily_review.log` |
 
-- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：`run.sh` 从 `/opt/feishupy-vps-jp/runtime/bridge.env` 加载（FEISHU_APP_ID/SECRET/MY_FEISHU_OPEN_ID）；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据。
+- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：仅从 WDC `/opt/yt-comment-automation/private.env` 或进程环境读取 `FEISHU_APP_ID/FEISHU_APP_SECRET/MY_FEISHU_OPEN_ID`，通知机器人固定为 `yt-comment-automation`；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据，禁止读取旧 bridge。
 - `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲`、`IGNORE_BVIDS`（6 个无歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
 - **所有 B 站 API 请求必须带 cookie**（裸请求 412，换 UA 没用）。
 - 本地对应仓库：`G:\codex-work\yt-comment-automation`。发布流程：本地改 → commit/push → WDC `git pull` → 实跑验证。

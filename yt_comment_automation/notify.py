@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Iterable, Optional
 
 from . import config
 
@@ -67,6 +69,170 @@ def send_feishu_message(text: str, dry_run: bool = False) -> tuple[bool, str]:
     return True, f"飞书已发送 message_id={resp.get('data', {}).get('message_id', '')}"
 
 
+def git_summary() -> str:
+    """Return the current short commit and dirty marker for audit reports."""
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(config.ROOT),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(config.ROOT),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return f"{commit}{'+dirty' if dirty else ''}"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _as_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        return "\n---\n".join(str(item) for item in value if str(item).strip())
+    return str(value)
+
+
+def _timestamp_lines(value: Any) -> list[str]:
+    text = _as_text(value)
+    ts_re = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")
+    return [line.strip() for line in text.splitlines() if line.strip() and ts_re.search(line)]
+
+
+def _clean_diff_reason(line: str, draft_lines: set[str], final_lines: set[str]) -> str:
+    if line not in draft_lines:
+        if not re.search(r"\d{1,2}:\d{2}(?::\d{2})?", line):
+            return "非歌单标记（无有效时间戳）"
+        if re.search(r"MC|開場|エンディング|エンドカード|話|トーク|掃除|声入り|开始|結束", line, re.I):
+            return "节目/谈话标记，不属于歌曲"
+        return "本地规则未识别为歌单"
+    if line not in final_lines:
+        return "Codex 审核删除或改写"
+    return "格式规范化"
+
+
+def build_cleanup_report(
+    source_text: str = "",
+    source_lines: str = "",
+    draft_messages: Any = None,
+    approved_messages: Any = None,
+    note: str = "",
+) -> tuple[str, str, str, str]:
+    """Build counts plus deterministic removed/changed explanations."""
+    raw_lines = _timestamp_lines(source_lines or source_text)
+    draft_lines = _timestamp_lines(draft_messages)
+    final_lines = _timestamp_lines(approved_messages)
+    draft_set, final_set = set(draft_lines), set(final_lines)
+    removed = [line for line in raw_lines if line not in draft_set and line not in final_set]
+    changed = [
+        (old, new)
+        for old, new in zip(raw_lines, final_lines)
+        if old != new and old in draft_set or old not in draft_set and new in final_set
+    ]
+    added = [line for line in final_lines if line not in raw_lines]
+    details: list[str] = []
+    for line in removed:
+        details.append(f"- 删除：{line}\n  原因：{_clean_diff_reason(line, draft_set, final_set)}")
+    for old, new in changed:
+        reason = "格式规范化" if re.sub(r"\s+", "", old) == re.sub(r"\s+", "", new) else "Codex 审核修正"
+        details.append(f"- 修改：{old}\n  改为：{new}\n  原因：{reason}")
+    for line in added:
+        details.append(f"- 新增：{line}\n  原因：Codex 审核补充")
+    if not details:
+        details.append("- 无删除、修改或新增；原始时间戳行全部保留")
+    counts = (
+        f"原始时间戳行：{len(raw_lines)} → 本地草稿行：{len(draft_lines)} → 最终发布行：{len(final_lines)}\n"
+        f"删除 {len(removed)} 行，修改 {len(changed)} 行，新增 {len(added)} 行"
+    )
+    if note:
+        details.append(f"- 审核备注：{note}")
+    return counts, "\n".join(details), _as_text(source_text), _as_text(source_lines)
+
+
+def build_code_fix_brief(
+    summary: str,
+    root_cause: str,
+    changes: Iterable[str] | str,
+    tests: Iterable[str] | str,
+    commit: str = "",
+    files: Iterable[str] | str = (),
+) -> str:
+    """Detailed code-fix report: cause, files, behavior change, tests, commit."""
+    change_text = "\n".join(str(x) for x in changes) if not isinstance(changes, str) else changes
+    test_text = "\n".join(str(x) for x in tests) if not isinstance(tests, str) else tests
+    file_text = "\n".join(str(x) for x in files) if not isinstance(files, str) else files
+    lines = [
+        "🛠代码修复完成",
+        f"摘要：{summary}",
+        f"根因：{root_cause}",
+    ]
+    if file_text:
+        lines.extend(["——变更文件——", file_text])
+    if change_text:
+        lines.extend(["——行为变更——", change_text])
+    if test_text:
+        lines.extend(["——测试——", test_text])
+    lines.append(f"commit：{commit or git_summary()}")
+    lines.append(f"时间：{beijing_now()}")
+    return "\n".join(lines)
+
+
+def build_like_action_brief(
+    results: Iterable[dict[str, Any]],
+    summary: str = "",
+    commit: str = "",
+) -> str:
+    """Detailed like action report with candidate identity and result."""
+    rows = list(results)
+    lines = ["👍Codex 审核点赞执行"]
+    if summary:
+        lines.append(summary)
+    lines.append(f"执行条数：{len(rows)}")
+    for row in rows:
+        lines.append(
+            "- rpid={rpid} oid={oid} source={source} result={result} error={error}\n"
+            "  content={content}".format(
+                rpid=row.get("rpid", ""),
+                oid=row.get("oid", ""),
+                source=row.get("source", ""),
+                result=row.get("result", row.get("status", "")),
+                error=row.get("error", ""),
+                content=str(row.get("content", "")).replace("\n", " ")[:240],
+            )
+        )
+    if not rows:
+        lines.append("- 无可执行候选")
+    lines.append(f"commit：{commit or git_summary()}")
+    lines.append(f"时间：{beijing_now()}")
+    return "\n".join(lines)
+
+
+def build_like_review_brief(
+    candidates: Iterable[dict[str, Any]],
+    commit: str = "",
+) -> str:
+    rows = list(candidates)
+    lines = ["👍点赞候选待 Codex 审核", f"新增候选：{len(rows)}"]
+    for row in rows:
+        lines.append(
+            "- rpid={rpid} oid={oid} source={source}\n  content={content}".format(
+                rpid=row.get("rpid", ""),
+                oid=row.get("oid", ""),
+                source=row.get("source", ""),
+                content=str(row.get("content", "")).replace("\n", " ")[:240],
+            )
+        )
+    lines.append(f"commit：{commit or git_summary()}")
+    lines.append(f"时间：{beijing_now()}")
+    return "\n".join(lines)
+
+
 def build_success_brief(
     bvid: str,
     yt_link: str,
@@ -75,24 +241,59 @@ def build_success_brief(
     profile: str = "",
     source_lines: str = "",
     final_message: str = "",
+    source_text: str = "",
+    draft_messages: Any = None,
+    approved_messages: Any = None,
+    note: str = "",
+    verification: Any = None,
+    rpids: Iterable[str] | str = (),
+    segments: int | str = 0,
+    failures: Iterable[str] | str = (),
+    status: str = "",
+    commit: str = "",
+    title: str = "",
+    collection: str = "",
 ) -> str:
-    """发送成功通知：链接/时间/数量/主播 + 源时间戳全量（未过滤）+ 发布时间轴。"""
+    """Detailed success report with source/draft/final content and verification."""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
     lines = [
-        "✅评论发送成功",
+        "✅评论发送成功（Codex 详细报告）",
         bili_link,
         yt_link,
         posted_at or beijing_now(),
+        f"状态：{status or 'applied'}",
         f"歌曲数量：{song_count}",
+        f"commit：{commit or git_summary()}",
     ]
+    if title:
+        lines.append(f"标题：{title}")
+    if collection:
+        lines.append(f"合集：{collection}")
     if profile:
         lines.append(profile)
-    if source_lines:
-        lines.append("——源时间戳（原始未过滤）——")
-        lines.append(source_lines)
-    if final_message:
-        lines.append("——发布（清理后）——")
-        lines.append(final_message)
+    counts, diff_report, raw_source, raw_lines = build_cleanup_report(
+        source_text=source_text,
+        source_lines=source_lines,
+        draft_messages=draft_messages,
+        approved_messages=approved_messages or final_message,
+        note=note,
+    )
+    lines.extend(["——清洗前后计数——", counts, "——清洗差异与原因——", diff_report])
+    lines.extend(["——原始来源——", raw_source or raw_lines or "（未提供）"])
+    if draft_messages is not None:
+        lines.extend(["——本地草稿——", _as_text(draft_messages) or "（空）"])
+    lines.extend(["——最终发布——", _as_text(approved_messages or final_message) or "（空）"])
+    if verification is not None:
+        lines.append(f"验证：{verification}")
+    if rpids:
+        lines.append(f"rpids：{','.join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids}")
+    if segments:
+        lines.append(f"segments：{segments}")
+    if failures:
+        lines.append(f"failures：{'; '.join(str(x) for x in failures) if not isinstance(failures, str) else failures}")
+    if note:
+        lines.append(f"审核备注：{note}")
+    lines.append(f"报告时间：{beijing_now()}")
     return "\n".join(lines)
 
 
@@ -113,6 +314,17 @@ def build_failure_brief(
     title: str = "",
     collection: str = "",
     yt_link: str = "",
+    source_text: str = "",
+    source_lines: str = "",
+    draft_messages: Any = None,
+    approved_messages: Any = None,
+    note: str = "",
+    verification: Any = None,
+    rpids: Iterable[str] | str = (),
+    segments: int | str = 0,
+    failures: Iterable[str] | str = (),
+    status: str = "",
+    commit: str = "",
 ) -> str:
     """失败通知：按错误类型给标题，附视频标题、合集、B站/油管链接、原因、时间。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
@@ -123,7 +335,34 @@ def build_failure_brief(
         lines.append(f"合集：{collection}")
     if yt_link:
         lines.append(yt_link)
+    if status:
+        lines.append(f"状态：{status}")
+    lines.append(f"commit：{commit or git_summary()}")
     lines.append(f"原因：{reason}")
+    if source_text or source_lines or draft_messages is not None or approved_messages is not None:
+        counts, diff_report, raw_source, raw_lines = build_cleanup_report(
+            source_text=source_text,
+            source_lines=source_lines,
+            draft_messages=draft_messages,
+            approved_messages=approved_messages,
+            note=note,
+        )
+        lines.extend(["——清洗前后计数——", counts, "——清洗差异与原因——", diff_report])
+        lines.extend(["——原始来源——", raw_source or raw_lines or "（未提供）"])
+        if draft_messages is not None:
+            lines.extend(["——本地草稿——", _as_text(draft_messages) or "（空）"])
+        if approved_messages is not None:
+            lines.extend(["——最终内容——", _as_text(approved_messages) or "（空）"])
+    if verification is not None:
+        lines.append(f"验证：{verification}")
+    if rpids:
+        lines.append(f"rpids：{','.join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids}")
+    if segments:
+        lines.append(f"segments：{segments}")
+    if failures:
+        lines.append(f"failures：{'; '.join(str(x) for x in failures) if not isinstance(failures, str) else failures}")
+    if note:
+        lines.append(f"审核备注：{note}")
     lines.append(f"时间：{beijing_now()}")
     return "\n".join(lines)
 

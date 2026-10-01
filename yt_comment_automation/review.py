@@ -205,6 +205,7 @@ def apply_comment(
     _mark_processed(Path(data_dir or config.data_dir()), bvid)
 
     try:
+        commit = notify.git_summary()
         if verified:
             brief = notify.build_success_brief(
                 bvid=bvid,
@@ -214,6 +215,18 @@ def apply_comment(
                 profile=item.get("desc_profile", ""),
                 source_lines=item.get("source_lines", ""),
                 final_message="\n---\n".join(messages),
+                source_text=item.get("source_text", ""),
+                draft_messages=item.get("draft_messages", []),
+                approved_messages=messages,
+                note=item.get("note", ""),
+                verification=item.get("verification"),
+                rpids=rpids,
+                segments=segments,
+                failures=failures,
+                status=item.get("status", ""),
+                commit=commit,
+                title=item.get("title", ""),
+                collection=item.get("collection", ""),
             )
         else:
             brief = notify.build_failure_brief(
@@ -222,6 +235,17 @@ def apply_comment(
                 title=item.get("title", ""),
                 collection=item.get("collection", ""),
                 yt_link=f"https://youtu.be/{item.get('yt_id', '')}" if item.get("yt_id") else "",
+                source_text=item.get("source_text", ""),
+                source_lines=item.get("source_lines", ""),
+                draft_messages=item.get("draft_messages", []),
+                approved_messages=messages,
+                note=item.get("note", ""),
+                verification=item.get("verification"),
+                rpids=rpids,
+                segments=segments,
+                failures=failures,
+                status=item.get("status", ""),
+                commit=commit,
             )
         notify.send_feishu_message(brief)
     except Exception:  # noqa: BLE001
