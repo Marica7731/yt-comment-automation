@@ -580,6 +580,17 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if not songlist_comments:
             desc_ts_seconds = len(re.findall(r"\d{1,2}:\d{2}:\d{2}", local_source_text or ""))
             if desc_ts_seconds < 2:
+                if config.codex_review() and not dry_run and review_source_text.strip():
+                    return _queue_codex_review(
+                        result,
+                        [],
+                        [],
+                        review_source_text,
+                        "codex_review",
+                        upgrade_mode,
+                        existing_rpid,
+                        cache_dir.parent,
+                    )
                 result.status = "skipped_no_songs"
                 result.detail = "未提取到有效歌曲（无结构化歌单评论，简介无秒级时间轴，跳过本地兜底）"
                 logger.info("[%s] %s", video.bvid, result.detail)

@@ -93,7 +93,7 @@
 ## 6. 验证纪律（血泪沉淀，违反必出事故）
 
 1. **部署脚本后必须实跑验证**；重大改动用**原样 cron 命令连跑两轮**看稳态（只跑一轮手工测试不算数——重抓间隔账本 bug 就是第二轮才暴露的）。
-2. 代码改动先 `python -m py_compile` + `pyflakes` + `pytest tests/`（90 项）；重构后必跑 pyflakes（多P改造曾遗留 NameError 崩 28 小时）。
+2. 代码改动先 `python -m py_compile` + `pyflakes` + `pytest tests/`（91 项）；重构后必跑 pyflakes（多P改造曾遗留 NameError 崩 28 小时）。
 3. Python 写文件用 Write 工具，禁止 heredoc 嵌码（Git Bash 引号会毁 f-string）；复杂逻辑写脚本文件跑，不塞 `python -c`。
 4. **禁止编造 API 的 host/路径/参数**：参数不确定就自己抓包看真实请求（浏览器 HAR/服务端实测），抓不到就明说没依据。HTTP 200 ≠ 参数正确（编造参数被静默忽略返回首页同款数据），必须比对返回内容。
 5. 诊断先看日志/cache 再下结论；用户贴的飞书通知可能滞后于已做的修复；汇报时间必须换算北京时间。
@@ -123,4 +123,4 @@
 - `RULES.md`：R01-R17 清洗规则权威文档（本地/插件共用）
 - `docs/feishu-notify-tutorial.md`：飞书通知通用教程
 - `CODEX_GOAL.md`：目标跟踪约定（完成后重命名归档）
-- `tests/`：90 项单元测试
+- `tests/`：91 项单元测试

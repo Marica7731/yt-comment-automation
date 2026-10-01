@@ -2,6 +2,8 @@
 from pathlib import Path
 
 from yt_comment_automation import like_review, review
+from yt_comment_automation import config as _config
+from yt_comment_automation import pipeline
 
 
 def test_like_review_merge_preserves_approval(tmp_path: Path):
@@ -84,6 +86,26 @@ def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
     assert item["draft_messages"] == ["0:01:00 01. A - B"]
     assert path.is_file()
 
+
+def test_codex_review_reaches_queue_before_local_gate(tmp_path: Path, monkeypatch):
+    """简介只有分钟级时间戳时也不能在 Codex 模式提前丢弃来源。"""
+    source = "01 1:00 A\n02 2:00 B"
+    video = type("Video", (), {"bvid": "BV1Gate", "yt_id": "yt-gate", "title": "t", "part_date": "2026-10-01", "collection": "c", "section": "s"})()
+    queued = []
+
+    monkeypatch.setattr(_config, "codex_review", lambda: True)
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
+    monkeypatch.setattr(pipeline, "_fetch_bili_video_info", lambda bvid, cookie_map=None: ("yt-gate", source, []))
+    monkeypatch.setattr(pipeline, "_refetch_gate", lambda cache_dir, yt_id, part_date: (0, 0))
+    monkeypatch.setattr(pipeline.yt_fetch, "fetch_youtube_raw", lambda *args, **kwargs: {"comments": [], "description": source})
+    monkeypatch.setattr(pipeline, "raw_has_timestamp_songlist", lambda raw: False)
+    monkeypatch.setattr(pipeline.review, "queue_comment", lambda payload, data_dir: (queued.append(payload) or tmp_path / "queued.json"))
+
+    result = pipeline.process_video(video, tmp_path, dry_run=False)
+
+    assert result.status == "needs_codex_review"
+    assert queued and queued[0]["source_text"] == source
 
 def test_comment_apply_marks_processed_and_verifies(tmp_path: Path, monkeypatch):
     payload = {
