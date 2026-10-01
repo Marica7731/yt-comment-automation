@@ -1,60 +1,10 @@
-"""ai.py 与 bili_comment.py 单元测试：DS 输出解析、分段、无歌手过滤。"""
+"""bili_comment 发布、通知与错误处理单元测试。"""
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from yt_comment_automation import ai, bili_comment  # noqa: E402
-
-
-def test_parse_ai_output_with_timestamps():
-    text = """0:02:16 01. バラライカ - 月島きらり starring 久住小春（モーニング娘。）
-0:06:41 02. Together - あきよしふみえ
-3:04 03. テスト曲 - テスト歌手"""
-    items = ai.parse_ai_output_to_items(text)
-    assert len(items) == 3
-    assert items[0].song == "バラライカ"
-    assert items[0].timestamp_seconds == 136
-    assert items[1].artist == "あきよしふみえ"
-    assert items[2].timestamp_seconds == 184
-
-
-def test_parse_ai_output_no_timestamp_fallback():
-    text = "01. バラライカ - 月島きらり\n02. Together - あきよしふみえ"
-    items = ai.parse_ai_output_to_items(text)
-    assert len(items) == 2
-    assert items[0].timestamp_seconds is None
-
-
-def test_parse_ai_output_keeps_no_artist():
-    text = "0:01:00 01. ただの曲名\n0:02:00 02. 有効曲 - 歌手"
-    items = ai.parse_ai_output_to_items(text)
-    assert len(items) == 2
-    assert items[0].song == "ただの曲名"
-    assert items[0].artist == ""
-    assert items[1].song == "有効曲"
-
-
-def test_parse_ai_output_unknown_artist_cleared():
-    text = "0:01:00 01. 曲 - 未記載\n0:02:00 02. 有効曲 - 歌手"
-    items = ai.parse_ai_output_to_items(text)
-    assert len(items) == 2
-    assert items[0].artist == ""  # 未記載 → 视为无歌手
-    assert items[1].song == "有効曲"
-
-
-def test_parse_ai_output_skips_blank_lines():
-    text = "0:01:00 01. 曲 - 歌手\n\n0:02:00 02. 曲2 - 歌手2\n\n"
-    items = ai.parse_ai_output_to_items(text)
-    assert len(items) == 2
-
-
-def test_parse_ai_output_artist_with_hyphen():
-    text = "0:01:00 01. Don't say \"lazy\" - 桜高軽音部"
-    items = ai.parse_ai_output_to_items(text)
-    assert len(items) == 1
-    assert items[0].song == 'Don\'t say "lazy"'
-    assert items[0].artist == "桜高軽音部"
+from yt_comment_automation import bili_comment  # noqa: E402
 
 
 def test_split_message_under_limit_single_segment():
@@ -253,59 +203,3 @@ def test_cli_crash_sends_notify(mocker=None):
 
     b = notify.build_crash_brief(tb)
     assert "RuntimeError: boom" in b
-
-
-def test_verify_items_detects_timestamp_shift():
-    """BV1JdYJ6GEev 案例：剔除スタート行后时间戳整体错位，校验应能发现。"""
-    source = """🐺☽ ໋꙳ Setlist 🐺🌟🎶
- 『05:33』スタート
- 『14:28』シャルル / バルーン
- 『21:16』だれかの心臓になれたなら / ユリイ・カノン
- 『28:31』ヤミタイガール / れるりり"""
-    from yt_comment_automation import ai
-
-    # 错位版本（每首拿到上一行时间戳）
-    shifted = [
-        ai.ParsedSong("シャルル", "バルーン", "0:05:33", 333),
-        ai.ParsedSong("だれかの心臓になれたなら", "ユリイ・カノン", "0:14:28", 868),
-        ai.ParsedSong("ヤミタイガール", "れるりり", "0:21:16", 1276),
-    ]
-    good, bad = ai.verify_items_against_source(shifted, source)
-    assert good is None  # 全部错位 → 整体作废
-    assert len(bad) == 3
-
-    # 正确版本（同行配对）
-    correct = [
-        ai.ParsedSong("シャルル", "バルーン", "0:14:28", 868),
-        ai.ParsedSong("だれかの心臓になれたなら", "ユリイ・カノン", "0:21:16", 1276),
-        ai.ParsedSong("ヤミタイガール", "れるりり", "0:28:31", 1711),
-    ]
-    good2, bad2 = ai.verify_items_against_source(correct, source)
-    assert good2 is not None
-    assert len(bad2) == 0
-    assert len(good2) == 3
-
-
-def test_verify_items_adjacent_lines_pair():
-    """跨行格式（时间戳行+歌名行相邻）应配对成功。"""
-    from yt_comment_automation import ai
-
-    source = "声入り\n2:03\n配信開始\n3:40\nミックスナッツ/ Official髭男dism"
-    items = [ai.ParsedSong("ミックスナッツ", "Official髭男dism", "3:40", 220)]
-    good, bad = ai.verify_items_against_source(items, source)
-    assert good is not None and len(good) == 1 and len(bad) == 0
-
-
-def test_verify_items_partial_bad_trimmed():
-    """少数行配不上 → 只剔除坏行，保留好的。"""
-    from yt_comment_automation import ai
-
-    source = "0:01:00 曲A / 歌手A\n0:02:00 曲B / 歌手B\n0:03:00 曲C / 歌手C"
-    items = [
-        ai.ParsedSong("曲A", "歌手A", "0:01:00", 60),
-        ai.ParsedSong("曲B", "歌手B", "0:02:30", 150),  # 时间戳不存在 → 坏行
-        ai.ParsedSong("曲C", "歌手C", "0:03:00", 180),
-    ]
-    good, bad = ai.verify_items_against_source(items, source, max_bad_ratio=0.5)
-    assert good is not None and len(good) == 2
-    assert len(bad) == 1 and bad[0].song == "曲B"

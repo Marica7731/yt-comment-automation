@@ -164,7 +164,7 @@ def test_is_junk_song_title_filters_onomatopoeia():
 
 
 def test_description_setlist_detected_as_songlist():
-    """BV15wYE68EBb：B站简介自带 SETLIST（无歌手歌名）应判为歌单、可喂 AI。"""
+    """BV15wYE68EBb：B站简介自带 SETLIST（无歌手歌名）应判为歌单并进入审核候选。"""
     from yt_comment_automation.pipeline import _is_songlist_comment
 
     desc = """・セットリスト
@@ -179,34 +179,17 @@ def test_description_setlist_detected_as_songlist():
     assert _is_songlist_comment(desc) is True
 
 
-def test_verify_items_against_description():
-    """AI 从简介提取的结果能在简介原文配对。"""
-    from yt_comment_automation import ai
-
-    desc = """・セットリスト
-0:00:00 Starry☆Melody
-0:04:34 Citylight Fantasy
-0:17:06 トイ×トイ⭐︎パーティ！"""
-    items = [
-        ai.ParsedSong("Starry☆Melody", "", "0:00:00", 0),
-        ai.ParsedSong("Citylight Fantasy", "", "0:04:34", 274),
-        ai.ParsedSong("トイ×トイ⭐︎パーティ！", "", "0:17:06", 1026),
-    ]
-    good, bad = ai.verify_items_against_source(items, desc)
-    assert good is not None and len(good) == 3 and len(bad) == 0
-
-
 def test_no_artist_opening_markers_filtered():
     """BV1K8Yo6RESA：无歌手开场标记（声入り）与口琴（ハーモニカ）不进歌单；带歌手真歌保留。"""
-    from yt_comment_automation import clean, ai
+    from yt_comment_automation import clean
     from yt_comment_automation.pipeline import is_junk_song_title
 
     items = [
-        ai.ParsedSong("声入り", "", "0:02:39", 159),
-        ai.ParsedSong("わたしの一番かわいいところ", "FRUITS ZIPPER", "0:06:18", 378),
-        ai.ParsedSong("ハーモニカ", "", "0:17:17", 1037),
-        ai.ParsedSong("ハーモニカ", "aiko", "0:20:00", 1200),
-        ai.ParsedSong("すずめ", "", "0:25:00", 1500),
+        clean.ParsedSong("声入り", "", "0:02:39", 159),
+        clean.ParsedSong("わたしの一番かわいいところ", "FRUITS ZIPPER", "0:06:18", 378),
+        clean.ParsedSong("ハーモニカ", "", "0:17:17", 1037),
+        clean.ParsedSong("ハーモニカ", "aiko", "0:20:00", 1200),
+        clean.ParsedSong("すずめ", "", "0:25:00", 1500),
     ]
     filtered = [
         it for it in items

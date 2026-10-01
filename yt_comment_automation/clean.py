@@ -1,6 +1,6 @@
 """YouTube 评论时间轴 → 歌曲列表 本地规则清洗（Python 移植版）。
 
-规则设计移植自油猴脚本「YouTube 评论纯文本复制 + AI整理（括号保护 + 曲目数量校正版）」
+规则设计移植自油猴脚本「YouTube 评论纯文本复制（括号保护 + 曲目数量校正版）」
 的核心本地清洗逻辑：括号保护、译文/罗马字括号删除、分隔符统一、时间戳提取、
 多行折叠时间轴合并、去重、格式化输出。
 """
@@ -464,7 +464,7 @@ def clean_song_or_artist_part(text: str) -> str:
     # 受保护正式标题（R09）：任何清洗步骤都不删改符号，直接返回干净结果
     if rules_has_protected_title(raw):
         return raw.strip()
-    # 先套用 DS 提炼的统一规则（R06/R07/R13/R14/R15：表演备注、译文括号、注音、日期、序号）
+    # 先套用确定性统一规则（R06/R07/R13/R14/R15：表演备注、译文括号、注音、日期、序号）
     t = apply_unified_rules(raw)
     t = strip_transliteration_parens_from_line(t).strip()
     t = strip_timeline_tree_prefix(t)
@@ -781,7 +781,7 @@ _BARE_TITLE_EXCLUDE = re.compile(
 def is_bare_title_excluded(song: str) -> bool:
     """无歌手歌名的排除判定（口琴间奏 ハーモニカ、哈欠 あくび 等被当歌名）。
 
-    供 AI 输出过滤复用：无歌手条目命中排除词 → 非歌；带歌手的不受影响
+    供候选输出过滤复用：无歌手条目命中排除词 → 非歌；带歌手的不受影响
     （aiko 的「ハーモニカ」这类真歌会以 歌名 - 歌手 形式出现）。
     """
     return bool(_BARE_TITLE_EXCLUDE.search((song or "").strip()))

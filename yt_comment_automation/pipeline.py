@@ -499,19 +499,19 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         logger.warning("[%s] 合并 history 缓存失败（忽略）: %s", video.bvid, merge_err)
     comments = list(dict.fromkeys(comments))
 
-    # 3b. 只保留「结构化歌单评论」，零散感想评论（夹 1 个时间戳的聊天）不喂给 DS/本地，
-    #    避免 DS 把「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」这类感想当歌单、
+    # 3b. 只保留「结构化歌单评论」，零散感想评论（夹 1 个时间戳的聊天）不进入候选，
+    #    避免把「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」这类感想当歌单、
     #    还把 UP 主昵称当歌手（BV1eYgV6WEq3 的错误根源）。
     songlist_comments = [t for t in comments if _is_songlist_comment(t)]
 
     # 3c. 评论区无歌单时，简介自带的 SETLIST 也是可靠来源：YouTube 简介
     #     （attributedDescription，频道主常写 SETLIST）优先，其次 B 站简介
     #     （投稿模板连同原文 SETLIST 一起写入，BV15wYE68EBb）。
-    ai_sources = list(songlist_comments)
-    if not ai_sources:
+    source_candidates = list(songlist_comments)
+    if not source_candidates:
         for cand in (description, desc):
             if cand and _is_songlist_comment(cand):
-                ai_sources = [cand]
+                source_candidates = [cand]
                 logger.info("[%s] 评论区无歌单，简介含 SETLIST，交给 Codex 审核", video.bvid)
                 break
 
@@ -525,7 +525,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                 _src_lines.append(_ln)
     result.source_lines = chr(10).join(_src_lines)
     # Codex 审核需要看到原始时间戳来源，即使本地规则判为无歌单也不能静默丢掉。
-    review_parts = list(ai_sources)
+    review_parts = list(source_candidates)
     for candidate_source in (description, desc):
         if candidate_source and candidate_source not in review_parts:
             review_parts.append(candidate_source)
@@ -560,7 +560,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                         cache_dir.parent,
                     )
                 result.status = "skipped_no_songs"
-                result.detail = "未提取到有效歌曲（无结构化歌单评论，简介无秒级时间轴，跳过本地兜底）"
+                result.detail = "未提取到有效歌曲（无结构化歌单评论，简介无秒级时间轴，暂无候选）"
                 logger.info("[%s] %s", video.bvid, result.detail)
                 return result
         # 逐个候选来源尝试本地规则；即使全部失败，原始来源仍由上方 Codex 队列接管。

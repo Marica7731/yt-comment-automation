@@ -1,7 +1,7 @@
-"""从 DS 差异样本提炼的统一规则实现（对应根目录 RULES.md R01-R17）。
+"""确定性统一规则实现（对应根目录 RULES.md R01-R17）。
 
-规则来源：extract_rules.py → data/rules_from_ds.json（DeepSeek reasoning high 提炼）。
-本模块把这些规则以确定性函数落地，供 clean.py 与未来插件/其他项目移植。
+规则来源：RULES.md 与 tests/test_rules.py 的人工审核记录。
+本模块把这些规则以确定性函数落地，供 clean.py 与插件移植。
 所有正则兼容 Python 与 JS（不使用 \\p 等差异语法）。
 """
 from __future__ import annotations

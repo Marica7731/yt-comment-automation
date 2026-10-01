@@ -3,7 +3,7 @@
 敏感配置：
 - BILI_COOKIE_FILE: biliup 格式 cookie JSON（SESSDATA/bili_jct/DedeUserID）
 - FEISHU_APP_ID / FEISHU_APP_SECRET / MY_FEISHU_OPEN_ID: 飞书自建应用
-- 发布和点赞均走 Codex 审核队列；生产不读取任何外部 AI key
+- 发布和点赞均走 Codex 审核队列；生产不读取任何外部模型凭据
 - SONG_SERCH_LYRICS_ROOT: song_serch_lyrics 仓库根目录（复用其评论抓取实现）
 
 优先从环境变量读取；未设置时尝试读取同目录私有文件 ../private.env（gitignore）。

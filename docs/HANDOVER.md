@@ -8,7 +8,7 @@
 
 - 仓库：`https://github.com/Marica7731/yt-comment-automation`（public，master，无密钥；private.env 被 gitignore）
 - 生产：WDC VPS `/opt/yt-comment-automation`（cron 驱动，长期无人值守）
-- 下游消费：`G:\codex-work\plugin` 的油猴插件 + `RULES.md` 共享清洗规则（`yt_comment_automation/rules.py` 由 auto_evolve 自动演进）
+- 下游消费：`G:\codex-work\plugin` 的油猴插件 + `RULES.md` 共享确定性清洗规则
 
 ## 2. 部署与调度全景（WDC）
 
@@ -18,7 +18,7 @@
 | 粉丝点赞 | `13 * * * *` | `flock -n /tmp/like-fans.lock python3 like_fans.py` | `logs/like_fans.log` |
 | 每日清洗复盘 | `0 0 * * *`(UTC)=北京 8:00 | `flock -n /tmp/daily-review.lock python3 daily_clean_review.py` | `logs/daily_review.log` |
 
-- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：`run.sh` 从 `/opt/feishupy-vps-jp/runtime/bridge.env` 加载（FEISHU_APP_ID/SECRET/MY_FEISHU_OPEN_ID）；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部 AI key。
+- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：`run.sh` 从 `/opt/feishupy-vps-jp/runtime/bridge.env` 加载（FEISHU_APP_ID/SECRET/MY_FEISHU_OPEN_ID）；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据。
 - `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲`、`IGNORE_BVIDS`（6 个无歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
 - **所有 B 站 API 请求必须带 cookie**（裸请求 412，换 UA 没用）。
 - 本地对应仓库：`G:\codex-work\yt-comment-automation`。发布流程：本地改 → commit/push → WDC `git pull` → 实跑验证。
@@ -44,7 +44,7 @@
 - 管线抓取并生成草稿或原始时间戳来源，写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时 cron 不发布，Codex 审核后才进入 `approved`。
 - `like_fans.py` 每小时只合并候选到 `data/like_review.json`，不执行点赞 action；Codex 用 `like_review_cli approve` 批准，随后 `python like_fans.py --apply ...` 才执行。
 - 审核文件是审计账本：`queue/merge` 不覆盖 `approved/applied/rejected`；执行前重新读取服务器真实点赞状态，状态不可确认宁可跳过。
-- 云端不得配置 `OPENCODE_API_KEY`、`DEEPSEEK_API_KEY`；生产链不存在外部 AI 调用。
+- 云端不配置任何外部模型凭据；生产链不存在外部模型调用。
 - 审核入口：`review_cli list/show/approve/apply`；点赞入口：`like_review_cli list/show/approve/reject`，执行动作固定为 `like_fans.py --apply`。
 
 ## 5. 关键机制与坑（按事故沉淀，改动前必读）
@@ -84,7 +84,7 @@
 - 飞书通知只有标题一个 👍，明细纯文本不折叠，仅有点赞动作才发；跳过明细只进 stdout 日志。
 
 ### 通知（notify.py）
-- 成功通知：源时间戳全量（未过滤）+ 发布内容；内容解释只来自 Codex 审核记录，不存在外部 AI 生成说明。
+- 成功通知：源时间戳全量（未过滤）+ 发布内容；内容解释只来自 Codex 审核记录。
 - 崩溃通知：cli 包 try/except（正式运行）+ cron_job.sh 检查退出码兜底。
 
 ### 复盘（daily_clean_review.py）
@@ -103,7 +103,7 @@
 
 - `dev/_wdc_run_fix_likes.py <本地脚本>`：通用 WDC 执行器（上传 /tmp/_wdc_task.py 执行回显）。
 - `dev/_mock_test_like_fans.py`、`dev/_mock_paginated_likes.py`：like_fans 决策逻辑 mock 测试（stub urlopen，11+7 项断言）。
-- `dev/_opencode_model_bench.py`、`dev/_bench_retry*.py`：全模型基准（加模型名即可重跑）。
+- 旧模型基准工具已移除；规则变更只能通过代码审查、测试和 Codex 审核完成。
 - `dev/_like_audit.py`：一次性评论区对账（**仅限人工对账，禁止挂 cron**——范围大于 msgfeed）。
 - 其余 `_wdc_*.py` 为历次事故的排查探针，可读可删。
 
