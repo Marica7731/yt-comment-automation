@@ -9,7 +9,6 @@
 - 飞书通知只有标题一个 👍，明细行纯文本；另含评论区补扫（折叠评论不进 msgfeed）。
 """
 import json
-import pathlib
 import re
 import sys
 import time
@@ -17,7 +16,8 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, '/opt/yt-comment-automation')
-from yt_comment_automation import bili_comment
+from yt_comment_automation import bili_comment, config
+from yt_comment_automation import like_review
 from yt_comment_automation.req_pace import pace
 
 OWNER_MID = "3546597260528367"
@@ -30,11 +30,35 @@ cookies = bili_comment.load_cookie_map()
 csrf = cookies.get("bili_jct", "")
 
 # 本地已赞集合：点赞成功即落盘，防重复。
-STATE_PATH = pathlib.Path("/opt/yt-comment-automation/data/liked_rpids.json")
+DATA_DIR = config.data_dir()
+STATE_PATH = DATA_DIR / "liked_rpids.json"
+LIKE_REVIEW = config.like_review()
+REVIEW_PATH = DATA_DIR / "like_review.json"
 try:
     liked_set = set(json.loads(STATE_PATH.read_text(encoding="utf-8")))
 except (OSError, ValueError):
     liked_set = set()
+liked_set = {str(value) for value in liked_set}
+existing_review = like_review.load_review(REVIEW_PATH)
+review_statuses = {
+    str(item.get("rpid")): str(item.get("status") or "pending")
+    for item in existing_review.get("candidates") or []
+}
+review_candidates: dict[str, dict] = {}
+
+def add_review_candidate(oid, rpid, content, source, bvid="", uri=""):
+    key = str(rpid)
+    if key in liked_set or key in review_candidates or key in review_statuses:
+        return False
+    review_candidates[key] = {
+        "oid": oid,
+        "rpid": rpid,
+        "content": content[:200],
+        "source": source,
+        "bvid": bvid or "",
+        "uri": uri or "",
+    }
+    return True
 
 headers = {
     "User-Agent": UA,
@@ -49,12 +73,12 @@ item_uri = {}  # oid → 视频页 uri（楼中楼兜底时反查 bvid 用）
 # 死了啦😭/转生踢我 事故）。msgfeed 点赞不限视频：回复我们的都赞。
 OWN_BVIDS: set[str] = set()
 try:
-    _p = json.loads(pathlib.Path("/opt/yt-comment-automation/data/processed.json").read_text(encoding="utf-8"))
+    _p = json.loads((DATA_DIR / "processed.json").read_text(encoding="utf-8"))
     OWN_BVIDS.update(_p.get("posted") or [])
 except (OSError, ValueError):
     pass
 try:
-    _snap = json.loads(pathlib.Path("/opt/yt-comment-automation/data/collections_snapshot.json").read_text(encoding="utf-8"))
+    _snap = json.loads((DATA_DIR / "collections_snapshot.json").read_text(encoding="utf-8"))
     for _v in (_snap.get("videos") if isinstance(_snap, dict) else []) or []:
         if isinstance(_v, dict) and _v.get("bvid"):
             OWN_BVIDS.add(_v["bvid"])
@@ -159,9 +183,42 @@ def send_like(oid, rpid):
 
 try:
     from yt_comment_automation import notify
+    def save_review_candidates() -> dict:
+        payload = like_review.merge_candidates(review_candidates.values(), REVIEW_PATH)
+        counts = like_review.summarize(payload)
+        return {
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "count": counts.get("pending", 0),
+            "total": counts.get("total", 0),
+            "counts": counts,
+        }
+
+    def apply_approved_likes(path: str) -> tuple[int, int, int]:
+        """执行 Codex 审核通过的点赞；每次 action 前重新确认当前未赞。"""
+        result = like_review.apply_approved(
+            resolve_real_liked,
+            send_like,
+            path,
+            liked_set=liked_set,
+            save_liked_set=save_liked_set,
+            sleep=time.sleep,
+        )
+        return result.get("liked", 0), result.get("skipped", 0), result.get("failed", 0)
+
     RUN_TS = notify.beijing_now()
 except Exception:  # noqa: BLE001
     RUN_TS = time.strftime("%Y-%m-%d %H:%M:%S")
+if len(sys.argv) >= 3 and sys.argv[1] == "--apply":
+    liked_n, skipped_n, failed_n = apply_approved_likes(sys.argv[2])
+    summary = f"汇总: 点赞 {liked_n} | 已赞跳过 {skipped_n} | 失败 {failed_n}"
+    print(summary, flush=True)
+    if liked_n or failed_n:
+        try:
+            notify.send_feishu_message(chr(10).join(["👍Codex 审核点赞执行", summary, f"时间：{notify.beijing_now()}" ]))
+        except Exception as err:  # noqa: BLE001
+            print(f"飞书通知失败: {err}", flush=True)
+    raise SystemExit(0 if failed_n == 0 else 1)
+
 print(f"==== 点赞任务 run {RUN_TS} ====", flush=True)
 
 liked, skipped_liked, skipped_self, failed = [], [], [], []
@@ -183,13 +240,13 @@ def process_items(items):
             print(f"  ⊘自己排除 mid={replyer} {content[:30]!r}", flush=True)
             continue
 
-        if rpid in liked_set or item.get("like_state", 0) != 0:
+        if str(rpid) in liked_set or item.get("like_state", 0) != 0:
             # 可能已赞：先复核真实状态，确认未赞才补，其余跳过（绝不盲发 action）
             real = resolve_real_liked(oid, rpid)
             if real is True:
                 skipped_liked.append(content)
-                if rpid not in liked_set:
-                    liked_set.add(rpid)
+                if str(rpid) not in liked_set:
+                    liked_set.add(str(rpid))
                     save_liked_set()
                 print(f"  =已赞跳过 rpid={rpid} {content[:30]!r}", flush=True)
                 continue
@@ -199,12 +256,25 @@ def process_items(items):
                 continue
             print(f"  ↻复核确认未赞，补赞 rpid={rpid} {content[:30]!r}", flush=True)
 
+        if LIKE_REVIEW:
+            add_review_candidate(
+                oid,
+                rpid,
+                content,
+                "msgfeed",
+                _bvid_from_uri(item.get("uri", "")) or "",
+                item.get("uri", ""),
+            )
+            new_likes += 1
+            print(f"  ⋯待审核 rpid={rpid} {content[:30]!r}", flush=True)
+            continue
+
         # 真正点赞（新回复，或复核确认未赞）
         try:
             r = send_like(oid, rpid)
             if r.get("code") == 0:
                 liked.append((rpid, content[:40]))
-                liked_set.add(rpid)
+                liked_set.add(str(rpid))
                 save_liked_set()
                 new_likes += 1
                 print(f"  ✓赞 rpid={rpid} {content[:30]!r}", flush=True)
@@ -274,9 +344,13 @@ for bvid, oid in video_oids.items():
             content2 = (rp.get("content") or {}).get("message", "")
             if mid2 == OWNER_MID:
                 continue
-            if rpid2 in liked_set or rp.get("action") == 1:
+            if str(rpid2) in liked_set or rp.get("action") == 1:
                 continue
             try:
+                if LIKE_REVIEW:
+                    add_review_candidate(oid, rpid2, content2, f"sweep:{bvid}", bvid)
+                    print(f"  ⋯待审核(评论区补扫 {bvid}) rpid={rpid2} {content2[:30]!r}", flush=True)
+                    continue
                 r = send_like(oid, rpid2)
             except Exception as err2:  # noqa: BLE001
                 failed.append((rpid2, "EXC", str(err2)[:60]))
@@ -285,7 +359,7 @@ for bvid, oid in video_oids.items():
                 continue
             if r.get("code") == 0:
                 liked.append((rpid2, content2[:40]))
-                liked_set.add(rpid2)
+                liked_set.add(str(rpid2))
                 save_liked_set()
                 print(f"  ✓赞(评论区补扫 {bvid}) rpid={rpid2} {content2[:30]!r}", flush=True)
             else:
@@ -294,6 +368,17 @@ for bvid, oid in video_oids.items():
             time.sleep(8)
         if len(replies) < 20:
             break
+
+if LIKE_REVIEW:
+    review_payload = save_review_candidates()
+    review_summary = f"点赞候选待 Codex 审核: {review_payload['count']} 条，文件: {REVIEW_PATH}"
+    print(review_summary, flush=True)
+    if review_payload["count"]:
+        try:
+            notify.send_feishu_message(chr(10).join(["👍点赞候选待审核", review_summary, f"时间：{notify.beijing_now()}" ]))
+        except Exception as err:  # noqa: BLE001
+            print(f"飞书通知失败: {err}", flush=True)
+    raise SystemExit(0)
 
 print(flush=True)
 summary = f"汇总: 点赞 {len(liked)} | 已赞跳过 {len(skipped_liked)} | 自己排除 {len(skipped_self)} | 失败 {len(failed)}"

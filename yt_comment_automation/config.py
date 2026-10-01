@@ -3,7 +3,7 @@
 敏感配置：
 - BILI_COOKIE_FILE: biliup 格式 cookie JSON（SESSDATA/bili_jct/DedeUserID）
 - FEISHU_APP_ID / FEISHU_APP_SECRET / MY_FEISHU_OPEN_ID: 飞书自建应用
-- DEEPSEEK_API_KEY: DeepSeek API Key（可选，仅在需要 AI 兜底时使用）
+- CODEX_REVIEW / LIKE_REVIEW: 默认开启；发布和点赞先由 Codex 审核，旧 AI key 不参与生产链
 - SONG_SERCH_LYRICS_ROOT: song_serch_lyrics 仓库根目录（复用其评论抓取实现）
 
 优先从环境变量读取；未设置时尝试读取同目录私有文件 ../private.env（gitignore）。
@@ -108,6 +108,14 @@ def opencode_primary_model() -> str:
 def opencode_check_model() -> str:
     """复核模型：glm-5.3-flash 输出准、reasoning 省、便宜。"""
     return get("OPENCODE_CHECK_MODEL", "glm-5.3-flash")
+
+def codex_review() -> bool:
+    """是否启用 Codex 内容审核：默认开启，禁止 AI 直接生成发布内容。"""
+    return get("CODEX_REVIEW", "1") == "1"
+
+def like_review() -> bool:
+    """点赞是否先进入审核队列；默认开启，cron 不再直接 action。"""
+    return get("LIKE_REVIEW", "1") == "1"
 
 
 def song_serch_lyrics_root() -> str:

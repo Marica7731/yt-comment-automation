@@ -18,7 +18,7 @@
 | 粉丝点赞 | `13 * * * *` | `flock -n /tmp/like-fans.lock python3 like_fans.py` | `logs/like_fans.log` |
 | 每日清洗复盘 | `0 0 * * *`(UTC)=北京 8:00 | `flock -n /tmp/daily-review.lock python3 daily_clean_review.py` | `logs/daily_review.log` |
 
-- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：`run.sh` 从 `/opt/feishupy-vps-jp/runtime/bridge.env` 加载（FEISHU_APP_ID/SECRET/MY_FEISHU_OPEN_ID）；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；OpenCode key：`private.env` 的 `OPENCODE_API_KEY`。
+- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：`run.sh` 从 `/opt/feishupy-vps-jp/runtime/bridge.env` 加载（FEISHU_APP_ID/SECRET/MY_FEISHU_OPEN_ID）；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；审核开关：`CODEX_REVIEW=1`、`LIKE_REVIEW=1`。
 - `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲`、`IGNORE_BVIDS`（6 个无歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
 - **所有 B 站 API 请求必须带 cookie**（裸请求 412，换 UA 没用）。
 - 本地对应仓库：`G:\codex-work\yt-comment-automation`。发布流程：本地改 → commit/push → WDC `git pull` → 实跑验证。
@@ -35,15 +35,17 @@
 | `yt_raw/fetch_times.json` | 每视频上次真实抓取时刻账本（重抓间隔依据） | 高 |
 | `yt_raw/yt_comment_ids.json` | 评论 id 账本（自适应翻页对账，每视频 500 条） | 中 |
 | `data/liked_rpids.json`（仓库根 data/） | 已点赞 rpid 集合（防 toggle 重复） | 高 |
+| `codex_review/*.json` | 歌单待审核/已批准/已发布账本，cron 不覆盖终态 | 高 |
+| `like_review.json` | 点赞候选与 Codex 批准/执行结果，cron 合并不覆盖终态 | 高 |
 | `deleted_dupes.json` | 历史清理记录 | 低 |
 
-## 4. AI 通道（OpenCode Go）
+## 4. Codex 审核与执行链路
 
-- 端点 `https://opencode.ai/zen/go/v1`（OpenAI 兼容 `/chat/completions`），三件套头缺一不可：`Authorization: Bearer` + `x-opencode-session`（任意值）+ `User-Agent: curl/8.0`（python UA 被 Cloudflare 1010 拦）。
-- 主提取 `omen-alpha` → 复核 `glm-5.3-flash`（多语言解析是/否/はい/いいえ；覆盖率 <90% fail-open 全保留）→ 双双失败走本地规则兜底。max_tokens 一律 32000。
-- 主/备模型输出无效（无时间戳条目疑似闲聊）时**先原模型重摇一次再互换**——偶发漂移重摇即可成功，勿直接降级。
-- key 在 private.env（当前 sk-vlL8...，2026-09-16 轮换）。价格表与 37 模型基准测试：`dev/_opencode_model_bench.py` + `dev/_bench_results.json`（第一档：omen-alpha/glm-5.3-flash/gpt-5.6-luna/kimi-k3/qwen3.7-max/glm-5.2）。
-- 配置 getter 在 `config.py`；提示词在 `ai.py`（PROMPT_TEMPLATE 内含时段表、树形表格、区间行、树形无时间戳行等专项规则，改动需同步 CHECK_PROMPT_TEMPLATE）。
+- `CODEX_REVIEW=1`（默认）：管线抓取并生成草稿或原始时间戳来源，写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时 cron 不发布，Codex 审核后才进入 `approved`。
+- `LIKE_REVIEW=1`（默认）：`like_fans.py` 每小时只合并候选到 `data/like_review.json`，不执行点赞 action；Codex 用 `like_review_cli approve` 批准，随后 `python like_fans.py --apply ...` 才执行。
+- 审核文件是审计账本：`queue/merge` 不覆盖 `approved/applied/rejected`；执行前重新读取服务器真实点赞状态，状态不可确认宁可跳过。
+- `OPENCODE_API_KEY`、`DEEPSEEK_API_KEY` 仅保留在旧代码/工具中，生产发布链默认不读取；不要把 key 写入 GitHub。
+- 审核入口：`review_cli list/show/approve/apply`；点赞入口：`like_review_cli list/show/approve/reject`，执行动作固定为 `like_fans.py --apply`。
 
 ## 5. 关键机制与坑（按事故沉淀，改动前必读）
 
@@ -91,7 +93,7 @@
 ## 6. 验证纪律（血泪沉淀，违反必出事故）
 
 1. **部署脚本后必须实跑验证**；重大改动用**原样 cron 命令连跑两轮**看稳态（只跑一轮手工测试不算数——重抓间隔账本 bug 就是第二轮才暴露的）。
-2. 代码改动先 `python -m py_compile` + `pyflakes` + `pytest tests/`（85 项）；重构后必跑 pyflakes（多P改造曾遗留 NameError 崩 28 小时）。
+2. 代码改动先 `python -m py_compile` + `pyflakes` + `pytest tests/`（90 项）；重构后必跑 pyflakes（多P改造曾遗留 NameError 崩 28 小时）。
 3. Python 写文件用 Write 工具，禁止 heredoc 嵌码（Git Bash 引号会毁 f-string）；复杂逻辑写脚本文件跑，不塞 `python -c`。
 4. **禁止编造 API 的 host/路径/参数**：参数不确定就自己抓包看真实请求（浏览器 HAR/服务端实测），抓不到就明说没依据。HTTP 200 ≠ 参数正确（编造参数被静默忽略返回首页同款数据），必须比对返回内容。
 5. 诊断先看日志/cache 再下结论；用户贴的飞书通知可能滞后于已做的修复；汇报时间必须换算北京时间。
@@ -107,12 +109,12 @@
 
 ## 8. 已知限制与未做事项
 
-- 本地兜底不支持树形表格歌单的无时间戳行（AI 失败时该类视频会漏发；AI 重摇机制已大幅缓解）。
-- glm 复核步偶发把正确主结果改坏（时间戳错乱/格式漂移），概率性，靠重试+每日复盘兜底。
+- 本地兜底不支持树形表格歌单的无时间戳行；原始来源仍会进入 Codex 审核，由审核者决定是否补发。
+- Codex 审核是发布前人工/代理决策点，未批准的候选不会产生网络 action；审核文件损坏时必须先修复账本。
 - 多 P 视频的区间标签退化为开始时间（split_items_by_pages 重建条目）。
 - msgfeed 聚合只显示同会话最新一条，旧回复靠评论区补扫兜底（补扫限自家视频，外人视频下的折叠回复覆盖不到）。
 - 翻页上限 5 页（100 条触达），超过的深部歌单抓不到（与旧行为一致）。
-- 3 字纯假名真歌名（すずめ）本地路径拒收，靠 AI 路径。
+- 3 字纯假名真歌名（すずめ）本地路径拒收，交由 Codex 依据原始来源审核。
 - 歌单 run 日志只留 10 小时，长期审计靠 data/run_*.json（约保留 1 个月）。
 
 ## 9. 文档索引
@@ -121,4 +123,4 @@
 - `RULES.md`：R01-R17 清洗规则权威文档（本地/插件共用）
 - `docs/feishu-notify-tutorial.md`：飞书通知通用教程
 - `CODEX_GOAL.md`：目标跟踪约定（完成后重命名归档）
-- `tests/`：85 项单元测试
+- `tests/`：90 项单元测试

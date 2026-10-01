@@ -6,10 +6,9 @@ B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视
 
 1. **检测合集更新**：读取 B 站 UGC 合集（ugc_season）全部视频，对比上次快照找出新增
 2. **抓取油管评论区**：无 cookie，纯 urllib 拉取评论 + 简介 + 章节
-3. **DeepSeek 优先整理**：deepseek-v4-flash 从原文直接整理「时间戳 NN. 歌名 - 歌手」列表
-   （92 视频批量评估：87/92 与本地规则完全一致 94.6%，2 个本地规则漏掉的方括号/＠格式由 DS 救回 52 首）
-4. **本地规则兜底**：DS 不可用时用本地规则清洗（括号保护、编号剥离、宣伝过滤）
-5. **发布 + 飞书通知**：B 站投稿 cookie 发布；超长评论自动切分主评论 + 楼中楼续写；成功后飞书通知
+3. **Codex 审核队列**：cron 只抓取、清洗并写入 `data/codex_review/*.json`，不调用 AI/OpenCode key
+4. **本地规则生成草稿**：结构化来源先由本地规则生成候选，无法确定的原始时间戳交给 Codex 复核
+5. **审核后发布 + 飞书通知**：Codex 批准后由 WDC 发布；超长评论自动切分主评论 + 楼中楼续写
    （B 站链接 / 油管链接 / 评论时间 / 歌曲数量）
 
 ## 目录结构
@@ -49,6 +48,14 @@ python -m yt_comment_automation.cli run --mode incremental
 
 # 5. 正式运行：全量（处理快照内所有未发布视频）
 python -m yt_comment_automation.cli run --mode full
+
+# 6. Codex 审核命令（在 WDC 运行；批准后再执行 apply）
+python -m yt_comment_automation.review_cli list --status pending
+python -m yt_comment_automation.review_cli approve --bvid BV1xxx --use-draft
+python -m yt_comment_automation.review_cli apply --bvid BV1xxx
+python -m yt_comment_automation.like_review_cli list --status pending
+python -m yt_comment_automation.like_review_cli approve --rpid 123 --max-count 5
+python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 ```
 
 ## 配置项（private.env / 环境变量）
@@ -59,7 +66,9 @@ python -m yt_comment_automation.cli run --mode full
 | `COLLECTION_ANCHORS` | 合集锚点 BV 号，逗号分隔（合集内任意视频 BV 号） |
 | `COLLECTION_NAMES` | 合集显示名（可选） |
 | `OWNER_MID` | 发布账号 mid（用于跳过已发布检测） |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key（DS 优先整理必需） |
+| `CODEX_REVIEW` | 默认 `1`；歌单进入 Codex 审核队列，禁止 AI 直接发布 |
+| `LIKE_REVIEW` | 默认 `1`；点赞 cron 只写候选，Codex 批准后执行 |
+| `DEEPSEEK_API_KEY` / `OPENCODE_API_KEY` | 旧版 AI 通道遗留，生产发布链不读取 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 飞书自建应用 |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
 

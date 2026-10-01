@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
+from . import review
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -84,14 +84,14 @@ def save_processed(data_dir: Path, posted: set[str]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _fetch_bili_video_info(bvid: str) -> tuple[str, str, list[dict]]:
+def _fetch_bili_video_info(bvid: str, cookie_map: dict[str, str] | None = None) -> tuple[str, str, list[dict]]:
     """一次 view API 调用返回 (简介首行 YouTube ID, 完整简介, 分P列表)。
 
     分P列表元素形如 {"page": 1, "part": "P001", "duration": 35995}；
     单P视频也返回 1 个元素。请求失败时 pages 为空列表。
     """
-    cookies = bili_comment.load_cookie_map()
     try:
+        cookies = cookie_map if cookie_map is not None else bili_comment.load_cookie_map()
         aid = bili_comment.get_aid(bvid, cookies)
     except Exception:  # noqa: BLE001
         return "", "", []
@@ -327,6 +327,42 @@ def raw_has_timestamp_songlist(raw: dict) -> bool:
     return False
 
 
+def _queue_codex_review(
+    result: VideoResult,
+    messages: list[str],
+    items: list,
+    source_text: str,
+    source: str,
+    upgrade_mode: bool,
+    existing_rpid: str,
+    data_dir: Path,
+) -> VideoResult:
+    payload = {
+        "bvid": result.bvid,
+        "yt_id": result.yt_id,
+        "title": result.title,
+        "part_date": result.part_date,
+        "collection": result.collection,
+        "desc_profile": result.desc_profile,
+        "source_lines": result.source_lines,
+        "source_text": source_text,
+        "draft_messages": messages,
+        "draft_song_count": len(items),
+        "source": source or "local",
+        "upgrade_mode": upgrade_mode,
+        "existing_rpid": existing_rpid,
+        "song_count": len(items),
+    }
+    path = review.queue_comment(payload, data_dir)
+    result.status = "needs_codex_review"
+    result.source = source or "codex_review"
+    result.song_count = len(items)
+    result.message = "\n---\n".join(messages)
+    result.detail = f"已写入 Codex 审核队列: {path.name}"
+    logger.info("[%s] %s", result.bvid, result.detail)
+    return result
+
+
 def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: bool) -> VideoResult:
     result = VideoResult(
         bvid=video.bvid,
@@ -374,11 +410,11 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     desc = ""
     pages: list[dict] = []
     if not yt_id:
-        yt_id, desc, pages = _fetch_bili_video_info(video.bvid)
+        yt_id, desc, pages = _fetch_bili_video_info(video.bvid, cookies)
     desc_url_id = ""
     if not desc:
         try:
-            desc_url_id, desc, pages = _fetch_bili_video_info(video.bvid)
+            desc_url_id, desc, pages = _fetch_bili_video_info(video.bvid, cookies)
         except Exception:  # noqa: BLE001
             desc_url_id = ""
     else:
@@ -490,10 +526,18 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             if _ln and _ts_line_re.search(_ln):
                 _src_lines.append(_ln)
     result.source_lines = chr(10).join(_src_lines)
+    # Codex 审核需要看到原始时间戳来源，即使本地规则判为无歌单也不能静默丢掉。
+    review_parts = list(ai_sources)
+    for candidate_source in (description, desc):
+        if candidate_source and candidate_source not in review_parts:
+            review_parts.append(candidate_source)
+    for source_line in _src_lines:
+        if source_line and not any(source_line in part for part in review_parts):
+            review_parts.append(source_line)
+    review_source_text = "\n\n---\n\n".join(review_parts)
 
     # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考；两个简介一并参与）
     local_source_text = description + ("\n" + desc if desc else "")
-    local_items = clean.build_comment_songlist(songlist_comments, local_source_text)
 
     # 5. AI 整理（生产主路径 OpenCode：omen-alpha 主提取 + glm-5.3-flash 复核；
     #     OpenCode 未配/失败时回退 DeepSeek）。只喂结构化歌单评论/简介 SETLIST，
@@ -501,7 +545,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     items: list = []
     source = ""
     ai_detail = ""
-    if (config.opencode_api_key() or config.deepseek_api_key()) and ai_sources:
+    if not config.codex_review() and (config.opencode_api_key() or config.deepseek_api_key()) and ai_sources:
         user_text = "\n\n---\n\n".join(ai_sources)
         ai_text, ai_err, ai_source = ai.call_songlist_ai(user_text)
         if ai_err:
@@ -527,7 +571,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                     items = good
             source = ai_source or "ai"
     else:
-        ai_detail = "评论区/简介均无结构化歌单（不调 AI）"
+        ai_detail = "Codex 审核模式（AI 已停用）" if config.codex_review() else "评论区/简介均无结构化歌单（不调 AI）"
     if not items:
         # 兜底闸门：没有任何结构化歌单评论时，简介必须"像真歌单"才允许本地提取——
         # 至少含 2 个秒级时间戳（H:MM:SS）。接力时段表/预告文的钟点时间（19:00）
@@ -546,7 +590,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             cand = [it for it in cand if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
             if not cand:
                 continue
-            if config.opencode_api_key() and any(not it.artist.strip() for it in cand):
+            if not config.codex_review() and config.opencode_api_key() and any(not it.artist.strip() for it in cand):
                 try:
                     cand, _dropped = ai.filter_bare_titles_with_ai(cand)
                     if _dropped:
@@ -571,7 +615,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         items = [it for it in items if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
     # 无歌手条目全走 AI 语义判定（不设黑名单——枚举式词表会误杀真歌名，
     # 且非歌标记是开放集合；带歌手条目不受影响）。AI 失败时 fail-open 全保留。
-    if any(not it.artist.strip() for it in items) and config.opencode_api_key():
+    if not config.codex_review() and any(not it.artist.strip() for it in items) and config.opencode_api_key():
         try:
             items, ai_dropped = ai.filter_bare_titles_with_ai(items)
             # 自检闭环：反向复核被剔条目，恢复误剔真歌（双视角交集才真剔）
@@ -594,6 +638,17 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         result.detail = ai_detail
 
     # 6b. 无歌曲
+    if config.codex_review() and not dry_run and not items and review_source_text.strip():
+        return _queue_codex_review(
+            result,
+            [],
+            [],
+            review_source_text,
+            "codex_review",
+            upgrade_mode,
+            existing_rpid,
+            cache_dir.parent,
+        )
     if not items:
         if upgrade_mode:
             # 已发过低质量评论，但 YouTube 当前也没歌单 → 保留原样
@@ -639,6 +694,18 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             return result
     else:
         messages = [clean.format_song_items(items, include_timestamps=True)]
+
+    if config.codex_review() and not dry_run:
+        return _queue_codex_review(
+            result,
+            messages,
+            items,
+            review_source_text,
+            source or "codex_review",
+            upgrade_mode,
+            existing_rpid,
+            cache_dir.parent,
+        )
 
     if dry_run:
         result.status = "dry_run"
@@ -722,7 +789,7 @@ def run_pipeline(
     cache_dir = data_dir / "yt_raw"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    cookies = bili_comment.load_cookie_map()
+    bili_comment.load_cookie_map()  # 启动时先验证发布凭据，process_video 再按视频加载
     posted = load_processed(data_dir)
 
     # 每次运行重置限流通知去重（跨 cron 周期每个视频可再提醒）
@@ -772,7 +839,7 @@ def run_pipeline(
             save_processed(data_dir, posted)
             # 非满额发布（保留数 < 原始源行数）都生成清理理由，附飞书通知供人工核查
             src_count = len([x for x in (result.source_lines or "").splitlines() if x.strip()])
-            if result.status == "posted" and config.opencode_api_key() and (
+            if result.status == "posted" and not config.codex_review() and config.opencode_api_key() and (
                 src_count == 0 or result.song_count < src_count
             ):
                 try:

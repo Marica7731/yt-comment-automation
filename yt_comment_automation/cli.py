@@ -9,10 +9,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
+logger = logging.getLogger("yt_comment_automation")
 import sys
-from pathlib import Path
 
 from . import collections, config
 
