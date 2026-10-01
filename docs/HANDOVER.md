@@ -18,7 +18,7 @@
 | 粉丝点赞 | `13 * * * *` | `flock -n /tmp/like-fans.lock python3 like_fans.py` | `logs/like_fans.log` |
 | 每日清洗复盘 | `0 0 * * *`(UTC)=北京 8:00 | `flock -n /tmp/daily-review.lock python3 daily_clean_review.py` | `logs/daily_review.log` |
 
-- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：`run.sh` 从 `/opt/feishupy-vps-jp/runtime/bridge.env` 加载（FEISHU_APP_ID/SECRET/MY_FEISHU_OPEN_ID）；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；审核开关：`CODEX_REVIEW=1`、`LIKE_REVIEW=1`。
+- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：`run.sh` 从 `/opt/feishupy-vps-jp/runtime/bridge.env` 加载（FEISHU_APP_ID/SECRET/MY_FEISHU_OPEN_ID）；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部 AI key。
 - `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲`、`IGNORE_BVIDS`（6 个无歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
 - **所有 B 站 API 请求必须带 cookie**（裸请求 412，换 UA 没用）。
 - 本地对应仓库：`G:\codex-work\yt-comment-automation`。发布流程：本地改 → commit/push → WDC `git pull` → 实跑验证。
@@ -41,10 +41,10 @@
 
 ## 4. Codex 审核与执行链路
 
-- `CODEX_REVIEW=1`（默认）：管线抓取并生成草稿或原始时间戳来源，写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时 cron 不发布，Codex 审核后才进入 `approved`。
-- `LIKE_REVIEW=1`（默认）：`like_fans.py` 每小时只合并候选到 `data/like_review.json`，不执行点赞 action；Codex 用 `like_review_cli approve` 批准，随后 `python like_fans.py --apply ...` 才执行。
+- 管线抓取并生成草稿或原始时间戳来源，写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时 cron 不发布，Codex 审核后才进入 `approved`。
+- `like_fans.py` 每小时只合并候选到 `data/like_review.json`，不执行点赞 action；Codex 用 `like_review_cli approve` 批准，随后 `python like_fans.py --apply ...` 才执行。
 - 审核文件是审计账本：`queue/merge` 不覆盖 `approved/applied/rejected`；执行前重新读取服务器真实点赞状态，状态不可确认宁可跳过。
-- `OPENCODE_API_KEY`、`DEEPSEEK_API_KEY` 仅保留在旧代码/工具中，生产发布链默认不读取；不要把 key 写入 GitHub。
+- 云端不得配置 `OPENCODE_API_KEY`、`DEEPSEEK_API_KEY`；生产链不存在外部 AI 调用。
 - 审核入口：`review_cli list/show/approve/apply`；点赞入口：`like_review_cli list/show/approve/reject`，执行动作固定为 `like_fans.py --apply`。
 
 ## 5. 关键机制与坑（按事故沉淀，改动前必读）
@@ -61,8 +61,8 @@
 ### 清洗（clean.py / rules.py）
 - **区间行**（`0:12:01 - 0:16:36 コネクト / ClariS`）必须整行保留取开始时间，且**起止都输出**（ParsedSong.timestamp_end_seconds，输出 `0:12:01-0:16:36 01. …`）；三种形态：同行/歌名在下行/结束时间在下行。
 - **「emoji+序号」前缀**（`🎸01. 0:05:03 …`、`🎸EN.` 返场）要组合剥离，序号剥完必须剩时间戳开头才生效（保护 8.8/4.3.2.1 数字歌名）。
-- **树形表格歌单**（序号+TAB+可空时间戳列，可能拆两条评论）AI 路径可解析（空时间戳沿用上方最近时间戳）；本地兜底不支持无时间戳行——已知 gap。
-- 裸歌名判定：单字汉字（奏/虹/桜）是真歌名不能因长度拒；1-3 字纯平假名（まで）是残片要拒（3 字假名真歌名如 すずめ 会被拒——历来靠 AI 路径，已知边角）。
+- **树形表格歌单**（序号+TAB+可空时间戳列，可能拆两条评论）本地草稿可能缺空时间戳行，原始来源仍交 Codex 审核。
+- 裸歌名判定：单字汉字（奏/虹/桜）是真歌名不能因长度拒；1-3 字纯平假名（まで）是残片要拒（3 字假名真歌名如 すずめ 交给 Codex 依原始来源判断）。
 - MC/环节行结尾（紹介/説明/コーナー/待ち/コール）、社交账号行（X：handle/status/数字）、宣伝/告知 直接拒。
 - 候选来源排序键 = **(带歌手数, 秒级时间戳数, 条数)**——接力时段表/预告文条数多但无歌手无秒级，天然沉底；绝不能按条数排。
 - 无结构化歌单评论时，简介必须含 ≥2 个秒级时间戳（H:MM:SS）才允许本地兜底（钟点时段表/预告文的结构性闸门）。
@@ -84,7 +84,7 @@
 - 飞书通知只有标题一个 👍，明细纯文本不折叠，仅有点赞动作才发；跳过明细只进 stdout 日志。
 
 ### 通知（notify.py）
-- 成功通知：源时间戳全量（未过滤）+ 发布内容 + 非满额时附 AI 清理说明。**注意 explain_cleanup 是事后解说没有执行权，排查问题只看代码和日志，别信说明文字的归因。**
+- 成功通知：源时间戳全量（未过滤）+ 发布内容；内容解释只来自 Codex 审核记录，不存在外部 AI 生成说明。
 - 崩溃通知：cli 包 try/except（正式运行）+ cron_job.sh 检查退出码兜底。
 
 ### 复盘（daily_clean_review.py）

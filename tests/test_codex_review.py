@@ -2,7 +2,6 @@
 from pathlib import Path
 
 from yt_comment_automation import like_review, review
-from yt_comment_automation import config as _config
 from yt_comment_automation import pipeline
 
 
@@ -93,7 +92,6 @@ def test_codex_review_reaches_queue_before_local_gate(tmp_path: Path, monkeypatc
     video = type("Video", (), {"bvid": "BV1Gate", "yt_id": "yt-gate", "title": "t", "part_date": "2026-10-01", "collection": "c", "section": "s"})()
     queued = []
 
-    monkeypatch.setattr(_config, "codex_review", lambda: True)
     monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
     monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
     monkeypatch.setattr(pipeline, "_fetch_bili_video_info", lambda bvid, cookie_map=None: ("yt-gate", source, []))

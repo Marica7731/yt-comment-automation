@@ -32,7 +32,6 @@ csrf = cookies.get("bili_jct", "")
 # 本地已赞集合：点赞成功即落盘，防重复。
 DATA_DIR = config.data_dir()
 STATE_PATH = DATA_DIR / "liked_rpids.json"
-LIKE_REVIEW = config.like_review()
 REVIEW_PATH = DATA_DIR / "like_review.json"
 try:
     liked_set = set(json.loads(STATE_PATH.read_text(encoding="utf-8")))
@@ -256,35 +255,16 @@ def process_items(items):
                 continue
             print(f"  ↻复核确认未赞，补赞 rpid={rpid} {content[:30]!r}", flush=True)
 
-        if LIKE_REVIEW:
-            add_review_candidate(
-                oid,
-                rpid,
-                content,
-                "msgfeed",
-                _bvid_from_uri(item.get("uri", "")) or "",
-                item.get("uri", ""),
-            )
-            new_likes += 1
-            print(f"  ⋯待审核 rpid={rpid} {content[:30]!r}", flush=True)
-            continue
-
-        # 真正点赞（新回复，或复核确认未赞）
-        try:
-            r = send_like(oid, rpid)
-            if r.get("code") == 0:
-                liked.append((rpid, content[:40]))
-                liked_set.add(str(rpid))
-                save_liked_set()
-                new_likes += 1
-                print(f"  ✓赞 rpid={rpid} {content[:30]!r}", flush=True)
-            else:
-                failed.append((rpid, r.get("code"), r.get("message")))
-                print(f"  ✗失败 rpid={rpid} code={r.get('code')} {r.get('message')}", flush=True)
-        except Exception as err:  # noqa: BLE001
-            failed.append((rpid, "EXC", str(err)[:60]))
-            print(f"  ✗异常 {err}", flush=True)
-        time.sleep(8)  # 频控：每个真实点赞间隔 8 秒（跳过的不消耗间隔）
+        add_review_candidate(
+            oid,
+            rpid,
+            content,
+            "msgfeed",
+            _bvid_from_uri(item.get("uri", "")) or "",
+            item.get("uri", ""),
+        )
+        new_likes += 1
+        print(f"  ⋯待审核 rpid={rpid} {content[:30]!r}", flush=True)
     return new_likes
 
 
@@ -346,64 +326,17 @@ for bvid, oid in video_oids.items():
                 continue
             if str(rpid2) in liked_set or rp.get("action") == 1:
                 continue
-            try:
-                if LIKE_REVIEW:
-                    add_review_candidate(oid, rpid2, content2, f"sweep:{bvid}", bvid)
-                    print(f"  ⋯待审核(评论区补扫 {bvid}) rpid={rpid2} {content2[:30]!r}", flush=True)
-                    continue
-                r = send_like(oid, rpid2)
-            except Exception as err2:  # noqa: BLE001
-                failed.append((rpid2, "EXC", str(err2)[:60]))
-                print(f"  ✗异常(评论区补扫 {bvid}) {err2}", flush=True)
-                time.sleep(8)
-                continue
-            if r.get("code") == 0:
-                liked.append((rpid2, content2[:40]))
-                liked_set.add(str(rpid2))
-                save_liked_set()
-                print(f"  ✓赞(评论区补扫 {bvid}) rpid={rpid2} {content2[:30]!r}", flush=True)
-            else:
-                failed.append((rpid2, r.get("code"), r.get("message")))
-                print(f"  ✗失败(评论区补扫 {bvid}) rpid={rpid2} code={r.get('code')} {r.get('message')}", flush=True)
-            time.sleep(8)
+            add_review_candidate(oid, rpid2, content2, f"sweep:{bvid}", bvid)
+            print(f"  ⋯待审核(评论区补扫 {bvid}) rpid={rpid2} {content2[:30]!r}", flush=True)
         if len(replies) < 20:
             break
 
-if LIKE_REVIEW:
-    review_payload = save_review_candidates()
-    review_summary = f"点赞候选待 Codex 审核: {review_payload['count']} 条，文件: {REVIEW_PATH}"
-    print(review_summary, flush=True)
-    if review_payload["count"]:
-        try:
-            notify.send_feishu_message(chr(10).join(["👍点赞候选待审核", review_summary, f"时间：{notify.beijing_now()}" ]))
-        except Exception as err:  # noqa: BLE001
-            print(f"飞书通知失败: {err}", flush=True)
-    raise SystemExit(0)
-
-print(flush=True)
-summary = f"汇总: 点赞 {len(liked)} | 已赞跳过 {len(skipped_liked)} | 自己排除 {len(skipped_self)} | 失败 {len(failed)}"
-print(summary, flush=True)
+review_payload = save_review_candidates()
+review_summary = f"点赞候选待 Codex 审核: {review_payload['count']} 条，文件: {REVIEW_PATH}"
+print(review_summary, flush=True)
 print(f"翻页: {page} 页 / {total_items} 条", flush=True)
-print("-- 已赞跳过明细（仅日志）--", flush=True)
-for c in skipped_liked:
-    print(f"   {c[:40]!r}", flush=True)
-print("-- 自己排除明细（仅日志）--", flush=True)
-for c in skipped_self:
-    print(f"   {c[:40]!r}", flush=True)
-
-# 飞书通知（有点赞动作才发；纯跳过不打扰）
-if liked:
+if review_payload["count"]:
     try:
-        detail = chr(10).join(c for _, c in liked)
-        if failed:
-            detail += chr(10) + f"⚠️失败 {len(failed)} 条"
-        brief = chr(10).join([
-            "👍粉丝回复点赞",
-            summary,
-            detail,
-            f"时间：{notify.beijing_now()}",
-        ])
-        ok, note = notify.send_feishu_message(brief)
-        print(f"飞书: {ok} {note}", flush=True)
+        notify.send_feishu_message(chr(10).join(["👍点赞候选待审核", review_summary, f"时间：{notify.beijing_now()}" ]))
     except Exception as err:  # noqa: BLE001
         print(f"飞书通知失败: {err}", flush=True)

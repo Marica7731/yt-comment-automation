@@ -1,7 +1,7 @@
 """Codex 内容审核队列。
 
 生产管线只负责抓取、生成候选和落盘；歌单文本由 Codex 审核并通过本模块
-显式应用到 WDC。审核文件保留原始来源与审核元数据，避免 AI 输出直接进入
+显式应用到 WDC。审核文件保留原始来源与审核元数据，确保只有 Codex 批准内容进入
 发布接口。
 """
 from __future__ import annotations
@@ -212,7 +212,6 @@ def apply_comment(
                 profile=item.get("desc_profile", ""),
                 source_lines=item.get("source_lines", ""),
                 final_message="\n---\n".join(messages),
-                clean_reason=item.get("clean_reason", ""),
             )
         else:
             brief = notify.build_failure_brief(

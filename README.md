@@ -6,7 +6,7 @@ B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视
 
 1. **检测合集更新**：读取 B 站 UGC 合集（ugc_season）全部视频，对比上次快照找出新增
 2. **抓取油管评论区**：无 cookie，纯 urllib 拉取评论 + 简介 + 章节
-3. **Codex 审核队列**：cron 只抓取、清洗并写入 `data/codex_review/*.json`，不调用 AI/OpenCode key
+3. **Codex 审核队列**：cron 只抓取、清洗并写入 `data/codex_review/*.json`，不依赖外部 AI
 4. **本地规则生成草稿**：结构化来源先由本地规则生成候选，无法确定的原始时间戳交给 Codex 复核
 5. **审核后发布 + 飞书通知**：Codex 批准后由 WDC 发布；超长评论自动切分主评论 + 楼中楼续写
    （B 站链接 / 油管链接 / 评论时间 / 歌曲数量）
@@ -18,7 +18,6 @@ yt_comment_automation/
   collections.py   B站合集抓取 + 新增检测
   yt_fetch.py      油管评论/简介抓取（无 cookie，原始 JSON 落盘缓存）
   clean.py         本地规则清洗：时间戳/歌名/歌手提取
-  ai.py            DeepSeek 兜底整理（responses API + prompt 缓存）
   bili_comment.py  B站评论：cookie 加载、已有评论检测、发布
   notify.py        飞书文本消息
   pipeline.py      管道编排（增量/全量/指定）
@@ -43,10 +42,10 @@ python -m yt_comment_automation.cli dry-run --limit 3
 # 3. 指定视频干跑
 python -m yt_comment_automation.cli dry-run --bvid BV1ixuN6AExD
 
-# 4. 正式运行：增量（只处理新增 + 未发布存量），发布 + 飞书通知
+# 4. 正式运行：增量（只处理新增 + 未发布存量），写入 Codex 审核队列
 python -m yt_comment_automation.cli run --mode incremental
 
-# 5. 正式运行：全量（处理快照内所有未发布视频）
+# 5. 正式运行：全量（处理快照内所有未发布视频），写入 Codex 审核队列
 python -m yt_comment_automation.cli run --mode full
 
 # 6. Codex 审核命令（在 WDC 运行；批准后再执行 apply）
@@ -66,9 +65,6 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 | `COLLECTION_ANCHORS` | 合集锚点 BV 号，逗号分隔（合集内任意视频 BV 号） |
 | `COLLECTION_NAMES` | 合集显示名（可选） |
 | `OWNER_MID` | 发布账号 mid（用于跳过已发布检测） |
-| `CODEX_REVIEW` | 默认 `1`；歌单进入 Codex 审核队列，禁止 AI 直接发布 |
-| `LIKE_REVIEW` | 默认 `1`；点赞 cron 只写候选，Codex 批准后执行 |
-| `DEEPSEEK_API_KEY` / `OPENCODE_API_KEY` | 旧版 AI 通道遗留，生产发布链不读取 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 飞书自建应用 |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
 

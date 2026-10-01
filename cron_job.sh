@@ -1,5 +1,5 @@
 #!/bin/bash
-# B站合集评论区时间戳歌轴：每日增量发布（flock 单实例锁防并发重复）
+# B站合集评论区时间戳歌轴：增量抓取并写入 Codex 审核队列（flock 单实例锁防并发重复）
 LOCKFILE=/tmp/yt-comment-automation.lock
 exec 9>"$LOCKFILE"
 if ! flock -n 9; then

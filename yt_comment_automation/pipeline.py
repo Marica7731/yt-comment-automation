@@ -1,4 +1,4 @@
-"""管道编排：合集检测 → 评论抓取 → 本地规则清洗 → AI 兜底 → 发布 → 飞书通知。
+"""管道编排：合集检测 → 评论抓取 → 本地规则清洗 → Codex 审核队列。
 
 运行策略：
 1. 抓取合集全部视频（view API，无 cookie）
@@ -7,9 +7,8 @@
    a. 检查本账号是否已发布时间戳歌轴评论 → 已发布跳过
    b. 从 B 站简介第一行取 YouTube 链接（与 part 字段互相校验）
    c. 抓取 YouTube 评论 + 简介原始 JSON
-   d. 本地规则清洗出歌曲列表
-   e. 若本地结果为空或过少 → DeepSeek 兜底整理
-   f. 格式化评论内容 → 发布 → 飞书通知
+   d. 本地规则生成草稿或收集原始时间戳来源
+   e. 写入 Codex 审核队列（发布动作只在审核后由 review_cli 执行）
 4. 保存合集快照与处理记录（幂等，可重跑）
 """
 from __future__ import annotations
@@ -23,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from . import ai, bili_comment, clean, collections, config, notify, yt_fetch
+from . import bili_comment, clean, collections, config, notify, yt_fetch
 
 logger = logging.getLogger("yt_comment_automation")
 
@@ -34,7 +33,7 @@ UPGRADE_CHECK_TTL = 7200
 # 新投稿认定窗口（天）：B站发布时间在该窗口内的升级复查保持每轮 force 重抓
 UPGRADE_FRESH_DAYS = 7
 
-# 本地规则结果可信的下限：低于此数量时触发 DeepSeek 兜底
+# 本地规则结果可信的下限：低于此数量时仍保留原始来源交 Codex 审核
 MIN_CONFIDENT_SONGS = 5
 
 # 本次运行已发过 YouTube 429 通知的 bvid（多个视频同时限流时只提醒一次，避免刷屏）
@@ -50,13 +49,12 @@ class VideoResult:
     collection: str
     status: str = ""  # already_posted / posted / skipped_no_songs / skipped_low_confidence / error / no_yt_link / dry_run
     song_count: int = 0
-    source: str = ""  # local / ai
+    source: str = ""  # local / codex_review
     message: str = ""
     error: str = ""
     detail: str = ""
     desc_profile: str = ""  # 简介提取的「主播 + 原标题」，随成功通知发送
     source_lines: str = ""  # 原始抓取来源中全部含时间戳的行（未过滤），随成功通知发送用于对比
-    clean_reason: str = ""  # 保留条目过少时 AI 生成的清理说明
 
 
 @dataclass
@@ -514,7 +512,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         for cand in (description, desc):
             if cand and _is_songlist_comment(cand):
                 ai_sources = [cand]
-                logger.info("[%s] 评论区无歌单，简介含 SETLIST，用简介喂 AI", video.bvid)
+                logger.info("[%s] 评论区无歌单，简介含 SETLIST，交给 Codex 审核", video.bvid)
                 break
 
     # 源时间戳行（未过滤全量）：原始抓取评论+简介中所有含时间戳的行，随飞书通知供人工对比
@@ -536,51 +534,21 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             review_parts.append(source_line)
     review_source_text = "\n\n---\n\n".join(review_parts)
 
-    # 4. 本地规则清洗（作为无 DS 时的兜底，以及 DS 输出的时间戳参考；两个简介一并参与）
+    # 4. 本地规则清洗（两个简介一并参与，结果只作为 Codex 审核草稿）
     local_source_text = description + ("\n" + desc if desc else "")
 
-    # 5. AI 整理（生产主路径 OpenCode：omen-alpha 主提取 + glm-5.3-flash 复核；
-    #     OpenCode 未配/失败时回退 DeepSeek）。只喂结构化歌单评论/简介 SETLIST，
-    #     防从感想提取/幻觉。
+    # 5. 本地规则生成候选；无论结果如何，原始来源都会进入 Codex 审核队列。
     items: list = []
     source = ""
-    ai_detail = ""
-    if not config.codex_review() and (config.opencode_api_key() or config.deepseek_api_key()) and ai_sources:
-        user_text = "\n\n---\n\n".join(ai_sources)
-        ai_text, ai_err, ai_source = ai.call_songlist_ai(user_text)
-        if ai_err:
-            ai_detail = f"AI 整理失败: {ai_err}"
-            logger.warning("[%s] %s", video.bvid, ai_detail)
-        elif ai.is_special_no_artist_response(ai_text):
-            ai_detail = "AI 判定缺歌手"
-        else:
-            items = ai.parse_ai_output_to_items(ai_text)
-            # 原文配对校验：AI 错位/幻觉行（时间戳与歌名在原文对不上）剔除；
-            # 错位占比高说明整体坏（如时间戳整体移位），整体作废回退本地
-            if items:
-                good, bad = ai.verify_items_against_source(items, user_text)
-                if good is None:
-                    logger.warning(
-                        "[%s] AI 输出 %d/%d 行未通过原文配对校验，整体作废回退本地",
-                        video.bvid, len(bad), len(items),
-                    )
-                    items = []
-                    ai_detail = f"AI 输出校验失败（{len(bad)}/{len(items)}行错位），用本地规则"
-                elif bad:
-                    logger.warning("[%s] AI 输出剔除 %d 行（原文配对失败）", video.bvid, len(bad))
-                    items = good
-            source = ai_source or "ai"
-    else:
-        ai_detail = "Codex 审核模式（AI 已停用）" if config.codex_review() else "评论区/简介均无结构化歌单（不调 AI）"
     if not items:
-        # 兜底闸门：没有任何结构化歌单评论时，简介必须"像真歌单"才允许本地提取——
+        # 本地提取闸门：没有结构化歌单评论时，简介必须"像真歌单"才尝试本地提取——
         # 至少含 2 个秒级时间戳（H:MM:SS）。接力时段表/预告文的钟点时间（19:00）
         # 没有秒，直接拦掉（BV1gthU6TEsX 两行 SZNO、BV1ALha63EuK 预告文残片两起）；
         # 有歌单评论时不设此限（评论歌单的 M:SS 格式合法）。
         if not songlist_comments:
             desc_ts_seconds = len(re.findall(r"\d{1,2}:\d{2}:\d{2}", local_source_text or ""))
             if desc_ts_seconds < 2:
-                if config.codex_review() and not dry_run and review_source_text.strip():
+                if not dry_run and review_source_text.strip():
                     return _queue_codex_review(
                         result,
                         [],
@@ -595,61 +563,28 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                 result.detail = "未提取到有效歌曲（无结构化歌单评论，简介无秒级时间轴，跳过本地兜底）"
                 logger.info("[%s] %s", video.bvid, result.detail)
                 return result
-        # AI 失败 → 本地兜底。最优来源可能整体是非歌（如活动成员时段表，
-        # 条数多但全是人名，会被语义判定剔光），此时逐个次优来源尝试。
+        # 逐个候选来源尝试本地规则；即使全部失败，原始来源仍由上方 Codex 队列接管。
         for cand in clean.build_comment_songlist_ranked(songlist_comments, local_source_text):
             cand = [it for it in cand if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
             if not cand:
                 continue
-            if not config.codex_review() and config.opencode_api_key() and any(not it.artist.strip() for it in cand):
-                try:
-                    cand, _dropped = ai.filter_bare_titles_with_ai(cand)
-                    if _dropped:
-                        _restored, _dropped = ai.recheck_dropped_titles(_dropped)
-                        if _restored:
-                            cand = sorted(cand + _restored, key=lambda it: (it.timestamp_seconds is None, it.timestamp_seconds or 0))
-                except Exception as cand_err:  # noqa: BLE001
-                    logger.warning("[%s] 候选来源语义判定失败（保留）: %s", video.bvid, cand_err)
             if cand:
                 items = cand
                 source = "local"
                 logger.info("[%s] 本地兜底采用次优来源（%d 首）", video.bvid, len(items))
                 break
-        if ai_detail:
-            ai_detail = f"本地兜底（{ai_detail}）"
 
     # 6. 过滤条目：必须有时间戳；歌手字段按配置（默认放宽=允许只有歌名）；
-    #    剔除拟声/碎片脏歌名（ｺｯ/ﾋﾟﾖ 等直播怪声标记被 AI 误当歌）
+    #    剔除拟声/碎片脏歌名（ｺｯ/ﾋﾟﾖ 等直播怪声标记）
     if config.require_artist():
         items = [it for it in items if it.artist and it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
     else:
         items = [it for it in items if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
-    # 无歌手条目全走 AI 语义判定（不设黑名单——枚举式词表会误杀真歌名，
-    # 且非歌标记是开放集合；带歌手条目不受影响）。AI 失败时 fail-open 全保留。
-    if not config.codex_review() and any(not it.artist.strip() for it in items) and config.opencode_api_key():
-        try:
-            items, ai_dropped = ai.filter_bare_titles_with_ai(items)
-            # 自检闭环：反向复核被剔条目，恢复误剔真歌（双视角交集才真剔）
-            if ai_dropped:
-                restored, still_dropped = ai.recheck_dropped_titles(ai_dropped)
-                if restored:
-                    logger.info("[%s] 反向复核恢复误剔条目: %s", video.bvid, [it.song for it in restored])
-                    items = sorted(items + restored, key=lambda it: (it.timestamp_seconds is None, it.timestamp_seconds or 0))
-                ai_dropped = still_dropped
-            if ai_dropped:
-                logger.info(
-                    "[%s] AI 语义判定剔除无歌手非歌条目: %s",
-                    video.bvid, [it.song for it in ai_dropped],
-                )
-        except Exception as err:  # noqa: BLE001
-            logger.warning("[%s] 无歌手条目 AI 判定失败（全保留）: %s", video.bvid, err)
     result.song_count = len(items)
     result.source = source
-    if ai_detail:
-        result.detail = ai_detail
 
     # 6b. 无歌曲
-    if config.codex_review() and not dry_run and not items and review_source_text.strip():
+    if not dry_run and not items and review_source_text.strip():
         return _queue_codex_review(
             result,
             [],
@@ -667,7 +602,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             result.detail = f"rpid={existing_rpid} 升级检查：YouTube 无更全歌单，保留原评论"
             return result
         result.status = "skipped_no_songs"
-        result.detail = f"未提取到有效歌曲（{result.detail or '本地与 AI 均无结果'}）"
+        result.detail = f"未提取到有效歌曲（{result.detail or '本地规则无结果'}）"
         return result
 
     # 6c. 升级判定：已发低质量评论时，新歌单须严格多于已发、且至少达绝对下限
@@ -706,7 +641,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     else:
         messages = [clean.format_song_items(items, include_timestamps=True)]
 
-    if config.codex_review() and not dry_run:
+    if not dry_run:
         return _queue_codex_review(
             result,
             messages,
@@ -726,59 +661,6 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             result.detail = f"升级：删旧后发 {len(messages)} 条主评论（dry-run 不执行）"
         return result
 
-    # 升级模式：先删旧评论（多P删自己的全部主评论），再发新评论
-    if upgrade_mode:
-        try:
-            own_all = bili_comment.find_own_comments(video.bvid, cookies)
-            deleted_any = False
-            for cm in own_all:
-                del_resp = bili_comment.delete_comment(video.bvid, cm.rpid, cookies)
-                if del_resp.get("code") != 0:
-                    result.status = "error"
-                    result.error = f"删除旧评论失败: rpid={cm.rpid} code={del_resp.get('code')} msg={del_resp.get('message')}"
-                    return result
-                deleted_any = True
-            if deleted_any:
-                logger.info("[%s] 已删除旧主评论 %d 条", video.bvid, len(own_all))
-        except Exception as err:  # noqa: BLE001
-            result.status = "error"
-            result.error = f"删除旧评论异常: {err}"
-            return result
-
-    all_rpids: list[str] = []
-    all_segments = 0
-    failures: list[str] = []
-    for k, msg in enumerate(messages, 1):
-        responses = bili_comment.post_comment_with_replies(video.bvid, msg, cookies)
-        if not responses:
-            failures.append(f"P{k}:无响应")
-            continue
-        main_resp = responses[0]
-        if main_resp.get("code") != 0:
-            failures.append(f"P{k}:code={main_resp.get('code')} msg={main_resp.get('message')}")
-            continue
-        all_rpids.extend(str(r.get("data", {}).get("rpid", "")) for r in responses if r.get("data"))
-        all_segments += len(responses)
-        followup_fail = next((r for r in responses[1:] if r.get("code") != 0), None)
-        if followup_fail:
-            failures.append(f"P{k}楼中楼:code={followup_fail.get('code')}")
-
-    if not all_rpids:
-        result.status = "error"
-        result.error = f"评论发布失败: {'; '.join(failures) or '无响应'}"
-        return result
-
-    # 至少一条主评论成功即视为已发布；失败段记录在 detail（缺失段可升级补发）
-    result.status = "posted"
-    result.message = "\n---\n".join(messages)
-    prefix = f"P1-P{len(messages)} " if multi_page else ""
-    if upgrade_mode:
-        result.detail = f"升级成功：发新 rpids={'/'.join(all_rpids)} segments={all_segments}"
-    elif failures:
-        result.detail = f"{prefix}rpids={'/'.join(all_rpids)} segments={all_segments} 部分失败: {'; '.join(failures)}"
-    else:
-        result.detail = f"{prefix}rpids={'/'.join(all_rpids)} segments={all_segments}"
-    return result
 
 
 def run_pipeline(
@@ -848,16 +730,6 @@ def run_pipeline(
             # 立即落盘：防止本轮后续处理崩溃（如 YouTube/B站接口异常）导致
             # save_processed 不执行，下轮 cron 重新发布同一视频（重复评论事故）
             save_processed(data_dir, posted)
-            # 非满额发布（保留数 < 原始源行数）都生成清理理由，附飞书通知供人工核查
-            src_count = len([x for x in (result.source_lines or "").splitlines() if x.strip()])
-            if result.status == "posted" and not config.codex_review() and config.opencode_api_key() and (
-                src_count == 0 or result.song_count < src_count
-            ):
-                try:
-                    result.clean_reason = ai.explain_cleanup(result.source_lines, result.message)
-                    logger.info("[%s] 清理说明: %s", result.bvid, result.clean_reason[:120])
-                except Exception as err:  # noqa: BLE001
-                    logger.warning("[%s] 清理说明生成失败（忽略）: %s", result.bvid, err)
             if result.status == "posted":
                 # 飞书通知（仅新投稿发布时；无新增/缺歌单不播报）
                 brief = notify.build_success_brief(
@@ -868,7 +740,6 @@ def run_pipeline(
                     profile=result.desc_profile,
                     source_lines=result.source_lines,
                     final_message=result.message,
-                    clean_reason=result.clean_reason,
                 )
                 ok, note = notify.send_feishu_message(brief)
                 logger.info("  飞书通知: %s %s", ok, note)

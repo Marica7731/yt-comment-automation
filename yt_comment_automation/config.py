@@ -3,7 +3,7 @@
 敏感配置：
 - BILI_COOKIE_FILE: biliup 格式 cookie JSON（SESSDATA/bili_jct/DedeUserID）
 - FEISHU_APP_ID / FEISHU_APP_SECRET / MY_FEISHU_OPEN_ID: 飞书自建应用
-- CODEX_REVIEW / LIKE_REVIEW: 默认开启；发布和点赞先由 Codex 审核，旧 AI key 不参与生产链
+- 发布和点赞均走 Codex 审核队列；生产不读取任何外部 AI key
 - SONG_SERCH_LYRICS_ROOT: song_serch_lyrics 仓库根目录（复用其评论抓取实现）
 
 优先从环境变量读取；未设置时尝试读取同目录私有文件 ../private.env（gitignore）。
@@ -87,35 +87,6 @@ def feishu_open_id() -> str:
     return get("MY_FEISHU_OPEN_ID", get("FEISHU_OPEN_ID"))
 
 
-def deepseek_api_key() -> str:
-    return get("DEEPSEEK_API_KEY")
-
-
-def opencode_api_key() -> str:
-    """OpenCode Go 网关 API key（OpenAI 兼容 chat/completions）。"""
-    return get("OPENCODE_API_KEY")
-
-
-def opencode_base() -> str:
-    return get("OPENCODE_BASE", "https://opencode.ai/zen/go/v1")
-
-
-def opencode_primary_model() -> str:
-    """主提取模型（实测 111 首完整输出）：omen-alpha 最便宜、glm-5.3-flash 最快。"""
-    return get("OPENCODE_PRIMARY_MODEL", "omen-alpha")
-
-
-def opencode_check_model() -> str:
-    """复核模型：glm-5.3-flash 输出准、reasoning 省、便宜。"""
-    return get("OPENCODE_CHECK_MODEL", "glm-5.3-flash")
-
-def codex_review() -> bool:
-    """是否启用 Codex 内容审核：默认开启，禁止 AI 直接生成发布内容。"""
-    return get("CODEX_REVIEW", "1") == "1"
-
-def like_review() -> bool:
-    """点赞是否先进入审核队列；默认开启，cron 不再直接 action。"""
-    return get("LIKE_REVIEW", "1") == "1"
 
 
 def song_serch_lyrics_root() -> str:

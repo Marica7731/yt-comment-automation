@@ -4,7 +4,7 @@
 用法：
   python -m yt_comment_automation.cli scan            # 只列出合集视频与新增，不抓评论不发布
   python -m yt_comment_automation.cli dry-run [--limit N] [--bvid BV1xxx]   # 干跑（不发布不通知）
-  python -m yt_comment_automation.cli run [--mode incremental|full] [--limit N] [--bvid BV1xxx]  # 正式运行
+  python -m yt_comment_automation.cli run [--mode incremental|full] [--limit N] [--bvid BV1xxx]  # 抓取并写入 Codex 审核队列
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def main() -> int:
     p_dry.add_argument("--limit", type=int, default=0, help="最多处理 N 个视频（0=不限）")
     p_dry.add_argument("--bvid", action="append", default=[], help="只处理指定 bvid（可重复）")
 
-    p_run = sub.add_parser("run", help="正式运行（发布 + 飞书通知）")
+    p_run = sub.add_parser("run", help="正式运行（抓取并写入 Codex 审核队列）")
     p_run.add_argument("--mode", choices=["incremental", "full"], default="incremental")
     p_run.add_argument("--limit", type=int, default=0, help="最多处理 N 个视频（0=不限）")
     p_run.add_argument("--bvid", action="append", default=[], help="只处理指定 bvid（可重复）")
