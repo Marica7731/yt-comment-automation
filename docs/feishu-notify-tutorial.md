@@ -1,11 +1,11 @@
-# 飞书机器人通知教程（通用）
+# 飞书机器人通知教程（yt-comment-automation）
 
 给任意脚本/定时任务发飞书消息的完整教程。纯标准库（`urllib`），不依赖第三方库，Windows / Linux / WSL 都可用。
 
 ## 一、准备：创建飞书自建应用
 
 1. 打开 [飞书开放平台](https://open.feishu.cn/app) → 「创建企业自建应用」。
-2. 随便填应用名称（如 `通知机器人`），创建后进入应用详情。
+2. 本项目固定使用应用名称 `yt-comment-automation`；旧机器人 `总控` 不参与本项目通知。
 3. 在「凭证与基础信息」页拿到：
    - `App ID`（形如 `cli_xxxxxxxxxxxxxxxx`）
    - `App Secret`（形如 `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`）
@@ -43,7 +43,7 @@ token = resp["tenant_access_token"]
 
 方式 B（最简单）：让接收人给机器人发一条消息，然后在飞书开放平台「事件与回调」或应用后台看 `open_id`。
 
-方式 C（本项目已有）：`MY_FEISHU_OPEN_ID` 已配置在环境里，直接复用即可。
+方式 C（本项目）：只从当前项目 `private.env` 或进程环境读取 `MY_FEISHU_OPEN_ID`；旧 bridge 的 open_id 不能跨应用复用。
 
 ## 三、发送文本消息（核心代码）
 
@@ -108,7 +108,7 @@ printf "✅构建成功\n版本 v1.2.3\n时间 $(date)" | python .../send_codex_
 echo "测试" | python .../send_codex_brief.py --dry-run
 ```
 
-依赖：脚本从环境变量读取飞书凭据（`FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID`），需先 export 或在进程环境里配置好。它内部加载 `feishu_hub.py` 的发送函数，凭据也可以由该 hub 的既有配置提供。
+依赖：脚本只从当前项目环境读取飞书凭据（`FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID`），需先 export 或写入当前项目 `private.env`；禁止读取旧 bridge 或其他部署的凭据。
 
 ## 五、常见问题
 

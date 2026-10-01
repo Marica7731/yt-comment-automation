@@ -65,7 +65,7 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 | `COLLECTION_ANCHORS` | 合集锚点 BV 号，逗号分隔（合集内任意视频 BV 号） |
 | `COLLECTION_NAMES` | 合集显示名（可选） |
 | `OWNER_MID` | 发布账号 mid（用于跳过已发布检测） |
-| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 飞书自建应用 |
+| `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 当前项目 `yt-comment-automation` 飞书机器人；不读取旧 bridge |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
 
 ## 评论格式与发布规则
