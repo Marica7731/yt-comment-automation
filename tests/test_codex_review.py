@@ -143,3 +143,17 @@ def test_comment_apply_marks_processed_and_verifies(tmp_path: Path, monkeypatch)
     assert item["status"] == "applied"
     assert item["verification"]["ok"] is True
     assert "BV1Apply" in (tmp_path / "processed.json").read_text(encoding="utf-8")
+
+def test_verify_own_comments_normalizes_bilibili_html_entities(monkeypatch):
+    class Own:
+        def __init__(self, message):
+            self.message = message
+
+    expected = '0:01:00 01. Don\'t say "lazy" - 桜高軽音部'
+    encoded = "0:01:00 01. Don&#39;t say &#34;lazy&#34; - 桜高軽音部"
+    monkeypatch.setattr(review.bili_comment, "find_own_comments", lambda bvid, cookies: [Own(encoded)])
+
+    ok, detail = review.verify_own_comments("BV1Html", [expected], {})
+
+    assert ok is True
+    assert "回读通过" in detail

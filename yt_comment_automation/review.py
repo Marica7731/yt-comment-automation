@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import html
 import json
 import time
 from pathlib import Path
@@ -114,12 +115,13 @@ def verify_own_comments(bvid: str, messages: list[str], cookies: dict[str, str])
     """回读评论区，确认每个已审核主评论的第一段确实可见。"""
     try:
         own = bili_comment.find_own_comments(bvid, cookies)
-        actual = [cm.message for cm in own]
+        actual = [_normalize_comment_for_compare(cm.message) for cm in own]
         expected = []
         for message in messages:
             segments = bili_comment.split_message_by_lines(message)
             if segments:
                 expected.append(segments[0])
+        expected = [_normalize_comment_for_compare(text) for text in expected]
         missing = [text for text in expected if text not in actual]
         if missing:
             return False, f"回读缺失 {len(missing)}/{len(expected)} 条: {missing[0][:80]}"
@@ -225,3 +227,6 @@ def apply_comment(
     except Exception:  # noqa: BLE001
         pass
     return item
+def _normalize_comment_for_compare(text: str) -> str:
+    """Normalize Bilibili HTML entities and line endings before comparison."""
+    return html.unescape(text or "").replace("\r\n", "\n").strip()
