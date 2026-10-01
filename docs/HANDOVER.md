@@ -7,15 +7,15 @@
 自动监控 B 站 4 个合集（直播/直播2/直播3/凛々咲，497 个自家视频）里的 VTuber 歌枠投稿，抓取对应 YouTube 直播的评论区/简介中的时间戳歌单，清洗成规范格式后作为 B 站评论发布到视频下方，并附带源/发布双时间轴的飞书通知。附带两个附属任务：粉丝回复自动点赞、每日清洗复盘。
 
 - 仓库：`https://github.com/Marica7731/yt-comment-automation`（public，master，无密钥；private.env 被 gitignore）
-- 生产：WDC VPS `/opt/yt-comment-automation`（cron 驱动，长期无人值守）
+- 生产：WDC VPS `/opt/yt-comment-automation`（评论/点赞由 Codex heartbeat 直接触发，每日复盘保留 cron）
 - 下游消费：`G:\codex-work\plugin` 的油猴插件 + `RULES.md` 共享确定性清洗规则
 
 ## 2. 部署与调度全景（WDC）
 
 | 任务 | cron | 命令 | 日志 |
 |---|---|---|---|
-| 歌单管线 | `*/20 * * * *` | `cron_job.sh`（flock + DRY_RUN=0 + timeout 3600 + run --mode incremental） | `logs/run_*.log`（保留 30 个 ≈10 小时） |
-| 粉丝点赞 | `13 * * * *` | `flock -n /tmp/like-fans.lock python3 like_fans.py` | `logs/like_fans.log` |
+| 歌单管线 | 无 cron，由 Codex heartbeat 直接触发 | `cron_job.sh`（flock + DRY_RUN=0 + timeout 3600 + run --mode incremental） | `logs/run_*.log`（保留 30 个 ≈10 小时） |
+| 粉丝点赞 | 无 cron，由 Codex heartbeat 直接触发 | `flock -n /tmp/like-fans.lock python3 like_fans.py` | `logs/like_fans.log` |
 | 每日清洗复盘 | `0 0 * * *`(UTC)=北京 8:00 | `flock -n /tmp/daily-review.lock python3 daily_clean_review.py` | `logs/daily_review.log` |
 
 - 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：`run.sh` 从 `/opt/feishupy-vps-jp/runtime/bridge.env` 加载（FEISHU_APP_ID/SECRET/MY_FEISHU_OPEN_ID）；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据。
@@ -35,14 +35,14 @@
 | `yt_raw/fetch_times.json` | 每视频上次真实抓取时刻账本（重抓间隔依据） | 高 |
 | `yt_raw/yt_comment_ids.json` | 评论 id 账本（自适应翻页对账，每视频 500 条） | 中 |
 | `data/liked_rpids.json`（仓库根 data/） | 已点赞 rpid 集合（防 toggle 重复） | 高 |
-| `codex_review/*.json` | 歌单待审核/已批准/已发布账本，cron 不覆盖终态 | 高 |
-| `like_review.json` | 点赞候选与 Codex 批准/执行结果，cron 合并不覆盖终态 | 高 |
+| `codex_review/*.json` | 歌单待审核/已批准/已发布账本，直接触发不覆盖终态 | 高 |
+| `like_review.json` | 点赞候选与 Codex 批准/执行结果，直接触发合并不覆盖终态 | 高 |
 | `deleted_dupes.json` | 历史清理记录 | 低 |
 
 ## 4. Codex 审核与执行链路
 
-- 管线抓取并生成草稿或原始时间戳来源，写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时 cron 不发布，Codex 审核后才进入 `approved`。
-- `like_fans.py` 每小时只合并候选到 `data/like_review.json`，不执行点赞 action；Codex 用 `like_review_cli approve` 批准，随后 `python like_fans.py --apply ...` 才执行。
+- Codex heartbeat 直接触发 WDC 管线，抓取并生成草稿或原始时间戳来源，写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时不发布，Codex 审核后才进入 `approved`。
+- Codex heartbeat 直接触发 `like_fans.py` 合并候选到 `data/like_review.json`，不执行点赞 action；Codex 用 `like_review_cli approve` 批准，随后 `python like_fans.py --apply ...` 才执行。
 - 审核文件是审计账本：`queue/merge` 不覆盖 `approved/applied/rejected`；执行前重新读取服务器真实点赞状态，状态不可确认宁可跳过。
 - 云端不配置任何外部模型凭据；生产链不存在外部模型调用。
 - 审核入口：`review_cli list/show/approve/apply`；点赞入口：`like_review_cli list/show/approve/reject`，执行动作固定为 `like_fans.py --apply`。
@@ -77,7 +77,7 @@
 - 升级模式：已发 <3 首时复查，新歌单严格多于已发且 ≥3 首才删旧发新；新投稿每轮 force 重抓，老投稿 2 小时 TTL。
 - 忽略列表 `IGNORE_BVIDS` 现有 6 个：BV1MW3R6vEoE,BV17KGK62EyU,BV1VERyBnEG6,BV1WAYb6zEoE,BV1one569EZt,BV18ZaZ6hE2F。
 
-### 点赞（like_fans.py，部署在仓库根，WDC cron）
+### 点赞（like_fans.py，部署在仓库根，由 Codex heartbeat 触发）
 - msgfeed「回复我的」游标翻页：响应 `cursor{id,time}`，下一页参数 `id` + `reply_time`（实测所得，勿猜其他参数名）；**页内有新赞才继续翻**，整页已赞/重复即停，上限 10 页。
 - msgfeed 点赞不限视频（回复我的=别人回复我们）；**评论区补扫限自家视频**（OWN_BVIDS=processed posted ∪ collections_snapshot）——补扫扫整个评论区，外人视频绝不能扫。
 - 点赞 8 秒频控只在真实点赞后消耗；点赞成功即写 liked_rpids.json。
@@ -85,15 +85,15 @@
 
 ### 通知（notify.py）
 - 成功通知：源时间戳全量（未过滤）+ 发布内容；内容解释只来自 Codex 审核记录。
-- 崩溃通知：cli 包 try/except（正式运行）+ cron_job.sh 检查退出码兜底。
+- 崩溃通知：cli 包 try/except（正式运行）+ 直接触发脚本检查退出码兜底。
 
 ### 复盘（daily_clean_review.py）
 - 对比缓存源时间戳行 vs run json message：被洗掉的源行原文列飞书。匹配必须归一（多版本 SETLIST 的分隔符/序号/时间戳差异），歌名段命中即算保留。列出的缺失行含大量本就该洗掉的行（START/宣伝/框架行），人工扫一眼判断真误杀。
 
 ## 6. 验证纪律（血泪沉淀，违反必出事故）
 
-1. **部署脚本后必须实跑验证**；重大改动用**原样 cron 命令连跑两轮**看稳态（只跑一轮手工测试不算数——重抓间隔账本 bug 就是第二轮才暴露的）。
-2. 代码改动先 `python -m py_compile` + `pyflakes` + `pytest tests/`（91 项）；重构后必跑 pyflakes（多P改造曾遗留 NameError 崩 28 小时）。
+1. **部署脚本后必须实跑验证**；重大改动用**原样直接触发命令连跑两轮**看稳态（只跑一轮手工测试不算数——重抓间隔账本 bug 就是第二轮才暴露的）。
+2. 代码改动先 `python -m py_compile` + `pyflakes` + `pytest tests/`（当前 81 项）；重构后必跑 pyflakes（多P改造曾遗留 NameError 崩 28 小时）。
 3. Python 写文件用 Write 工具，禁止 heredoc 嵌码（Git Bash 引号会毁 f-string）；复杂逻辑写脚本文件跑，不塞 `python -c`。
 4. **禁止编造 API 的 host/路径/参数**：参数不确定就自己抓包看真实请求（浏览器 HAR/服务端实测），抓不到就明说没依据。HTTP 200 ≠ 参数正确（编造参数被静默忽略返回首页同款数据），必须比对返回内容。
 5. 诊断先看日志/cache 再下结论；用户贴的飞书通知可能滞后于已做的修复；汇报时间必须换算北京时间。
