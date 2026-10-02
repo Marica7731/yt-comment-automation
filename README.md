@@ -71,8 +71,6 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 | `COLLECTION_NAMES` | 合集显示名（可选） |
 | `OWNER_MID` | 发布账号 mid（用于跳过已发布检测） |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 当前项目 `yt-comment-automation` 飞书机器人；不读取旧 bridge |
-| `YOUTUBE_API_KEY` | YouTube Data API v3 key；只在 Innertube 429 后作为备用抓取通道 |
-| `YOUTUBE_FETCH_BACKEND` | `auto`（默认）或 `official`；未配置 key 时保持原抓取行为 |
 | `YOUTUBE_FETCH_MODE` | `auto`（默认）或 `cache_only`；生产 cron 强制 `cache_only` |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
 
