@@ -490,7 +490,21 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             if not _yt_rate_limited_notified:
                 _yt_rate_limited_notified.add(video.bvid)
                 try:
-                    brief = notify.build_yt_rate_limit_brief(video.bvid, result.error)
+                    brief = notify.build_yt_rate_limit_brief(
+                        video.bvid,
+                        result.error,
+                        files=[
+                            "yt_comment_automation/pipeline.py",
+                            "yt_comment_automation/yt_fetch.py",
+                            "cron_job.sh",
+                        ],
+                        tests=[
+                            f"fetch_youtube_raw({yt_id}) → HTTP 429",
+                            "429 retry exhausted after 5 attempts",
+                        ],
+                        commit=notify.git_summary(),
+                        failures=[result.error],
+                    )
                     ok, note = notify.send_feishu_message(brief)
                     logger.info("[%s] 飞书 YouTube 429 通知: %s %s", video.bvid, ok, note)
                 except Exception as notify_err:  # noqa: BLE001

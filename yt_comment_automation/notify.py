@@ -392,14 +392,46 @@ def build_failure_brief(
     return "\n".join(lines)
 
 
-def build_yt_rate_limit_brief(bvid: str, reason: str) -> str:
+def build_yt_rate_limit_brief(
+    bvid: str,
+    reason: str,
+    *,
+    files: Iterable[str] | str = (),
+    tests: Iterable[str] | str = (),
+    commit: str = "",
+    verification: Any = None,
+    rpids: Iterable[str] | str = (),
+    segments: int | str = 0,
+    failures: Iterable[str] | str = (),
+) -> str:
     """YouTube 页面抓取限流（429）通知：提醒及时关注抓取频率/IP 风控。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
+    rpids_text = ",".join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids
+    failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
+    file_text = _as_multiline(files)
+    test_text = _as_multiline(tests)
     return "\n".join(
         [
             "⚠️YouTube 限流(429)",
             bili_link,
             f"原因：{reason}",
+            "——原始来源——",
+            "N/A（抓取失败，无发布内容）",
+            "——清洗前后计数——",
+            "N/A / N/A / N/A",
+            "——本地草稿——",
+            "N/A",
+            "——最终发布内容——",
+            "N/A",
+            f"验证：{verification if verification is not None else 'N/A'}",
+            f"rpids：{rpids_text or '[]'}",
+            f"segments：{segments if segments not in (None, '') else 0}",
+            f"failures：{failure_text or reason}",
+            "——涉及文件——",
+            file_text or "（未提供）",
+            "——测试命令与结果——",
+            test_text or "（未提供）",
+            f"commit：{commit or git_summary()}",
             f"时间：{beijing_now()}",
         ]
     )
