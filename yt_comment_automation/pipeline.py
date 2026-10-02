@@ -32,6 +32,8 @@ UPGRADE_THRESHOLD = 3
 UPGRADE_CHECK_TTL = 7200
 # 新投稿认定窗口（天）：B站发布时间在该窗口内的升级复查保持每轮 force 重抓
 UPGRADE_FRESH_DAYS = 7
+# Codex pending 候选按用户要求降频：同一视频至少间隔 12 小时再查评论区
+PENDING_RECHECK_HOURS = 12
 
 # 本地规则结果可信的下限：低于此数量时仍保留原始来源交 Codex 审核
 MIN_CONFIDENT_SONGS = 5
@@ -231,6 +233,13 @@ def _refetch_gate(cache_dir, yt_id: str, part_date: str) -> tuple[float, float]:
         if new:
             return 0.0, 0.0
     return OLD_VIDEO_REFETCH_HOURS * 3600.0, _last_fetch_age(cache_dir, yt_id)
+
+
+def _pending_review_status(bvid: str, data_dir: Path) -> str:
+    try:
+        return str(review.load_comment(bvid, data_dir=data_dir).get("status") or "")
+    except (FileNotFoundError, OSError, ValueError):
+        return ""
 
 
 def is_junk_song_title(song: str) -> bool:
@@ -438,14 +447,18 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    请求节奏：全局任意两次 YouTube 请求间隔 ≥2 秒（yt_fetch 内置节流）；
     #    429 重试最多 5 次，任一次成功直接放行，全失败报错跳过该视频。
     try:
-        gate_interval, gate_age = _refetch_gate(cache_dir, yt_id, video.part_date)
+        if _pending_review_status(video.bvid, cache_dir.parent) == "pending":
+            gate_interval = PENDING_RECHECK_HOURS * 3600.0
+            gate_age = _last_fetch_age(cache_dir, yt_id)
+        else:
+            gate_interval, gate_age = _refetch_gate(cache_dir, yt_id, video.part_date)
         if gate_interval and gate_age < gate_interval:
             logger.info(
-                "[%s] 老视频距上次抓取 %.1f 小时（ <%d 小时），本轮跳过",
+                "[%s] 视频距上次抓取 %.1f 小时（ <%d 小时），本轮跳过",
                 video.bvid, gate_age / 3600, gate_interval // 3600,
             )
             result.status = "skipped_no_songs"
-            result.error = f"老视频距上次抓取不足 {gate_interval // 3600} 小时，本轮跳过"
+            result.error = f"视频距上次抓取不足 {gate_interval // 3600} 小时，本轮跳过"
             return result
         if upgrade_mode:
             # 已发低质量评论的复查必须看最新评论区（否则读旧数据 → already_posted 死循环）。
