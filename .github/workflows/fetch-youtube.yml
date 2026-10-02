@@ -1,15 +1,23 @@
 name: fetch-youtube
 
 on:
+  push:
+    branches:
+      - master
+    paths:
+      - youtube_targets.txt
   workflow_dispatch:
     inputs:
       video_ids:
-        description: Comma-separated YouTube video IDs
-        required: true
+        description: Optional comma-separated YouTube video IDs
+        required: false
         type: string
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: youtube-action-cache
 
 jobs:
   fetch:
@@ -24,12 +32,24 @@ jobs:
 
       - name: Fetch YouTube comments
         env:
+          MANUAL_VIDEO_IDS: ${{ inputs.video_ids }}
           YOUTUBE_FETCH_MODE: auto
+          YOUTUBE_FETCH_BACKEND: auto
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           YOUTUBE_REQUEST_MIN_GAP_SECONDS: "3"
         shell: bash
         run: |
+          set -euo pipefail
+          VIDEO_IDS="$MANUAL_VIDEO_IDS"
+          if [ -z "$VIDEO_IDS" ]; then
+            VIDEO_IDS="$(awk '!/^#/ {gsub(/[[:space:]]/, ""); printf "%s", $0}' youtube_targets.txt)"
+          fi
+          if [ -z "$VIDEO_IDS" ]; then
+            echo "::error::youtube_targets.txt contains no video IDs"
+            exit 1
+          fi
           python -m yt_comment_automation.youtube_action \
-            --video-ids "${{ inputs.video_ids }}" \
+            --video-ids "$VIDEO_IDS" \
             --output-dir /tmp/youtube-action
 
       - name: Upload fetch payload
@@ -40,3 +60,29 @@ jobs:
           path: /tmp/youtube-action/payload.json
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Publish cache payload branch
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f /tmp/youtube-action/payload.json
+          AUTH=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          rm -rf /tmp/youtube-cache-repo
+          git init -q /tmp/youtube-cache-repo
+          cd /tmp/youtube-cache-repo
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          if git -c http.extraheader="AUTHORIZATION: basic $AUTH" fetch -q --depth=1 origin youtube-action-cache; then
+            git checkout -q -B youtube-action-cache FETCH_HEAD
+          else
+            git checkout -q --orphan youtube-action-cache
+          fi
+          rm -f youtube-action-payload.json
+          cp /tmp/youtube-action/payload.json youtube-action-payload.json
+          git add -f youtube-action-payload.json
+          git -c user.name="github-actions" -c user.email="github-actions@github.com" \
+            commit -q -m "cache YouTube fetch payload"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" \
+            push -q origin HEAD:youtube-action-cache

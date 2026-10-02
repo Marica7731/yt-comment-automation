@@ -53,12 +53,15 @@
 - **抓取频率按"同一视频两次抓取的间隔"控制**：新视频（B站投稿 ≤2 天）每轮抓，老视频 ≥12 小时（`_refetch_gate`，上次抓取时刻查 `fetch_times.json` 账本——无歌单不落主缓存所以 mtime 不可用）。不到间隔跳过该视频本轮，**绝不用缓存内容顶替**。
 - **全局请求节流 2 秒**：`req_pace.py` 跨进程共享时钟（fcntl 文件锁），YouTube 抓取与 B 站请求、点赞脚本共用。风控看出口 IP 总速率。
 - **429 重试最多 5 次**（Retry-After 优先，退避 2/4/8/16/30s），任一次成功放行；飞书 429 通知一轮只发一条。
-- 429 重试耗尽后切换已验证的 YouTube Data API v3；key 只存 WDC `private.env`，
-  不进 Git、不从本机请求 YouTube。2026-10-02 实测 `videos.list` 返回 HTTP 200、1 条视频。
+- 429 重试耗尽后切换已验证的 YouTube Data API v3；key 只存 WDC `private.env`
+  和 GitHub Actions secret，不进 Git、不从本机请求 YouTube。2026-10-02 在 WDC 实测
+  `videos.list`、`commentThreads.list` 均返回 HTTP 200、各 1 条数据。
 - YouTube 抓取主链路：`python3 dev/run_youtube_action.py` 在 WDC 计算到期 ID，
-  触发 GitHub Action `fetch-youtube`，下载 artifact 后由
-  `youtube_cache_sync` 合并到 `data/yt_raw`；WDC 的 `cron_job.sh` 强制
-  `YOUTUBE_FETCH_MODE=cache_only`，缺缓存只跳过，不再直连 YouTube。
+  写 `youtube_targets.txt` 后用 SSH Git 推送触发 GitHub Action `fetch-youtube`；
+  Action 按 3 秒最小间隔抓取并把 payload 提交到 `youtube-action-cache` 分支，
+  本机轮询该分支后经 SSH 交给 `youtube_cache_sync` 合并；不依赖 GitHub API token。
+  WDC 的 `cron_job.sh` 强制 `YOUTUBE_FETCH_MODE=cache_only`，缺缓存只跳过，
+  不再直连 YouTube。
 - **自适应翻页**：评论按 `commentId`（缺失回退文本 sha1）对账，第 1 页有新评论才翻下一页，某页全旧即停——但**仅限已发布视频的升级复查**（early_stop=True）；未发布视频必须抓满 5 页（歌单被闲聊顶到后面页时，提前停=永远抓不回）。上限 5 页=100 条触达。
 - 缓存有效性只能由处理结果决定：发布=留缓存，0 首未发布=不落缓存+删旧缓存。静态判定缓存有效性会被骗（闲聊表像歌单）。
 - 简介提取必须认 `attributedDescription`（新版 YouTube 页面正文在这，simpleText 常为空）。
