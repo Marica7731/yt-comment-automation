@@ -224,3 +224,39 @@ def test_no_artist_opening_markers_filtered():
     assert ("ハーモニカ", "aiko") in songs          # 带歌手真歌保留
     assert ("わたしの一番かわいいところ", "FRUITS ZIPPER") in songs
     assert ("すずめ", "") in songs
+
+
+def test_pending_video_skips_before_youtube_for_twelve_hours(tmp_path, monkeypatch):
+    import datetime as dt
+    from yt_comment_automation import collections
+
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1PendingGate",
+        title="pending gate",
+        part_date=dt.date.today().isoformat(),
+        yt_id="abcdefghijk",
+    )
+    monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_fetch_bili_video_info",
+        lambda bvid, cookie_map=None: (
+            "abcdefghijk", "https://youtu.be/abcdefghijk", []
+        ),
+    )
+    monkeypatch.setattr(pipeline, "_pending_review_status", lambda bvid, data_dir: "pending")
+    monkeypatch.setattr(pipeline, "_last_fetch_age", lambda cache_dir, yt_id: 11 * 3600.0)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("pending 12 小时门控内不应请求 YouTube")
+
+    monkeypatch.setattr(pipeline.yt_fetch, "fetch_youtube_raw", fail_if_called)
+
+    result = pipeline.process_video(video, tmp_path, dry_run=False)
+
+    assert result.status == "skipped_no_songs"
+    assert "不足 12" in result.error
