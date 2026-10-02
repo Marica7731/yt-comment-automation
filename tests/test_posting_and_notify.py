@@ -215,6 +215,15 @@ NameError: name 'message' is not defined"""
     assert "commit：abc1234" in brief
 
 
+def test_cron_process_exit_uses_detailed_crash_report():
+    script = (Path(__file__).resolve().parents[1] / "cron_job.sh").read_text(encoding="utf-8")
+    assert "CRON_RUN_EXIT=" in script
+    assert "notify.build_crash_brief(" in script
+    assert "notify.git_summary()" in script
+    assert "process exit code=" in script
+    assert "yt_comment_automation/pipeline.py" in script
+
+
 def test_cli_crash_sends_notify(mocker=None):
     """cli 正式运行崩溃时调用飞书通知。"""
     import sys
