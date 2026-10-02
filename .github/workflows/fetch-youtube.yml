@@ -1,0 +1,41 @@
+name: fetch-youtube
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_ids:
+        description: Comma-separated YouTube video IDs
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch YouTube comments
+        env:
+          YOUTUBE_FETCH_MODE: auto
+        shell: bash
+        run: |
+          python -m yt_comment_automation.youtube_action \
+            --video-ids "${{ inputs.video_ids }}" \
+            --output-dir /tmp/youtube-action
+
+      - name: Upload fetch payload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-cache-${{ github.run_id }}
+          path: /tmp/youtube-action/payload.json
+          if-no-files-found: warn
+          retention-days: 7

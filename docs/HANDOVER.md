@@ -54,6 +54,10 @@
 - **全局请求节流 2 秒**：`req_pace.py` 跨进程共享时钟（fcntl 文件锁），YouTube 抓取与 B 站请求、点赞脚本共用。风控看出口 IP 总速率。
 - **429 重试最多 5 次**（Retry-After 优先，退避 2/4/8/16/30s），任一次成功放行；飞书 429 通知一轮只发一条。
 - 429 重试耗尽后，仅当 WDC 私有环境存在 `YOUTUBE_API_KEY` 时切换 YouTube Data API v3；API key 不进 Git、不从本机请求 YouTube。
+- YouTube 抓取主链路：`python3 dev/run_youtube_action.py` 在 WDC 计算到期 ID，
+  触发 GitHub Action `fetch-youtube`，下载 artifact 后由
+  `youtube_cache_sync` 合并到 `data/yt_raw`；WDC 的 `cron_job.sh` 强制
+  `YOUTUBE_FETCH_MODE=cache_only`，缺缓存只跳过，不再直连 YouTube。
 - **自适应翻页**：评论按 `commentId`（缺失回退文本 sha1）对账，第 1 页有新评论才翻下一页，某页全旧即停——但**仅限已发布视频的升级复查**（early_stop=True）；未发布视频必须抓满 5 页（歌单被闲聊顶到后面页时，提前停=永远抓不回）。上限 5 页=100 条触达。
 - 缓存有效性只能由处理结果决定：发布=留缓存，0 首未发布=不落缓存+删旧缓存。静态判定缓存有效性会被骗（闲聊表像歌单）。
 - 简介提取必须认 `attributedDescription`（新版 YouTube 页面正文在这，simpleText 常为空）。

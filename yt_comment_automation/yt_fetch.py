@@ -32,6 +32,10 @@ class YtFetchError(RuntimeError):
     pass
 
 
+class YtCacheMissError(YtFetchError):
+    """cache_only 模式下没有 Action 回传缓存；调用方应跳过而不是直连 YouTube。"""
+
+
 def is_rate_limited_error(err: Exception) -> bool:
     """判断异常是否为 YouTube 限流（429）。urllib 对 429 抛 HTTPError，重试耗尽后原样上抛。"""
     import urllib.error
@@ -732,6 +736,19 @@ def fetch_youtube_raw(
     """抓取视频评论区和简介；仅在配置 key 且 Innertube 429 时切官方 API。"""
     resolved_cache_dir = Path(cache_dir) if cache_dir else None
     from . import config
+
+    fetch_mode = config.get("YOUTUBE_FETCH_MODE", "auto").lower()
+    if fetch_mode == "cache_only":
+        if not resolved_cache_dir:
+            raise YtCacheMissError("cache_only 模式必须提供 cache_dir")
+        cache_path = resolved_cache_dir / f"{video_id}.info.json"
+        if not cache_path.is_file():
+            raise YtCacheMissError(
+                f"GitHub Action 缓存缺失: {video_id}.info.json"
+            )
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+    if fetch_mode not in {"auto", ""}:
+        raise YtFetchError(f"不支持的 YOUTUBE_FETCH_MODE: {fetch_mode}")
 
     backend = config.get("YOUTUBE_FETCH_BACKEND", "auto").lower()
     if backend == "official":

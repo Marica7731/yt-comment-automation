@@ -9,6 +9,7 @@ fi
 
 export DRY_RUN=0
 export DATA_DIR=/opt/yt-comment-automation/data
+export YOUTUBE_FETCH_MODE=cache_only
 cd /opt/yt-comment-automation
 LOG_DIR=/opt/yt-comment-automation/logs
 mkdir -p "$LOG_DIR"
