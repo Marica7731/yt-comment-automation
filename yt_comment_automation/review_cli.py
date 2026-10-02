@@ -86,7 +86,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"bvid": item["bvid"], "status": item["status"], "messages": len(item["approved_messages"])}, ensure_ascii=False))
         return 0
     if args.command == "apply":
-        item = review.apply_comment(args.bvid, dry_run=args.dry_run)
+        try:
+            item = review.apply_comment(args.bvid, dry_run=args.dry_run)
+        except Exception as err:
+            review.notify_apply_failure(args.bvid, str(err))
+            raise
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification")}, ensure_ascii=False))
         return 0 if item.get("status") in {"applied", "dry_run"} else 1
     return 2

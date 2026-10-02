@@ -306,12 +306,11 @@ def build_success_brief(
     lines.extend(["——最终发布——", _as_text(approved_messages or final_message) or "（空）"])
     if verification is not None:
         lines.append(f"验证：{verification}")
-    if rpids:
-        lines.append(f"rpids：{','.join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids}")
-    if segments:
-        lines.append(f"segments：{segments}")
-    if failures:
-        lines.append(f"failures：{'; '.join(str(x) for x in failures) if not isinstance(failures, str) else failures}")
+    rpids_text = ",".join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids
+    failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
+    lines.append(f"rpids：{rpids_text or '[]'}")
+    lines.append(f"segments：{segments if segments not in (None, '') else 0}")
+    lines.append(f"failures：{failure_text or '[]'}")
     if note:
         lines.append(f"审核备注：{note}")
     file_text = _as_multiline(files)
@@ -382,12 +381,11 @@ def build_failure_brief(
             lines.extend(["——最终内容——", _as_text(approved_messages) or "（空）"])
     if verification is not None:
         lines.append(f"验证：{verification}")
-    if rpids:
-        lines.append(f"rpids：{','.join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids}")
-    if segments:
-        lines.append(f"segments：{segments}")
-    if failures:
-        lines.append(f"failures：{'; '.join(str(x) for x in failures) if not isinstance(failures, str) else failures}")
+    rpids_text = ",".join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids
+    failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
+    lines.append(f"rpids：{rpids_text or '[]'}")
+    lines.append(f"segments：{segments if segments not in (None, '') else 0}")
+    lines.append(f"failures：{failure_text or '[]'}")
     if note:
         lines.append(f"审核备注：{note}")
     file_text = _as_multiline(files)
