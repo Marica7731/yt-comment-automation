@@ -67,6 +67,7 @@ def test_like_review_unavailable_state_never_posts(tmp_path: Path):
 
 
 def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
+
     payload = {
         "bvid": "BV1Review",
         "yt_id": "yt",
@@ -84,6 +85,39 @@ def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
     assert item["approved_messages"] == ["0:01:00 01. A - B"]
     assert item["draft_messages"] == ["0:01:00 01. A - B"]
     assert path.is_file()
+
+
+def test_publish_batches_merge_single_page_messages():
+    messages = [
+        "01:37 01. A - X",
+        "04:09 02. B - Y",
+        "08:55 03. C - Z",
+    ]
+    grouped = review._group_messages_by_pages(messages, [{"page": 1, "duration": 1891}])
+    assert grouped == [chr(10).join(messages)]
+
+
+def test_publish_batches_keep_existing_multi_page_comments():
+    messages = ["P1\n0:01 01. A", "P2\n10:00:01 02. B"]
+    pages = [{"page": 1, "duration": 36000}, {"page": 2, "duration": 600}]
+    assert review._group_messages_by_pages(messages, pages) == messages
+
+
+def test_publish_batches_split_flat_messages_by_page_duration():
+    messages = ["0:01 01. A", "10:00:01 02. B"]
+    pages = [{"page": 1, "duration": 36000}, {"page": 2, "duration": 600}]
+    grouped = review._group_messages_by_pages(messages, pages)
+    assert grouped == ["P1\n0:01 01. A", "P2\n10:00:01 02. B"]
+
+
+def test_publish_batches_refuse_when_duration_missing(monkeypatch):
+    monkeypatch.setattr(review, "_fetch_video_pages", lambda bvid, cookies: [])
+    try:
+        review._normalize_publish_batches("BV1NoDuration", ["0:01 A", "0:02 B"], {})
+    except RuntimeError as err:
+        assert "拒绝发布多条主评论" in str(err)
+    else:
+        raise AssertionError("缺少时长时应拒绝发布")
 
 
 def test_codex_review_reaches_queue_before_local_gate(tmp_path: Path, monkeypatch):

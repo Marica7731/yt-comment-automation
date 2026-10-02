@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
 
-from . import bili_comment, config, notify
+from . import bili_comment, clean, config, notify
 
 
 def review_dir(data_dir: Path | None = None) -> Path:
@@ -111,6 +112,78 @@ def _mark_processed(data_dir: Path, bvid: str) -> None:
     _write_json(path, payload)
 
 
+def _fetch_video_pages(bvid: str, cookies: dict[str, str]) -> list[dict[str, Any]]:
+    """读取 B 站分 P 和时长；多条主评论发布前必须有可验证的批次依据。"""
+    data = bili_comment._request_json(
+        f"{bili_comment.VIEW_API}?bvid={bvid}",
+        cookies,
+        f"https://www.bilibili.com/video/{bvid}",
+    )
+    if data.get("code") != 0:
+        raise RuntimeError(f"读取视频时长失败: {data.get('message')}")
+    body = data.get("data") or {}
+    pages = [
+        {"page": p.get("page"), "duration": int(p.get("duration") or 0)}
+        for p in (body.get("pages") or [])
+        if isinstance(p, dict)
+    ]
+    if not pages and int(body.get("duration") or 0) > 0:
+        pages = [{"page": 1, "duration": int(body["duration"])}]
+    return pages
+
+
+def _group_messages_by_pages(messages: list[str], pages: list[dict[str, Any]]) -> list[str]:
+    """单 P 合并成一条；多 P 按页面时长边界切分，禁止按歌曲条数拆顶层评论。"""
+    lines = [line.strip() for message in messages for line in str(message).splitlines() if line.strip()]
+    if not lines:
+        raise ValueError("待发布评论为空")
+    if len(pages) <= 1:
+        return [chr(10).join(lines)]
+
+    if len(messages) == len(pages):
+        first_lines = [str(message).splitlines()[0].strip() for message in messages if str(message).splitlines()]
+        if all(re.fullmatch(r"P\d+", line or "") for line in first_lines):
+            return [chr(10).join(str(message).splitlines()) for message in messages]
+
+    durations = [max(0, int(page.get("duration") or 0)) for page in pages]
+    if not durations or sum(durations) <= 0:
+        raise RuntimeError("视频分 P 时长无效，拒绝猜测发布批次")
+    bounds = [0]
+    for duration in durations:
+        bounds.append(bounds[-1] + duration)
+    page_lines: list[list[str]] = [[] for _ in durations]
+    for line in lines:
+        timestamp = clean.extract_first_timestamp_info(line)
+        seconds = timestamp.get("seconds")
+        if seconds is None:
+            raise RuntimeError(f"多 P 歌单缺少可解析时间戳，拒绝发布: {line}")
+        page_index = len(durations) - 1
+        for index in range(len(durations)):
+            if bounds[index] <= int(seconds) < bounds[index + 1]:
+                page_index = index
+                break
+        page_lines[page_index].append(line)
+    grouped = []
+    for index, group in enumerate(page_lines, 1):
+        if group:
+            grouped.append(f"P{index}{chr(10)}{chr(10).join(group)}")
+    if not grouped:
+        raise RuntimeError("按视频时长切分后没有可发布内容")
+    return grouped
+
+
+def _normalize_publish_batches(
+    bvid: str, messages: list[str], cookies: dict[str, str]
+) -> list[str]:
+    cleaned = [str(message).strip() for message in messages if str(message).strip()]
+    if len(cleaned) <= 1:
+        return cleaned
+    pages = _fetch_video_pages(bvid, cookies)
+    if not pages:
+        raise RuntimeError("无法读取视频分 P/时长，拒绝发布多条主评论")
+    return _group_messages_by_pages(cleaned, pages)
+
+
 def verify_own_comments(bvid: str, messages: list[str], cookies: dict[str, str]) -> tuple[bool, str]:
     """回读评论区，确认每个已审核主评论的第一段确实可见。"""
     try:
@@ -146,11 +219,19 @@ def apply_comment(
         return {"bvid": bvid, "status": "dry_run", "messages": messages}
 
     data_path = review_dir(data_dir) / f"{bvid}.json"
+    cookies = bili_comment.load_cookie_map()
+    try:
+        messages = _normalize_publish_batches(bvid, messages, cookies)
+    except Exception as err:  # noqa: BLE001
+        error = f"发布批次校验失败: {err}"
+        item.update({"status": "approved", "error": error, "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+        _write_json(data_path, item)
+        raise RuntimeError(error) from err
+    item["approved_messages"] = messages
     item["status"] = "applying"
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     _write_json(data_path, item)
 
-    cookies = bili_comment.load_cookie_map()
     if bool(item.get("upgrade_mode")):
         for cm in bili_comment.find_own_comments(bvid, cookies):
             resp = bili_comment.delete_comment(bvid, cm.rpid, cookies)
