@@ -122,6 +122,12 @@ def list_comments(data_dir: Path | None = None, status: str | None = None) -> li
         except (OSError, ValueError):
             continue
         if status is None or item.get("status") == status:
+            if status == "pending" and not config.in_codex_scope(
+                str(item.get("bvid") or ""),
+                part_date=str(item.get("part_date") or ""),
+                queued_at=str(item.get("queued_at") or ""),
+            ):
+                continue
             out.append(item)
     return out
 
