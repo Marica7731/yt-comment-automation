@@ -685,7 +685,7 @@ def is_obviously_non_song_text(text: str) -> bool:
     t = strip_trailing_visual_decorations(t)
     if not t:
         return True
-    if re.match(r"^(開始|结束|終了|end|start)$", t, re.IGNORECASE):
+    if re.match(r"^(開始|开始|结束|終了|end|start|スタート)$", t, re.IGNORECASE):
         return True
     if re.match(r"^(talk|mc|雑談|聊天|感想|告知|返场|休息)$", t, re.IGNORECASE):
         return True
