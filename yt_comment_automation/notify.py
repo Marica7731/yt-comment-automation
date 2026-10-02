@@ -301,11 +301,10 @@ def build_success_brief(
     )
     lines.extend(["——清洗前后计数——", counts, "——清洗差异与原因——", diff_report])
     lines.extend(["——原始来源——", raw_source or raw_lines or "（未提供）"])
-    if draft_messages is not None:
-        lines.extend(["——本地草稿——", _as_text(draft_messages) or "（空）"])
+    draft_text = _as_text(draft_messages)
+    lines.extend(["——本地草稿——", draft_text or "（未提供）"])
     lines.extend(["——最终发布——", _as_text(approved_messages or final_message) or "（空）"])
-    if verification is not None:
-        lines.append(f"验证：{verification}")
+    lines.append(f"验证：{verification if verification is not None else 'N/A'}")
     rpids_text = ",".join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids
     failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
     lines.append(f"rpids：{rpids_text or '[]'}")
@@ -365,22 +364,19 @@ def build_failure_brief(
         lines.append(f"状态：{status}")
     lines.append(f"commit：{commit or git_summary()}")
     lines.append(f"原因：{reason}")
-    if source_text or source_lines or draft_messages is not None or approved_messages is not None:
-        counts, diff_report, raw_source, raw_lines = build_cleanup_report(
-            source_text=source_text,
-            source_lines=source_lines,
-            draft_messages=draft_messages,
-            approved_messages=approved_messages,
-            note=note,
-        )
-        lines.extend(["——清洗前后计数——", counts, "——清洗差异与原因——", diff_report])
-        lines.extend(["——原始来源——", raw_source or raw_lines or "（未提供）"])
-        if draft_messages is not None:
-            lines.extend(["——本地草稿——", _as_text(draft_messages) or "（空）"])
-        if approved_messages is not None:
-            lines.extend(["——最终内容——", _as_text(approved_messages) or "（空）"])
-    if verification is not None:
-        lines.append(f"验证：{verification}")
+    counts, diff_report, raw_source, raw_lines = build_cleanup_report(
+        source_text=source_text,
+        source_lines=source_lines,
+        draft_messages=draft_messages,
+        approved_messages=approved_messages,
+        note=note,
+    )
+    lines.extend(["——清洗前后计数——", counts, "——清洗差异与原因——", diff_report])
+    lines.extend(["——原始来源——", raw_source or raw_lines or "（未提供）"])
+    draft_text = _as_text(draft_messages)
+    lines.extend(["——本地草稿——", draft_text or "（未提供）"])
+    lines.extend(["——最终内容——", _as_text(approved_messages) or "（未提供）"])
+    lines.append(f"验证：{verification if verification is not None else 'N/A'}")
     rpids_text = ",".join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids
     failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
     lines.append(f"rpids：{rpids_text or '[]'}")

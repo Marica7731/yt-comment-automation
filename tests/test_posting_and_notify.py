@@ -103,6 +103,13 @@ def test_build_success_brief_with_profile():
     assert "✅评论发送成功" in brief
     assert "主播：凛々咲 / Ririsya@RirisyaMusic" in brief
     assert "歌曲数量：14" in brief
+    assert "——原始来源——" in brief
+    assert "——本地草稿——" in brief
+    assert "——最终发布——" in brief
+    assert "验证：N/A" in brief
+    assert "rpids：[]" in brief
+    assert "segments：0" in brief
+    assert "failures：[]" in brief
 
 
 def test_failure_brief_title_by_error_type():
@@ -133,6 +140,14 @@ def test_failure_brief_fallback_title():
 
     brief = notify.build_failure_brief("BV1xxx", "未知异常: xxx")
     assert "❌处理失败" in brief
+    assert "——清洗前后计数——" in brief
+    assert "——原始来源——" in brief
+    assert "——本地草稿——" in brief
+    assert "——最终内容——" in brief
+    assert "验证：N/A" in brief
+    assert "rpids：[]" in brief
+    assert "segments：0" in brief
+    assert "failures：[]" in brief
 
 
 def test_yt_fetch_json_decode_error_diagnosable():
