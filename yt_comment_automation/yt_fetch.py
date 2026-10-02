@@ -14,6 +14,7 @@ import json
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -578,6 +579,162 @@ def _fetch_youtube_innertube_raw(
     return raw_info
 
 
+def _youtube_api_get(resource: str, params: dict[str, Any]) -> dict[str, Any]:
+    """调用 YouTube Data API v3；key 只从当前进程环境/private.env 读取。"""
+    from . import config
+
+    api_key = config.get("YOUTUBE_API_KEY")
+    if not api_key:
+        raise YtFetchError("official 主路径缺少 YOUTUBE_API_KEY，拒绝隐式降级")
+    query = urllib.parse.urlencode({**params, "key": api_key})
+    url = f"https://www.googleapis.com/youtube/v3/{resource}?{query}"
+    request = urllib.request.Request(url, headers=_headers())
+    try:
+        with _urlopen_with_retry(request) as response:
+            payload = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            body = json.loads(exc.read().decode("utf-8", errors="replace"))
+            detail = str((body.get("error") or {}).get("message") or "")
+        except (ValueError, AttributeError):
+            detail = ""
+        raise YtFetchError(
+            f"YouTube Data API {resource} HTTP {exc.code}: {detail or exc.reason}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise YtFetchError(
+            f"YouTube Data API {resource} 网络错误: {exc.reason}"
+        ) from exc
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise YtFetchError(f"YouTube Data API {resource} 返回非 JSON 响应") from exc
+    if isinstance(data, dict) and data.get("error"):
+        error = data["error"] if isinstance(data["error"], dict) else {}
+        raise YtFetchError(
+            f"YouTube Data API {resource} 错误: {error.get('message') or data['error']}"
+        )
+    if not isinstance(data, dict):
+        raise YtFetchError(f"YouTube Data API {resource} 返回结构异常")
+    return data
+
+
+def _official_comment_entries(items: Any) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    if not isinstance(items, list):
+        return entries
+    for thread in items:
+        if not isinstance(thread, dict):
+            continue
+        top = ((thread.get("snippet") or {}).get("topLevelComment")) or {}
+        replies = ((thread.get("replies") or {}).get("comments")) or []
+        comments = [top, *replies] if isinstance(replies, list) else [top]
+        for comment in comments:
+            if not isinstance(comment, dict):
+                continue
+            snippet = comment.get("snippet") or {}
+            text = snippet.get("textOriginal") or snippet.get("textDisplay") or ""
+            cid = str(comment.get("id") or "")
+            if text and cid:
+                entries.append({"id": cid, "text": str(text)})
+    return entries
+
+
+def _fetch_youtube_official_raw(
+    video_id: str,
+    cache_dir: Path | None,
+    force: bool,
+    max_age_seconds: int | None,
+    early_stop: bool,
+) -> dict[str, Any]:
+    """已验证的官方 API 主路径；可显式启用，也可在 Innertube 429 后恢复。"""
+    if cache_dir and not force:
+        cache_path = cache_dir / f"{video_id}.info.json"
+        if cache_path.is_file():
+            if max_age_seconds is None:
+                return json.loads(cache_path.read_text(encoding="utf-8"))
+            if time.time() - cache_path.stat().st_mtime < max_age_seconds:
+                return json.loads(cache_path.read_text(encoding="utf-8"))
+
+    video_response = _youtube_api_get("videos", {"part": "snippet", "id": video_id})
+    video_items = video_response.get("items") or []
+    description = ""
+    if video_items:
+        description = str((video_items[0].get("snippet") or {}).get("description") or "")
+
+    known_ids = _load_known_comment_ids(cache_dir, video_id)
+    fetched_ids: list[str] = []
+    comments: list[str] = []
+    responses: list[dict[str, Any]] = []
+    page_token = ""
+    while len(responses) < 5:
+        params: dict[str, Any] = {
+            "part": "snippet,replies",
+            "videoId": video_id,
+            "order": "time",
+            "maxResults": 50,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        response = _youtube_api_get("commentThreads", params)
+        responses.append(response)
+        page_entries = _official_comment_entries(response.get("items"))
+        page_new = 0
+        for entry in page_entries:
+            comments.append(entry["text"])
+            fetched_ids.append(entry["id"])
+            if entry["id"] not in known_ids:
+                page_new += 1
+        next_token = str(response.get("nextPageToken") or "")
+        if not next_token or (early_stop and page_new == 0):
+            break
+        page_token = next_token
+
+    _save_comment_ids(cache_dir, video_id, fetched_ids)
+    raw_info = {
+        "id": video_id,
+        "webpage_url": WATCH_URL.format(video_id=video_id),
+        "description": description,
+        "comments": [{"text": text} for text in comments],
+        "raw": {
+            "videos_response": video_response,
+            "comments_responses": responses,
+        },
+    }
+
+    if cache_dir:
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            ledger = cache_dir / "fetch_times.json"
+            try:
+                times = json.loads(ledger.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                times = {}
+            times[video_id] = time.time()
+            if len(times) > 500:
+                times = dict(sorted(times.items(), key=lambda kv: kv[1], reverse=True)[:500])
+            ledger.write_text(json.dumps(times), encoding="utf-8")
+        except OSError:
+            pass
+
+    if not any(c.get("text") for c in raw_info["comments"]):
+        return raw_info
+
+    if cache_dir:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_dir / f"{video_id}.info.json"
+        if cache_path.is_file():
+            hist_dir = cache_dir / "history" / video_id
+            hist_dir.mkdir(parents=True, exist_ok=True)
+            olds = sorted(hist_dir.glob("*.info.json"))
+            while len(olds) >= 3:
+                olds.pop(0).unlink()
+            cache_path.rename(hist_dir / f"{time.strftime('%Y%m%d_%H%M%S')}.info.json")
+        cache_path.write_text(json.dumps(raw_info, ensure_ascii=False, indent=2), encoding="utf-8")
+    return raw_info
+
+
 def fetch_youtube_raw(
     video_id: str,
     cache_dir: str | Path | None = None,
@@ -585,7 +742,7 @@ def fetch_youtube_raw(
     max_age_seconds: int | None = None,
     early_stop: bool = False,
 ) -> dict[str, Any]:
-    """抓取视频评论区和简介；生产 cron 使用 cache_only 读取 Action 缓存。"""
+    """抓取视频评论区和简介；支持 Action 缓存、Innertube 和已验证官方 API。"""
     resolved_cache_dir = Path(cache_dir) if cache_dir else None
     from . import config
 
@@ -602,9 +759,31 @@ def fetch_youtube_raw(
     if fetch_mode not in {"auto", ""}:
         raise YtFetchError(f"不支持的 YOUTUBE_FETCH_MODE: {fetch_mode}")
 
-    return _fetch_youtube_innertube_raw(
-        video_id, resolved_cache_dir, force, max_age_seconds, early_stop
-    )
+    backend = config.get("YOUTUBE_FETCH_BACKEND", "auto").lower()
+    if backend == "official":
+        return _fetch_youtube_official_raw(
+            video_id, resolved_cache_dir, force, max_age_seconds, early_stop
+        )
+    if backend not in {"auto", ""}:
+        raise YtFetchError(f"不支持的 YOUTUBE_FETCH_BACKEND: {backend}")
+    try:
+        return _fetch_youtube_innertube_raw(
+            video_id, resolved_cache_dir, force, max_age_seconds, early_stop
+        )
+    except Exception as err:
+        if not is_rate_limited_error(err):
+            raise
+        if not config.get("YOUTUBE_API_KEY"):
+            raise
+        try:
+            return _fetch_youtube_official_raw(
+                video_id, resolved_cache_dir, force, max_age_seconds, early_stop
+            )
+        except Exception as fallback_err:
+            raise YtFetchError(
+                "YouTube 429; 已验证 official 恢复路径失败: "
+                f"{type(fallback_err).__name__}: {fallback_err}"
+            ) from err
 
 
 def extract_description_first_line_youtube_url(description: str) -> str:

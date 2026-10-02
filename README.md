@@ -16,6 +16,9 @@ YouTube 评论抓取主链路由 GitHub Action 完成：`dev/run_youtube_action.
 `.github/workflows/fetch-youtube.yml`；轮询 `youtube-action-cache` 分支读取
 payload，再经 SSH 合并到 WDC 的 `data/yt_raw`。WDC 的 `cron_job.sh` 以
 `YOUTUBE_FETCH_MODE=cache_only` 运行，缓存缺失时跳过，不直连 YouTube。
+官方 YouTube Data API 是另一条已验证主路径：`YOUTUBE_FETCH_BACKEND=official`
+显式启用，key 只存 WDC `private.env`。2026-10-02 已在 WDC 实测
+`videos.list` 与 `commentThreads.list` 均返回 HTTP 200；不使用未配置的 GitHub secret。
 
 ## 目录结构
 
@@ -74,6 +77,8 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 | `CODEX_SCOPE_START_DATE` | Codex 接手范围起始日期，默认 `2026-10-02`；只处理该日及之后的视频 |
 | `CODEX_SCOPE_BVIDS` | 手工点名、必须纳入范围的 BVID，逗号分隔 |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 当前项目 `yt-comment-automation` 飞书机器人；不读取旧 bridge |
+| `YOUTUBE_API_KEY` | 已在 WDC 实测通过的 YouTube Data API v3 key；只存 WDC `private.env`，不写入 Git 或 GitHub Actions secret |
+| `YOUTUBE_FETCH_BACKEND` | `official`（显式启用已验证 API 主路径）、`auto`（Innertube，429 且有 key 时恢复） |
 | `YOUTUBE_FETCH_MODE` | `auto`（默认）或 `cache_only`；生产 cron 强制 `cache_only` |
 | `YOUTUBE_REQUEST_MIN_GAP_SECONDS` | YouTube 相邻请求最小间隔；GitHub Action workflow 使用 3 秒 |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
