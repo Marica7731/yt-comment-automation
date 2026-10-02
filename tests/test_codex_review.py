@@ -213,7 +213,13 @@ def test_comment_apply_marks_processed_and_verifies(tmp_path: Path, monkeypatch)
         "find_own_comments",
         lambda bvid, cookies: [Own(payload["draft_messages"][0])],
     )
-    monkeypatch.setattr(review.notify, "build_success_brief", lambda **kwargs: "brief")
+    success_kwargs = {}
+
+    def capture_success(**kwargs):
+        success_kwargs.update(kwargs)
+        return "brief"
+
+    monkeypatch.setattr(review.notify, "build_success_brief", capture_success)
     monkeypatch.setattr(review.notify, "send_feishu_message", lambda brief: (True, "ok"))
 
     item = review.apply_comment("BV1Apply", tmp_path)
@@ -221,6 +227,12 @@ def test_comment_apply_marks_processed_and_verifies(tmp_path: Path, monkeypatch)
     assert item["status"] == "applied"
     assert item["verification"]["ok"] is True
     assert "BV1Apply" in (tmp_path / "processed.json").read_text(encoding="utf-8")
+    assert "yt_comment_automation/review.py" in success_kwargs["files"]
+    assert any("review_cli apply --bvid BV1Apply" in x for x in success_kwargs["tests"])
+    assert success_kwargs["verification"]["ok"] is True
+    assert success_kwargs["rpids"] == ["r1"]
+    assert success_kwargs["segments"] == 1
+    assert success_kwargs["failures"] == []
 
 def test_verify_own_comments_normalizes_bilibili_html_entities(monkeypatch):
     class Own:
