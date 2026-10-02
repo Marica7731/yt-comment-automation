@@ -6,7 +6,7 @@
 - 已赞跳过（跳过明细只进日志，不发飞书）；自己的回复排除；
 - reply/action 是 toggle：只有确认「当前未赞」才发 action，绝不盲发（盲发会把赞取消）；
 - 接口里 mid 是字符串：比较一律 str() 归一，否则自己排除永不生效；
-- 飞书通知只有标题一个 👍，明细行纯文本；另含评论区补扫（折叠评论不进 msgfeed）。
+- 待审核候选只写本地队列和日志，不发飞书；只有点赞执行结果才通知；
 """
 import json
 import re
@@ -363,10 +363,3 @@ review_payload = save_review_candidates()
 review_summary = f"点赞候选待 Codex 审核: {review_payload['count']} 条，文件: {REVIEW_PATH}"
 print(review_summary, flush=True)
 print(f"翻页: {page} 页 / {total_items} 条", flush=True)
-if review_payload["count"]:
-    try:
-        notify.send_feishu_message(
-            notify.build_like_review_brief(review_payload.get("candidates", []))
-        )
-    except Exception as err:  # noqa: BLE001
-        print(f"飞书通知失败: {err}", flush=True)
