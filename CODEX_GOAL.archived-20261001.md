@@ -13,7 +13,7 @@
 - 合集1：anchor BV13ege65Es5（ugc_season 8744333「直播」，9 节，70 视频）
 - 合集2：anchor BV1ZYNT6hEEe（ugc_season 8744348「直播2」，5 节，22 视频）
 - 已发布过时间戳歌轴评论的视频跳过（如 BV16aNn6zEqv / BV1xbub6EEj4）
-- 处理链：合集检测 → YouTube 评论抓取（无 cookie）→ 本地规则清洗 → DeepSeek 兜底 → 发布 → 飞书
+- 处理链（历史记录，已切换为 Codex 单一模式）：合集检测 → YouTube 评论抓取（无 cookie）→ 本地规则清洗 → 发布 → 飞书
 
 ## 禁止事项
 - 不把 IP、apikey、cookie、token 上传 GitHub
