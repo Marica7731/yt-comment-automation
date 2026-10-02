@@ -746,6 +746,15 @@ def run_pipeline(
             if result.status == "posted":
                 # 飞书通知（仅新投稿发布时；无新增/缺歌单不播报）
                 brief = notify.build_success_brief(
+                    files=[
+                        "yt_comment_automation/pipeline.py",
+                        "yt_comment_automation/bili_comment.py",
+                        "data/processed.json",
+                    ],
+                    tests=[
+                        f"cron_job.sh → {result.status}",
+                        f"song_count={result.song_count}",
+                    ],
                     bvid=result.bvid,
                     yt_link=f"https://youtu.be/{result.yt_id}",
                     posted_at=notify.beijing_now(),
@@ -758,6 +767,11 @@ def run_pipeline(
                 logger.info("  飞书通知: %s %s", ok, note)
         elif result.status == "error" and not dry_run:
             brief = notify.build_failure_brief(
+                files=[
+                    "yt_comment_automation/pipeline.py",
+                    "yt_comment_automation/yt_fetch.py",
+                ],
+                tests=[f"cron_job.sh → {result.status}: {result.error}"],
                 bvid=result.bvid,
                 reason=result.error,
                 title=result.title,

@@ -289,6 +289,15 @@ def apply_comment(
         commit = notify.git_summary()
         if verified:
             brief = notify.build_success_brief(
+                files=[
+                    "yt_comment_automation/review.py",
+                    "yt_comment_automation/bili_comment.py",
+                    f"data/review/{bvid}.json",
+                ],
+                tests=[
+                    f"review_cli apply --bvid {bvid} → status={item.get('status', '')}",
+                    f"verification → {verify_detail}",
+                ],
                 bvid=bvid,
                 yt_link=f"https://youtu.be/{item.get('yt_id', '')}" if item.get("yt_id") else "",
                 posted_at=notify.beijing_now(),
@@ -315,6 +324,15 @@ def apply_comment(
                 reason=f"评论已发布但回读验收失败：{verify_detail}",
                 title=item.get("title", ""),
                 collection=item.get("collection", ""),
+                files=[
+                    "yt_comment_automation/review.py",
+                    "yt_comment_automation/bili_comment.py",
+                    f"data/review/{bvid}.json",
+                ],
+                tests=[
+                    f"review_cli apply --bvid {bvid} → status={item.get('status', '')}",
+                    f"verification → {verify_detail}",
+                ],
                 yt_link=f"https://youtu.be/{item.get('yt_id', '')}" if item.get("yt_id") else "",
                 source_text=item.get("source_text", ""),
                 source_lines=item.get("source_lines", ""),

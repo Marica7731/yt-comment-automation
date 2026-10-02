@@ -160,11 +160,15 @@ def test_yt_fetch_error_goes_through_failure_brief():
         "BV19hxdzfEkb",
         "YouTube 抓取失败: YtFetchError: youtubei 响应不是 JSON（可能是验证码/反爬 HTML）: ...; 响应开头: '<!DOCTYPE html>...'",
         title="SHONEN MANGA",
+        files=["yt_comment_automation/yt_fetch.py"],
+        tests=["yt_fetch failure path → failure brief"],
         collection="凛々咲",
         yt_link="https://youtu.be/WVGFpUyvxgo",
     )
     assert "⚠️YouTube 抓取失败" in brief
     assert "验证码/反爬" in brief
+    assert "yt_comment_automation/yt_fetch.py" in brief
+    assert "yt_fetch failure path → failure brief" in brief
 
 
 def test_build_crash_brief():
@@ -224,6 +228,8 @@ def test_detailed_success_brief_includes_cleanup_and_verification():
         failures=[],
         status="applied",
         commit="abc1234",
+        files=["yt_comment_automation/review.py"],
+        tests=["review_cli apply → applied", "回读 → passed"],
     )
     assert "原始时间戳行：3 → 本地草稿行：2 → 最终发布行：2" in brief
     assert "节目/谈话标记" in brief
@@ -232,6 +238,10 @@ def test_detailed_success_brief_includes_cleanup_and_verification():
     assert "回读通过" in brief
     assert "rpids：111,222" in brief
     assert "commit：abc1234" in brief
+    assert "——涉及文件——" in brief
+    assert "yt_comment_automation/review.py" in brief
+    assert "——测试命令与结果——" in brief
+    assert "review_cli apply → applied" in brief
 
 
 def test_code_fix_brief_is_auditable():
@@ -267,12 +277,20 @@ def test_like_action_brief_lists_candidates():
         ],
         summary="点赞 1 | 失败 0",
         commit="aaa1111",
+        files=["like_fans.py"],
+        tests=["resolve_real_liked precheck → passed"],
+        failures=[],
+        segments="N/A",
     )
     assert "rpid=901" in brief
     assert "oid=77" in brief
     assert "source=msgfeed" in brief
     assert "result=liked" in brief
     assert "commit：aaa1111" in brief
+    assert "segments：N/A" in brief
+    assert "failures：[]" in brief
+    assert "like_fans.py" in brief
+    assert "resolve_real_liked precheck → passed" in brief
 
 
 def test_config_has_no_legacy_feishu_bridge_loader():
