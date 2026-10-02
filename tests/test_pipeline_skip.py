@@ -1,5 +1,21 @@
 
 from yt_comment_automation.pipeline import raw_has_timestamp_songlist  # noqa: E402
+from yt_comment_automation import pipeline  # noqa: E402
+
+
+def test_refetch_gate_new_video_every_round_old_video_four_hours(tmp_path):
+    import datetime as dt
+
+    new_interval, new_age = pipeline._refetch_gate(
+        tmp_path, "new-video", dt.date.today().isoformat()
+    )
+    assert (new_interval, new_age) == (0.0, 0.0)
+
+    old_interval, old_age = pipeline._refetch_gate(
+        tmp_path, "old-video", "2020-01-01"
+    )
+    assert old_interval == 4 * 3600.0
+    assert old_age == float("inf")
 
 
 def test_raw_songlist_detected():
