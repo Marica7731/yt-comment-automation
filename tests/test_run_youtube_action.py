@@ -65,6 +65,7 @@ def test_workflow_uses_push_trigger_secret_and_three_second_gap():
         runner.ROOT / ".github" / "workflows" / "fetch-youtube.yml"
     ).read_text(encoding="utf-8")
     assert "paths:\n      - youtube_targets.txt" in workflow
-    assert "YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}" in workflow
     assert 'YOUTUBE_REQUEST_MIN_GAP_SECONDS: "3"' in workflow
     assert "push -q origin HEAD:youtube-action-cache" in workflow
+    assert "YOUTUBE_API_KEY" not in workflow
+    assert "YOUTUBE_FETCH_BACKEND" not in workflow
