@@ -239,6 +239,21 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--apply":
                 notify.build_like_action_brief(
                     apply_result.get("executed", []),
                     summary=summary,
+                    files=[
+                        "like_fans.py",
+                        "yt_comment_automation/like_review.py",
+                        "data/like_review.json",
+                        "data/liked_rpids.json",
+                    ],
+                    tests=[
+                        "action 前 resolve_real_liked 真实点赞状态复核",
+                        f"like_fans.py --apply → 点赞 {liked_n} | 跳过 {skipped_n} | 失败 {failed_n}",
+                    ],
+                    failures=[
+                        f"rpid={row.get('rpid', '')} result={row.get('result', row.get('status', ''))} error={row.get('error', '')}"
+                        for row in apply_result.get("executed", [])
+                        if row.get("status") == "failed" or row.get("result") in {"exception", "api_error", "verify_unavailable"}
+                    ],
                 )
             )
         except Exception as err:  # noqa: BLE001

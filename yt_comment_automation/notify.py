@@ -99,6 +99,14 @@ def _as_text(value: Any) -> str:
     return str(value)
 
 
+def _as_multiline(value: Iterable[str] | str) -> str:
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    return "\n".join(str(item) for item in value if str(item).strip())
+
+
 def _timestamp_lines(value: Any) -> list[str]:
     text = _as_text(value)
     ts_re = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")
@@ -187,6 +195,10 @@ def build_like_action_brief(
     results: Iterable[dict[str, Any]],
     summary: str = "",
     commit: str = "",
+    files: Iterable[str] | str = (),
+    tests: Iterable[str] | str = (),
+    failures: Iterable[str] | str = (),
+    segments: int | str = "",
 ) -> str:
     """Detailed like action report with candidate identity and result."""
     rows = list(results)
@@ -208,6 +220,13 @@ def build_like_action_brief(
         )
     if not rows:
         lines.append("- 无可执行候选")
+    lines.append(f"segments：{segments if segments not in (None, '') else 'N/A（点赞动作无评论分段）'}")
+    failure_text = _as_multiline(failures)
+    lines.append(f"failures：{failure_text or '[]'}")
+    file_text = _as_multiline(files)
+    test_text = _as_multiline(tests)
+    lines.extend(["——涉及文件——", file_text or "（未提供）"])
+    lines.extend(["——测试命令与结果——", test_text or "（未提供）"])
     lines.append(f"commit：{commit or git_summary()}")
     lines.append(f"时间：{beijing_now()}")
     return "\n".join(lines)
@@ -253,6 +272,8 @@ def build_success_brief(
     commit: str = "",
     title: str = "",
     collection: str = "",
+    files: Iterable[str] | str = (),
+    tests: Iterable[str] | str = (),
 ) -> str:
     """Detailed success report with source/draft/final content and verification."""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
@@ -293,6 +314,10 @@ def build_success_brief(
         lines.append(f"failures：{'; '.join(str(x) for x in failures) if not isinstance(failures, str) else failures}")
     if note:
         lines.append(f"审核备注：{note}")
+    file_text = _as_multiline(files)
+    test_text = _as_multiline(tests)
+    lines.extend(["——涉及文件——", file_text or "（未提供）"])
+    lines.extend(["——测试命令与结果——", test_text or "（未提供）"])
     lines.append(f"报告时间：{beijing_now()}")
     return "\n".join(lines)
 
@@ -325,6 +350,8 @@ def build_failure_brief(
     failures: Iterable[str] | str = (),
     status: str = "",
     commit: str = "",
+    files: Iterable[str] | str = (),
+    tests: Iterable[str] | str = (),
 ) -> str:
     """失败通知：按错误类型给标题，附视频标题、合集、B站/油管链接、原因、时间。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
@@ -363,6 +390,10 @@ def build_failure_brief(
         lines.append(f"failures：{'; '.join(str(x) for x in failures) if not isinstance(failures, str) else failures}")
     if note:
         lines.append(f"审核备注：{note}")
+    file_text = _as_multiline(files)
+    test_text = _as_multiline(tests)
+    lines.extend(["——涉及文件——", file_text or "（未提供）"])
+    lines.extend(["——测试命令与结果——", test_text or "（未提供）"])
     lines.append(f"时间：{beijing_now()}")
     return "\n".join(lines)
 
