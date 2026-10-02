@@ -207,3 +207,4 @@ def test_katakana_start_marker_is_not_a_song():
     )
     assert [item.song for item in items] == ["怪獣"]
     assert clean.is_obviously_non_song_text("スタート") is True
+    assert clean.is_non_song_section_marker("スタート") is True
