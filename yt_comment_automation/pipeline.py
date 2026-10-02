@@ -32,8 +32,8 @@ UPGRADE_THRESHOLD = 3
 UPGRADE_CHECK_TTL = 7200
 # 新投稿认定窗口（天）：B站发布时间在该窗口内的升级复查保持每轮 force 重抓
 UPGRADE_FRESH_DAYS = 7
-# Codex pending 候选按用户要求降频：同一老视频至少间隔 4 小时再查评论区
-PENDING_RECHECK_HOURS = 4
+# Codex pending 候选按用户要求降频：同一视频至少间隔 12 小时再查评论区
+PENDING_RECHECK_HOURS = 12
 
 # 本地规则结果可信的下限：低于此数量时仍保留原始来源交 Codex 审核
 MIN_CONFIDENT_SONGS = 5
@@ -198,7 +198,7 @@ def _looks_like_song_line_rest(rest: str) -> bool:
 # 同一视频重抓间隔控制（按"两次抓取的间隔"，不是轮次间隔——YouTube 风控
 # 看的是同一视频被反复请求的频率）：
 NEW_VIDEO_DAYS = 2  # B站投稿 ≤2 天 = 新视频，保持每轮抓（歌单常延迟出现）
-OLD_VIDEO_REFETCH_HOURS = 4  # 老视频同一视频至少间隔 4 小时才再抓
+OLD_VIDEO_REFETCH_HOURS = 12  # 老视频同一视频至少间隔 12 小时才再抓
 
 
 def _last_fetch_age(cache_dir, yt_id: str) -> float:
@@ -221,7 +221,7 @@ def _last_fetch_age(cache_dir, yt_id: str) -> float:
 def _refetch_gate(cache_dir, yt_id: str, part_date: str) -> tuple[float, float]:
     """返回 (该视频要求的最小重抓间隔秒数, 距上次抓取的秒数)。
 
-    新视频 → (0, 0) 不设限；老视频 → 4 小时。没抓过 → age=inf 必抓。
+    新视频 → (0, 0) 不设限；老视频 → 12 小时。没抓过 → age=inf 必抓。
     """
     if part_date:
         try:
@@ -442,7 +442,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     # 3. 抓取 YouTube 评论 + 简介
     #    抓取频率按"同一视频两次抓取的间隔"控制（不是轮次间隔）：
     #    - 新视频（B站投稿 ≤2 天）：保持每轮抓（歌单常延迟出现）
-    #    - 老视频：同一视频至少间隔 4 小时（上次抓取时间=缓存 mtime，只用
+    #    - 老视频：同一视频至少间隔 12 小时（上次抓取时间=缓存 mtime，只用
     #      元数据算间隔，不用缓存内容顶替）
     #    请求节奏：全局任意两次 YouTube 请求间隔 ≥2 秒（yt_fetch 内置节流）；
     #    429 重试最多 5 次，任一次成功直接放行，全失败报错跳过该视频。
