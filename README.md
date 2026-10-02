@@ -11,6 +11,11 @@ B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视
 5. **审核后发布 + 飞书通知**：Codex 批准后由 WDC 发布；超长评论自动切分主评论 + 楼中楼续写
    （B 站链接 / 油管链接 / 评论时间 / 歌曲数量）
 
+YouTube 评论抓取主链路由 GitHub Action 完成：`dev/run_youtube_action.py`
+先在 WDC 计算到期 ID，再触发 `.github/workflows/fetch-youtube.yml`，
+下载 artifact 后合并到 WDC 的 `data/yt_raw`。WDC 的 `cron_job.sh` 以
+`YOUTUBE_FETCH_MODE=cache_only` 运行，缓存缺失时跳过，不直连 YouTube。
+
 ## 目录结构
 
 ```
@@ -66,6 +71,9 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 | `COLLECTION_NAMES` | 合集显示名（可选） |
 | `OWNER_MID` | 发布账号 mid（用于跳过已发布检测） |
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 当前项目 `yt-comment-automation` 飞书机器人；不读取旧 bridge |
+| `YOUTUBE_API_KEY` | YouTube Data API v3 key；只在 Innertube 429 后作为备用抓取通道 |
+| `YOUTUBE_FETCH_BACKEND` | `auto`（默认）或 `official`；未配置 key 时保持原抓取行为 |
+| `YOUTUBE_FETCH_MODE` | `auto`（默认）或 `cache_only`；生产 cron 强制 `cache_only` |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
 
 ## 评论格式与发布规则

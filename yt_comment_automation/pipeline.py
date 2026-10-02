@@ -483,6 +483,11 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                 logger.info("[%s] 缓存无歌单，强制重新抓取 YouTube", video.bvid)
                 raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
     except Exception as err:  # noqa: BLE001
+        if isinstance(err, yt_fetch.YtCacheMissError):
+            result.status = "skipped_no_songs"
+            result.error = str(err)
+            logger.info("[%s] 跳过 YouTube：Action 缓存缺失", video.bvid)
+            return result
         result.status = "error"
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"
         # 429 重试 5 次后仍失败 → 飞书提醒（一轮只提醒一次）
