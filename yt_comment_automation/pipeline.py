@@ -154,7 +154,7 @@ def _extract_yt_id_from_part(part: str) -> str:
 
 # 非歌曲时间戳标记词（带时间戳但内容不是歌：开始/MC/章节/杂谈/告知/截图等）
 _NON_SONG_TS_MARKERS = re.compile(
-    r"(?:開始|开始|start|終了|end|opening|open|closing|close|mc|雑談|talk|感想|告知|お知らせ|"
+    r"(?:開始|开始|start|スタート|終了|end|opening|open|closing|close|mc|雑談|talk|感想|告知|お知らせ|"
     r"チャプター|chapter|セトリ|setlist|タイムスタンプ|timestamp|スクショ|挨拶|自己紹介|コメント|"
     r"おつ|お疲れ|ありがとう|宣伝|休憩|トイレ|お水|スパチャ読み|リクエスト募集|あくび|助かる|てぇてぇ|"
     r"声入り|開始前|準備|待機|待機所|文房具|マウント|ご飯|お風呂|お風呂|おかえり|ただいま|"

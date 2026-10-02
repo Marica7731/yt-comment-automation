@@ -200,3 +200,10 @@ def test_dotted_numeric_song_names():
     assert c is not None and c.song == "あなたの夜が明けるまで(-5キー)"
     d = clean.parse_song_line_after_timestamp("1:50:07 14. 14.あなたの夜が明けるまで(-5キー)")
     assert d is not None and d.song == "あなたの夜が明けるまで(-5キー)"
+
+def test_katakana_start_marker_is_not_a_song():
+    items = clean.extract_plain_songs_from_source_timeline(
+        "『03:18』スタート\n『09:29』怪獣 / サカナクション"
+    )
+    assert [item.song for item in items] == ["怪獣"]
+    assert clean.is_obviously_non_song_text("スタート") is True
