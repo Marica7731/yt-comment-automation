@@ -405,18 +405,49 @@ def build_yt_rate_limit_brief(bvid: str, reason: str) -> str:
     )
 
 
-def build_crash_brief(traceback_text: str) -> str:
+def build_crash_brief(
+    traceback_text: str,
+    *,
+    files: Iterable[str] | str = (),
+    tests: Iterable[str] | str = (),
+    commit: str = "",
+    verification: Any = None,
+    rpids: Iterable[str] | str = (),
+    segments: int | str = 0,
+    failures: Iterable[str] | str = (),
+) -> str:
     """整轮管线崩溃通知：任何未捕获异常都提醒，避免"很久没发"才发现。"""
     lines = (traceback_text or "").splitlines()
     # 提炼调用链（File "...", line N, in func）与最终异常
     frames = [ln.strip() for ln in lines if ln.strip().startswith("File ") and ", in " in ln]
     err_line = next((ln.strip() for ln in reversed(lines) if ln.strip() and not ln.strip().startswith(("Traceback", "File ", "    "))), "未知异常")
     frames_str = "\n".join(frames[-3:]) if frames else "（无堆栈）"
+    rpids_text = ",".join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids
+    failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
+    file_text = _as_multiline(files)
+    test_text = _as_multiline(tests)
     return "\n".join(
         [
             "💥管线崩溃",
             f"异常：{err_line}",
             frames_str,
+            "——原始来源——",
+            "N/A（管线异常，无单条发布内容）",
+            "——清洗前后计数——",
+            "N/A / N/A / N/A",
+            "——本地草稿——",
+            "N/A",
+            "——最终发布内容——",
+            "N/A",
+            f"验证：{verification if verification is not None else 'N/A'}",
+            f"rpids：{rpids_text or '[]'}",
+            f"segments：{segments if segments not in (None, '') else 0}",
+            f"failures：{failure_text or err_line}",
+            "——涉及文件——",
+            file_text or "（未提供）",
+            "——测试命令与结果——",
+            test_text or "（未提供）",
+            f"commit：{commit or git_summary()}",
             f"时间：{beijing_now()}",
         ]
     )

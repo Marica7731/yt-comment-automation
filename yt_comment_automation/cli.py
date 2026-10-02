@@ -76,7 +76,19 @@ def main() -> int:
             try:
                 from . import notify
 
-                brief = notify.build_crash_brief(tb)
+                brief = notify.build_crash_brief(
+                    tb,
+                    files=[
+                        "yt_comment_automation/cli.py",
+                        "yt_comment_automation/pipeline.py",
+                        "cron_job.sh",
+                    ],
+                    tests=[
+                        f"pipeline run mode={mode} dry_run={dry_run} → crashed",
+                        "traceback → crash brief",
+                    ],
+                    commit=notify.git_summary(),
+                )
                 ok, note = notify.send_feishu_message(brief)
                 logger.info("崩溃飞书通知: %s %s", ok, note)
             except Exception as notify_err:  # noqa: BLE001

@@ -193,10 +193,26 @@ def test_build_crash_brief():
   File "yt_comment_automation/pipeline.py", line 446, in process_video
     messages = [message]
 NameError: name 'message' is not defined"""
-    brief = notify.build_crash_brief(tb)
+    brief = notify.build_crash_brief(
+        tb,
+        files=["yt_comment_automation/pipeline.py"],
+        tests=["pipeline run → crashed"],
+        commit="abc1234",
+    )
     assert "💥管线崩溃" in brief
     assert "NameError: name 'message' is not defined" in brief
     assert "pipeline.py\", line 446" in brief
+    assert "——原始来源——" in brief
+    assert "——清洗前后计数——" in brief
+    assert "——本地草稿——" in brief
+    assert "——最终发布内容——" in brief
+    assert "验证：N/A" in brief
+    assert "rpids：[]" in brief
+    assert "segments：0" in brief
+    assert "failures：NameError" in brief
+    assert "yt_comment_automation/pipeline.py" in brief
+    assert "pipeline run → crashed" in brief
+    assert "commit：abc1234" in brief
 
 
 def test_cli_crash_sends_notify(mocker=None):
