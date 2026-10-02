@@ -49,10 +49,28 @@ def test_yt_rate_limited_detection():
 def test_build_yt_rate_limit_brief():
     from yt_comment_automation import notify
 
-    brief = notify.build_yt_rate_limit_brief("BV1Wq846oE3E", "YouTube 抓取失败: HTTPError: HTTP Error 429")
+    brief = notify.build_yt_rate_limit_brief(
+        "BV1Wq846oE3E",
+        "YouTube 抓取失败: HTTPError: HTTP Error 429",
+        files=["yt_comment_automation/yt_fetch.py"],
+        tests=["fetch_youtube_raw → HTTP 429", "retry exhausted"],
+        commit="abc1234",
+        failures=["HTTP Error 429"],
+    )
     assert "⚠️YouTube 限流(429)" in brief
     assert "https://www.bilibili.com/video/BV1Wq846oE3E" in brief
     assert "429" in brief
+    assert "——原始来源——" in brief
+    assert "——清洗前后计数——" in brief
+    assert "——本地草稿——" in brief
+    assert "——最终发布内容——" in brief
+    assert "验证：N/A" in brief
+    assert "rpids：[]" in brief
+    assert "segments：0" in brief
+    assert "failures：HTTP Error 429" in brief
+    assert "yt_comment_automation/yt_fetch.py" in brief
+    assert "retry exhausted" in brief
+    assert "commit：abc1234" in brief
 
 
 def test_extract_desc_profile_ririsya_format():
