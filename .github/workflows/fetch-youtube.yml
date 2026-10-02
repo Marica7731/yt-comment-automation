@@ -34,8 +34,6 @@ jobs:
         env:
           MANUAL_VIDEO_IDS: ${{ inputs.video_ids }}
           YOUTUBE_FETCH_MODE: auto
-          YOUTUBE_FETCH_BACKEND: auto
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           YOUTUBE_REQUEST_MIN_GAP_SECONDS: "3"
         shell: bash
         run: |
