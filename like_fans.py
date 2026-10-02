@@ -43,10 +43,18 @@ review_statuses = {
     str(item.get("rpid")): str(item.get("status") or "pending")
     for item in existing_review.get("candidates") or []
 }
+root_id_by_rpid = {
+    str(item.get("rpid")): str(item.get("root_id") or "")
+    for item in existing_review.get("candidates") or []
+    if item.get("root_id")
+}
 review_candidates: dict[str, dict] = {}
 
-def add_review_candidate(oid, rpid, content, source, bvid="", uri=""):
+def add_review_candidate(oid, rpid, content, source, bvid="", uri="", root_id=""):
     key = str(rpid)
+    normalized_root_id = str(root_id or "")
+    if normalized_root_id:
+        root_id_by_rpid[key] = normalized_root_id
     if key in liked_set or key in review_candidates or key in review_statuses:
         return False
     review_candidates[key] = {
@@ -56,6 +64,7 @@ def add_review_candidate(oid, rpid, content, source, bvid="", uri=""):
         "source": source,
         "bvid": bvid or "",
         "uri": uri or "",
+        "root_id": normalized_root_id,
     }
     return True
 
@@ -118,11 +127,12 @@ def fetch_msgfeed_page(cursor_id=None, cursor_time=None):
     return d.get("items") or [], d.get("cursor") or {}
 
 
-def resolve_real_liked(oid, rpid):
+def resolve_real_liked(oid, rpid, root_id=None):
     """读该条评论的真实点赞状态。
 
     粉丝回复多为视频顶层评论（msgfeed 聚合只显示最新一条），所以先查视频
     顶层评论列表（action/reaction 是活字段），查不到再兜底查我们主评论楼中楼。
+    msgfeed 提供 root_id 时优先按该楼层复核；缺失时才回退自有主评论。
     返回 True=已赞 False=未赞 None=两处都查不到（复核失败宁漏勿撤）。
     """
     try:
@@ -141,7 +151,9 @@ def resolve_real_liked(oid, rpid):
                     return ((rp.get("reaction") or {}).get("status") == 1) or (rp.get("action") == 1)
             if len(replies) < 20:
                 break
-        root = our_root_rpid_cache.get(oid)
+        root = str(root_id or "") or root_id_by_rpid.get(str(rpid), "")
+        if not root:
+            root = our_root_rpid_cache.get(oid)
         if not root:
             m_bv = re.search(r"/video/(BV[0-9A-Za-z]{10})", item_uri.get(oid, ""))
             if m_bv:
@@ -195,8 +207,15 @@ try:
 
     def apply_approved_likes(path: str) -> dict:
         """执行 Codex 审核通过的点赞；每次 action 前重新确认当前未赞。"""
+        def resolve_candidate(oid, rpid):
+            return resolve_real_liked(
+                oid,
+                rpid,
+                root_id=root_id_by_rpid.get(str(rpid), ""),
+            )
+
         return like_review.apply_approved(
-            resolve_real_liked,
+            resolve_candidate,
             send_like,
             path,
             liked_set=liked_set,
@@ -270,6 +289,7 @@ def process_items(items):
             "msgfeed",
             _bvid_from_uri(item.get("uri", "")) or "",
             item.get("uri", ""),
+            root_id=item.get("root_id", ""),
         )
         new_likes += 1
         print(f"  ⋯待审核 rpid={rpid} {content[:30]!r}", flush=True)
