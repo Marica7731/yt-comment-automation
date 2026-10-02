@@ -59,6 +59,61 @@ def load_comment(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
     return _load(path)
 
 
+def notify_apply_failure(
+    bvid: str,
+    reason: str,
+    data_dir: Path | None = None,
+) -> tuple[bool, str]:
+    """为 apply 异常生成并发送详细失败报告；通知失败不覆盖原始异常。"""
+    try:
+        item = load_comment(bvid, data_dir=data_dir)
+    except Exception as load_err:  # noqa: BLE001
+        item = {"bvid": bvid, "title": "", "collection": ""}
+        reason = f"{reason}；读取审核文件失败: {load_err}"
+
+    failures = [str(x) for x in item.get("failures") or [] if str(x).strip()]
+    if reason not in failures:
+        failures.append(reason)
+    approved = [str(x) for x in item.get("approved_messages") or []]
+    try:
+        segments = int(item.get("segments") or 0)
+    except (TypeError, ValueError):
+        segments = 0
+    status = str(item.get("status") or "failed")
+    brief = notify.build_failure_brief(
+        bvid=bvid,
+        reason=reason,
+        title=str(item.get("title") or ""),
+        collection=str(item.get("collection") or ""),
+        yt_link=f"https://youtu.be/{item.get('yt_id', '')}" if item.get("yt_id") else "",
+        source_text=str(item.get("source_text") or ""),
+        source_lines=str(item.get("source_lines") or ""),
+        draft_messages=item.get("draft_messages", []),
+        approved_messages=approved,
+        note=str(item.get("note") or ""),
+        verification=item.get("verification"),
+        rpids=item.get("rpids") or [],
+        segments=segments,
+        failures=failures,
+        status=status,
+        commit=notify.git_summary(),
+        files=[
+            "yt_comment_automation/review.py",
+            "yt_comment_automation/review_cli.py",
+            "yt_comment_automation/bili_comment.py",
+            f"data/codex_review/{bvid}.json",
+        ],
+        tests=[
+            f"review_cli apply --bvid {bvid} → exception: {reason}",
+            f"status={status}",
+        ],
+    )
+    try:
+        return notify.send_feishu_message(brief)
+    except Exception as notify_err:  # noqa: BLE001
+        return False, f"失败报告发送异常: {notify_err}"
+
+
 def list_comments(data_dir: Path | None = None, status: str | None = None) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for path in sorted(review_dir(data_dir).glob("*.json")):

@@ -1,7 +1,9 @@
 """Codex 审核队列的持久化、批准和执行测试。"""
 from pathlib import Path
 
-from yt_comment_automation import like_review, review
+import pytest
+
+from yt_comment_automation import like_review, review, review_cli
 from yt_comment_automation import pipeline
 
 
@@ -118,6 +120,48 @@ def test_publish_batches_refuse_when_duration_missing(monkeypatch):
         assert "拒绝发布多条主评论" in str(err)
     else:
         raise AssertionError("缺少时长时应拒绝发布")
+
+
+def test_review_cli_apply_exception_sends_detailed_failure(monkeypatch):
+    item = {
+        "bvid": "BV1ApplyFail",
+        "yt_id": "yt-fail",
+        "title": "失败测试",
+        "collection": "测试",
+        "status": "approved",
+        "source_text": "0:01 A",
+        "source_lines": "0:01 A",
+        "draft_messages": ["0:01 01. A - B"],
+        "approved_messages": ["0:01 01. A - B"],
+        "note": "审核通过",
+        "rpids": [],
+        "segments": 0,
+        "failures": [],
+    }
+    sent = []
+
+    def fail_apply(bvid, dry_run=False):
+        raise RuntimeError("发布批次校验失败: 拒绝发布多条主评论")
+
+    monkeypatch.setattr(review, "load_comment", lambda bvid, data_dir=None: item)
+    monkeypatch.setattr(review, "apply_comment", fail_apply)
+    monkeypatch.setattr(
+        review.notify,
+        "send_feishu_message",
+        lambda brief: sent.append(brief) or (True, "ok"),
+    )
+
+    with pytest.raises(RuntimeError, match="发布批次校验失败"):
+        review_cli.main(["apply", "--bvid", "BV1ApplyFail"])
+
+    assert len(sent) == 1
+    brief = sent[0]
+    assert "发布批次校验失败" in brief
+    assert "yt_comment_automation/review_cli.py" in brief
+    assert "review_cli apply --bvid BV1ApplyFail" in brief
+    assert "rpids：[]" in brief
+    assert "segments：0" in brief
+    assert "failures：发布批次校验失败" in brief
 
 
 def test_codex_review_reaches_queue_before_local_gate(tmp_path: Path, monkeypatch):
