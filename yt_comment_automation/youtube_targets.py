@@ -30,7 +30,12 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
     now = time.time()
     ids: list[str] = []
     for video in videos:
-        if not video.yt_id or video.bvid in posted or video.bvid in ignored:
+        if (
+            not video.yt_id
+            or video.bvid in posted
+            or video.bvid in ignored
+            or not config.in_codex_scope(video.bvid, part_date=video.part_date)
+        ):
             continue
         interval = 0.0
         if video.bvid in pending_bvids:

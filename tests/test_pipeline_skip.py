@@ -260,3 +260,15 @@ def test_pending_video_skips_before_youtube_for_twelve_hours(tmp_path, monkeypat
 
     assert result.status == "skipped_no_songs"
     assert "不足 12" in result.error
+
+
+def test_codex_scope_excludes_pre_takeover_videos(monkeypatch):
+    from yt_comment_automation import config
+
+    monkeypatch.setenv("CODEX_SCOPE_START_DATE", "2026-10-02")
+    monkeypatch.delenv("CODEX_SCOPE_BVIDS", raising=False)
+    assert config.in_codex_scope("BV1New", part_date="2026-10-02") is True
+    assert config.in_codex_scope("BV1Old", part_date="2026-10-01") is False
+    assert config.in_codex_scope("BV1Manual", part_date="2026-10-01") is False
+    monkeypatch.setenv("CODEX_SCOPE_BVIDS", "BV1Manual")
+    assert config.in_codex_scope("BV1Manual", part_date="2026-10-01") is True

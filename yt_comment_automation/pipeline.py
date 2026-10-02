@@ -746,6 +746,13 @@ def run_pipeline(
     else:  # full
         candidates = [v for v in videos if v.bvid not in posted]
 
+    # 历史存量不属于本次接手范围；显式 --bvid / CODEX_SCOPE_BVIDS 仍可越过日期边界。
+    if not (mode == "specific" and specific_bvids):
+        candidates = [
+            v for v in candidates
+            if config.in_codex_scope(v.bvid, part_date=v.part_date)
+        ]
+
     candidates.sort(key=lambda v: v.part_date, reverse=True)
     if limit > 0:
         candidates = candidates[:limit]

@@ -16,6 +16,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Codex 接手日期：只处理该日期及之后发布的视频，避免每轮重扫历史存量。
+CODEX_SCOPE_START_DATE_DEFAULT = "2026-10-02"
+
 
 def _load_dotenv(path: Path) -> None:
     if not path.is_file():
@@ -100,6 +103,30 @@ def require_artist() -> bool:
 def ignore_bvids() -> set[str]:
     """忽略列表：这些视频不写评论、不播报（如标题带歌但实际非歌枠的投稿）。"""
     return {b.strip() for b in get("IGNORE_BVIDS", "").split(",") if b.strip()}
+
+
+def codex_scope_start_date() -> str:
+    """Codex 接手后的视频范围起始日期（含当日）。"""
+    return get("CODEX_SCOPE_START_DATE", CODEX_SCOPE_START_DATE_DEFAULT)
+
+
+def codex_scope_bvids() -> set[str]:
+    """手工点名、必须纳入 Codex 范围的 B 站视频。"""
+    return {b.strip() for b in get("CODEX_SCOPE_BVIDS", "").split(",") if b.strip()}
+
+
+def in_codex_scope(bvid: str, part_date: str = "", queued_at: str = "") -> bool:
+    """判断视频是否属于接手后的新视频范围。
+
+    优先使用投稿日期；投稿日期为空时使用入队日期，便于处理没有
+    `[YYYY-MM-DD]` 前缀的手工目标。显式点名的 BVID 永远在范围内。
+    """
+    if bvid and bvid in codex_scope_bvids():
+        return True
+    scope_date = (part_date or "").strip()[:10]
+    if not scope_date:
+        scope_date = (queued_at or "").strip()[:10]
+    return bool(scope_date) and scope_date >= codex_scope_start_date()
 
 
 def data_dir() -> Path:
