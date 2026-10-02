@@ -64,8 +64,13 @@ def _throttle():
     # 跨进程共用时钟：与 like_fans（B站点赞）等并发时共用同一个最小间隔，
     # 出口 IP 的对外请求总速率受控（风控看的是叠加速率，不是单进程速率）
     from .req_pace import pace
+    from . import config
 
-    pace(REQUEST_MIN_GAP_SECONDS)
+    try:
+        configured_gap = float(config.get("YOUTUBE_REQUEST_MIN_GAP_SECONDS", str(REQUEST_MIN_GAP_SECONDS)))
+    except ValueError:
+        configured_gap = REQUEST_MIN_GAP_SECONDS
+    pace(max(configured_gap, 0.5))
 
 
 def _urlopen_with_retry(req: urllib.request.Request, retries: int = 5):

@@ -25,6 +25,7 @@ jobs:
       - name: Fetch YouTube comments
         env:
           YOUTUBE_FETCH_MODE: auto
+          YOUTUBE_REQUEST_MIN_GAP_SECONDS: "3"
         shell: bash
         run: |
           python -m yt_comment_automation.youtube_action \

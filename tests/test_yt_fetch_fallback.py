@@ -110,3 +110,13 @@ def test_official_api_parser_extracts_description_and_replies(tmp_path, monkeypa
         "top",
         "reply",
     ]
+
+
+def test_request_gap_is_configurable(monkeypatch):
+    from yt_comment_automation import req_pace
+
+    seen = []
+    monkeypatch.setenv("YOUTUBE_REQUEST_MIN_GAP_SECONDS", "3")
+    monkeypatch.setattr(req_pace, "pace", lambda gap: seen.append(gap))
+    yt_fetch._throttle()
+    assert seen == [3.0]
