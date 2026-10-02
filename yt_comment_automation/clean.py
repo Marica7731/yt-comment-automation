@@ -886,7 +886,7 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
 
 
 _NON_SONG_SECTION_MARKER_RE = re.compile(
-    r"^(opening|open|op|start|starting|intro|introduction|幕開け|開幕|開始|オープニング|closing|close|end|ending|ed|outro|閉幕|終幕|終了|エンディング)$"
+    r"^(opening|open|op|start|starting|intro|introduction|幕開け|開幕|開始|スタート|オープニング|closing|close|end|ending|ed|outro|閉幕|終幕|終了|エンディング)$"
 )
 
 
