@@ -19,14 +19,36 @@ RUN_EXIT=$?
 # 运行异常（Python 崩溃已由 cli 发飞书；这里兜底 timeout 超时/SIGTERM 等进程级退出）
 if [ $RUN_EXIT -ne 0 ]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S') run exited with $RUN_EXIT" >> "$LOGFILE"
-  PYTHONPATH=/opt/yt-comment-automation python3 -c "
+  CRON_RUN_EXIT="$RUN_EXIT" CRON_LOGFILE="$LOGFILE" PYTHONPATH=/opt/yt-comment-automation python3 - >> "$LOGFILE" 2>&1 <<'PY'
+import os
 import sys
-sys.path.insert(0, '/opt/yt-comment-automation')
+
+sys.path.insert(0, "/opt/yt-comment-automation")
 from yt_comment_automation import notify
-brief = '💥Codex 直接触发进程退出异常\n退出码：$RUN_EXIT\n日志：$LOGFILE\n时间：' + notify.beijing_now()
+
+exit_code = os.environ.get("CRON_RUN_EXIT", "unknown")
+log_file = os.environ.get("CRON_LOGFILE", "")
+brief = notify.build_crash_brief(
+    f"ProcessExitError: cron_job.sh exited with {exit_code}",
+    files=[
+        "cron_job.sh",
+        "run.sh",
+        "yt_comment_automation/cli.py",
+        "yt_comment_automation/pipeline.py",
+    ],
+    tests=[
+        f"cron_job.sh → process exit {exit_code}",
+        f"log={log_file}",
+    ],
+    commit=notify.git_summary(),
+    failures=[
+        f"process exit code={exit_code}",
+        f"log={log_file}",
+    ],
+)
 ok, note = notify.send_feishu_message(brief)
-print('crash notify:', ok, note)
-" >> "$LOGFILE" 2>&1
+print("crash notify:", ok, note)
+PY
 fi
 
 # 保留最近 30 个日志
