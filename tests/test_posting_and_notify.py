@@ -108,7 +108,7 @@ def test_extract_desc_profile_no_anchor():
     assert profile == "原标题：テスト動画"
 
 
-def test_build_success_brief_with_profile():
+def test_build_success_brief_omits_profile_and_verbose_audit_sections():
     from yt_comment_automation import notify
 
     brief = notify.build_success_brief(
@@ -119,15 +119,19 @@ def test_build_success_brief_with_profile():
         profile="主播：凛々咲 / Ririsya@RirisyaMusic",
     )
     assert "✅评论发送成功" in brief
-    assert "主播：凛々咲 / Ririsya@RirisyaMusic" in brief
+    assert "主播：凛々咲 / Ririsya@RirisyaMusic" not in brief
     assert "歌曲数量：14" in brief
-    assert "——原始来源——" in brief
-    assert "——本地草稿——" in brief
+    assert "——清洗汇总——" in brief
+    assert "——关键时间戳节选——" in brief
     assert "——最终发布——" in brief
     assert "验证：N/A" in brief
     assert "rpids：[]" in brief
-    assert "segments：0" in brief
-    assert "failures：[]" in brief
+    assert "——本地草稿——" not in brief
+    assert "segments：" not in brief
+    assert "failures：" not in brief
+    assert "审核备注：" not in brief
+    assert "——涉及文件——" not in brief
+    assert "——测试命令与结果——" not in brief
 
 
 def test_failure_brief_title_by_error_type():
@@ -158,14 +162,14 @@ def test_failure_brief_fallback_title():
 
     brief = notify.build_failure_brief("BV1xxx", "未知异常: xxx")
     assert "❌处理失败" in brief
-    assert "——清洗前后计数——" in brief
-    assert "——原始来源——" in brief
-    assert "——本地草稿——" in brief
+    assert "——清洗汇总——" in brief
+    assert "——关键时间戳节选——" in brief
     assert "——最终内容——" in brief
     assert "验证：N/A" in brief
     assert "rpids：[]" in brief
-    assert "segments：0" in brief
-    assert "failures：[]" in brief
+    assert "——本地草稿——" not in brief
+    assert "segments：" not in brief
+    assert "failures：" not in brief
 
 
 def test_yt_fetch_json_decode_error_diagnosable():
@@ -200,8 +204,8 @@ def test_yt_fetch_error_goes_through_failure_brief():
     )
     assert "⚠️YouTube 抓取失败" in brief
     assert "验证码/反爬" in brief
-    assert "yt_comment_automation/yt_fetch.py" in brief
-    assert "yt_fetch failure path → failure brief" in brief
+    assert "yt_comment_automation/yt_fetch.py" not in brief
+    assert "yt_fetch failure path → failure brief" not in brief
 
 
 def test_build_crash_brief():
@@ -289,17 +293,27 @@ def test_detailed_success_brief_includes_cleanup_and_verification():
         files=["yt_comment_automation/review.py"],
         tests=["review_cli apply → applied", "回读 → passed"],
     )
-    assert "原始时间戳行：3 → 本地草稿行：2 → 最终发布行：2" in brief
-    assert "节目/谈话标记" in brief
-    assert "本地草稿" in brief
+    assert "原始时间戳：3 行 → 最终发布：2 行" in brief
+    assert "排除：1 行（节目/谈话标记 1 行）" in brief
+    assert "Codex 调整：2 行（编号/格式规范化 0 行，内容补全或修正 2 行）" in brief
+    assert "——清洗汇总——" in brief
+    assert "——关键时间戳节选——" in brief
+    assert "0:01:00 A" in brief
+    assert "0:03:00 B" in brief
+    assert "0:02:00 MC" not in brief
     assert "最终发布" in brief
-    assert "回读通过" in brief
+    assert "验证：通过｜回读通过" in brief
     assert "rpids：111,222" in brief
     assert "commit：abc1234" in brief
-    assert "——涉及文件——" in brief
-    assert "yt_comment_automation/review.py" in brief
-    assert "——测试命令与结果——" in brief
-    assert "review_cli apply → applied" in brief
+    assert "——原始来源——" not in brief
+    assert "——本地草稿——" not in brief
+    assert "segments：" not in brief
+    assert "failures：" not in brief
+    assert "审核备注：Codex corrected numbering" not in brief
+    assert "——涉及文件——" not in brief
+    assert "yt_comment_automation/review.py" not in brief
+    assert "——测试命令与结果——" not in brief
+    assert "review_cli apply → applied" not in brief
 
 
 def test_code_fix_brief_is_auditable():

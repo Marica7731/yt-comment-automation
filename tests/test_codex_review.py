@@ -157,11 +157,12 @@ def test_review_cli_apply_exception_sends_detailed_failure(monkeypatch):
     assert len(sent) == 1
     brief = sent[0]
     assert "发布批次校验失败" in brief
-    assert "yt_comment_automation/review_cli.py" in brief
-    assert "review_cli apply --bvid BV1ApplyFail" in brief
+    assert "yt_comment_automation/review_cli.py" not in brief
+    assert "review_cli apply --bvid BV1ApplyFail" not in brief
     assert "rpids：[]" in brief
-    assert "segments：0" in brief
-    assert "failures：发布批次校验失败" in brief
+    assert "segments：" not in brief
+    assert "failures：" not in brief
+    assert "失败详情：发布批次校验失败" not in brief
 
 
 def test_codex_review_reaches_queue_before_local_gate(tmp_path: Path, monkeypatch):
