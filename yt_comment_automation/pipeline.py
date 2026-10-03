@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from . import bili_comment, clean, collections, config, notify, yt_fetch
+from . import bili_comment, clean, collections, config, notify, youtube_cache_sync, yt_fetch
 
 logger = logging.getLogger("yt_comment_automation")
 
@@ -447,7 +447,12 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     #    请求节奏：全局任意两次 YouTube 请求间隔 ≥2 秒（yt_fetch 内置节流）；
     #    429 重试最多 5 次，任一次成功直接放行，全失败报错跳过该视频。
     try:
-        if _pending_review_status(video.bvid, cache_dir.parent) == "pending":
+        action_pending = youtube_cache_sync.is_pending_action(cache_dir.parent, yt_id)
+        if action_pending:
+            logger.info("[%s] Action 缓存已同步，本轮强制进入处理", video.bvid)
+            gate_interval = 0.0
+            gate_age = 0.0
+        elif _pending_review_status(video.bvid, cache_dir.parent) == "pending":
             gate_interval = PENDING_RECHECK_HOURS * 3600.0
             gate_age = _last_fetch_age(cache_dir, yt_id)
         else:
@@ -515,6 +520,9 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                 except Exception as notify_err:  # noqa: BLE001
                     logger.warning("[%s] 飞书 YouTube 429 通知失败: %s", video.bvid, notify_err)
         return result
+
+    if action_pending:
+        youtube_cache_sync.mark_processed(cache_dir.parent, yt_id)
 
     comments = [c.get("text", "") for c in raw.get("comments", [])]
     description = raw.get("description", "")
