@@ -29,7 +29,10 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _load(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"审核文件必须是 JSON object: {path}")
+    return payload
 
 
 def queue_comment(payload: dict[str, Any], data_dir: Path | None = None) -> Path:
