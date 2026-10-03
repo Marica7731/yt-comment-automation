@@ -107,22 +107,60 @@ def _as_multiline(value: Iterable[str] | str) -> str:
     return "\n".join(str(item) for item in value if str(item).strip())
 
 
+_TIMESTAMP_RE = re.compile(r"(?<![\d:])(\d{1,3}:\d{2}(?::\d{2})?)(?![\d:])")
+_PROGRAM_MARKER_RE = re.compile(
+    r"MC|开场|开场白|開始|开始|終了|结束|エンディング|エンドカード|片頭|片尾|"
+    r"トーク|トークタイム|話|掃除|声入り|セットリスト|歌枠|配信開始|校对|修正",
+    re.I,
+)
+_EXCLUDED_REASON_ORDER = ("节目/谈话标记", "非歌单内容")
+
+
 def _timestamp_lines(value: Any) -> list[str]:
     text = _as_text(value)
-    ts_re = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")
-    return [line.strip() for line in text.splitlines() if line.strip() and ts_re.search(line)]
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and _TIMESTAMP_RE.search(line)
+    ]
 
 
-def _clean_diff_reason(line: str, draft_lines: set[str], final_lines: set[str]) -> str:
-    if line not in draft_lines:
-        if not re.search(r"\d{1,2}:\d{2}(?::\d{2})?", line):
-            return "非歌单标记（无有效时间戳）"
-        if re.search(r"MC|開場|エンディング|エンドカード|話|トーク|掃除|声入り|开始|結束", line, re.I):
-            return "节目/谈话标记，不属于歌曲"
-        return "本地规则未识别为歌单"
-    if line not in final_lines:
-        return "Codex 审核删除或改写"
-    return "格式规范化"
+def _timestamp_key(line: str) -> str:
+    match = _TIMESTAMP_RE.search(line)
+    return match.group(1) if match else ""
+
+
+def _song_text(line: str) -> str:
+    text = _TIMESTAMP_RE.sub("", str(line), count=1).strip()
+    text = re.sub(r"^\d{1,3}\s*[.．、]\s*", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _excluded_reason(line: str) -> str:
+    return "节目/谈话标记" if _PROGRAM_MARKER_RE.search(line) else "非歌单内容"
+
+
+def _timestamp_excerpt(lines: list[str], limit: int = 10) -> str:
+    if not lines:
+        return "（无可节选的时间戳）"
+    if len(lines) <= limit:
+        return "\n".join(lines)
+    head_count = limit // 2
+    tail_count = limit - head_count
+    omitted = len(lines) - limit
+    return "\n".join([
+        *lines[:head_count],
+        f"… 中间省略 {omitted} 行 …",
+        *lines[-tail_count:],
+    ])
+
+
+def _verification_text(value: Any) -> str:
+    if isinstance(value, dict):
+        ok = "通过" if value.get("ok") else "未通过"
+        detail = str(value.get("detail") or value.get("message") or "").strip()
+        return f"{ok}｜{detail}" if detail else ok
+    return str(value) if value not in (None, "") else "N/A"
 
 
 def build_cleanup_report(
@@ -131,36 +169,57 @@ def build_cleanup_report(
     draft_messages: Any = None,
     approved_messages: Any = None,
     note: str = "",
-) -> tuple[str, str, str, str]:
-    """Build counts plus deterministic removed/changed explanations."""
+) -> tuple[str, str, str]:
+    """Return a compact cleanup summary, a source excerpt, and raw source lines."""
+    del draft_messages, note
     raw_lines = _timestamp_lines(source_lines or source_text)
-    draft_lines = _timestamp_lines(draft_messages)
     final_lines = _timestamp_lines(approved_messages)
-    draft_set, final_set = set(draft_lines), set(final_lines)
-    removed = [line for line in raw_lines if line not in draft_set and line not in final_set]
-    changed = [
-        (old, new)
-        for old, new in zip(raw_lines, final_lines)
-        if old != new and old in draft_set or old not in draft_set and new in final_set
-    ]
-    added = [line for line in final_lines if line not in raw_lines]
-    details: list[str] = []
-    for line in removed:
-        details.append(f"- 删除：{line}\n  原因：{_clean_diff_reason(line, draft_set, final_set)}")
-    for old, new in changed:
-        reason = "格式规范化" if re.sub(r"\s+", "", old) == re.sub(r"\s+", "", new) else "Codex 审核修正"
-        details.append(f"- 修改：{old}\n  改为：{new}\n  原因：{reason}")
-    for line in added:
-        details.append(f"- 新增：{line}\n  原因：Codex 审核补充")
-    if not details:
-        details.append("- 无删除、修改或新增；原始时间戳行全部保留")
-    counts = (
-        f"原始时间戳行：{len(raw_lines)} → 本地草稿行：{len(draft_lines)} → 最终发布行：{len(final_lines)}\n"
-        f"删除 {len(removed)} 行，修改 {len(changed)} 行，新增 {len(added)} 行"
-    )
-    if note:
-        details.append(f"- 审核备注：{note}")
-    return counts, "\n".join(details), _as_text(source_text), _as_text(source_lines)
+
+    final_by_key = {_timestamp_key(line): line for line in final_lines if _timestamp_key(line)}
+    raw_keys = {_timestamp_key(line) for line in raw_lines if _timestamp_key(line)}
+    excluded = [line for line in raw_lines if _timestamp_key(line) not in final_by_key]
+    added = [line for line in final_lines if _timestamp_key(line) not in raw_keys]
+    formatted = 0
+    content_changed = 0
+    for raw_line in raw_lines:
+        key = _timestamp_key(raw_line)
+        final_line = final_by_key.get(key)
+        if not key or not final_line or raw_line == final_line:
+            continue
+        if _song_text(raw_line) == _song_text(final_line):
+            formatted += 1
+        else:
+            content_changed += 1
+
+    if not raw_lines and not final_lines:
+        summary = "无可对比的时间戳。"
+    else:
+        summary_lines = [f"原始时间戳：{len(raw_lines)} 行 → 最终发布：{len(final_lines)} 行"]
+        if excluded:
+            reason_counts: dict[str, int] = {}
+            for line in excluded:
+                reason = _excluded_reason(line)
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
+            reason_text = "、".join(
+                f"{reason} {reason_counts[reason]} 行"
+                for reason in _EXCLUDED_REASON_ORDER
+                if reason_counts.get(reason)
+            )
+            summary_lines.append(f"排除：{len(excluded)} 行（{reason_text}）")
+        else:
+            summary_lines.append("排除：0 行")
+        if added:
+            summary_lines.append(f"新增时间戳：{len(added)} 行")
+        adjusted = formatted + content_changed
+        summary_lines.append(
+            f"Codex 调整：{adjusted} 行（编号/格式规范化 {formatted} 行，"
+            f"内容补全或修正 {content_changed} 行）"
+        )
+        summary = "\n".join(summary_lines)
+
+    matched_source_lines = [line for line in raw_lines if _timestamp_key(line) in final_by_key]
+    excerpt_lines = matched_source_lines or raw_lines
+    return summary, _timestamp_excerpt(excerpt_lines), _as_text(source_lines or source_text)
 
 
 def build_code_fix_brief(
@@ -275,10 +334,11 @@ def build_success_brief(
     files: Iterable[str] | str = (),
     tests: Iterable[str] | str = (),
 ) -> str:
-    """Detailed success report with source/draft/final content and verification."""
+    """Compact success report with cleanup summary, source excerpt, and verification."""
+    del profile, note, segments, failures, files, tests
     bili_link = f"https://www.bilibili.com/video/{bvid}"
     lines = [
-        "✅评论发送成功（Codex 详细报告）",
+        "✅评论发送成功",
         bili_link,
         yt_link,
         posted_at or beijing_now(),
@@ -290,32 +350,17 @@ def build_success_brief(
         lines.append(f"标题：{title}")
     if collection:
         lines.append(f"合集：{collection}")
-    if profile:
-        lines.append(profile)
-    counts, diff_report, raw_source, raw_lines = build_cleanup_report(
+    cleanup_summary, source_excerpt, _ = build_cleanup_report(
         source_text=source_text,
         source_lines=source_lines,
         draft_messages=draft_messages,
         approved_messages=approved_messages or final_message,
-        note=note,
     )
-    lines.extend(["——清洗前后计数——", counts, "——清洗差异与原因——", diff_report])
-    lines.extend(["——原始来源——", raw_source or raw_lines or "（未提供）"])
-    draft_text = _as_text(draft_messages)
-    lines.extend(["——本地草稿——", draft_text or "（未提供）"])
+    lines.extend(["——清洗汇总——", cleanup_summary, "——关键时间戳节选——", source_excerpt])
     lines.extend(["——最终发布——", _as_text(approved_messages or final_message) or "（空）"])
-    lines.append(f"验证：{verification if verification is not None else 'N/A'}")
+    lines.append(f"验证：{_verification_text(verification)}")
     rpids_text = ",".join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids
-    failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
     lines.append(f"rpids：{rpids_text or '[]'}")
-    lines.append(f"segments：{segments if segments not in (None, '') else 0}")
-    lines.append(f"failures：{failure_text or '[]'}")
-    if note:
-        lines.append(f"审核备注：{note}")
-    file_text = _as_multiline(files)
-    test_text = _as_multiline(tests)
-    lines.extend(["——涉及文件——", file_text or "（未提供）"])
-    lines.extend(["——测试命令与结果——", test_text or "（未提供）"])
     lines.append(f"报告时间：{beijing_now()}")
     return "\n".join(lines)
 
@@ -352,6 +397,7 @@ def build_failure_brief(
     tests: Iterable[str] | str = (),
 ) -> str:
     """失败通知：按错误类型给标题，附视频标题、合集、B站/油管链接、原因、时间。"""
+    del note, segments, files, tests
     bili_link = f"https://www.bilibili.com/video/{bvid}"
     lines = [_error_title(reason), bili_link]
     if title:
@@ -363,31 +409,23 @@ def build_failure_brief(
     if status:
         lines.append(f"状态：{status}")
     lines.append(f"commit：{commit or git_summary()}")
-    lines.append(f"原因：{reason}")
-    counts, diff_report, raw_source, raw_lines = build_cleanup_report(
+    failure_items = [str(x).strip() for x in failures if str(x).strip()] if not isinstance(failures, str) else [failures.strip()]
+    failure_items = [x for x in failure_items if x and x != reason]
+    reason_text = f"原因：{reason}"
+    if failure_items:
+        reason_text += f"；失败详情：{'; '.join(failure_items)}"
+    lines.append(reason_text)
+    cleanup_summary, source_excerpt, _ = build_cleanup_report(
         source_text=source_text,
         source_lines=source_lines,
         draft_messages=draft_messages,
         approved_messages=approved_messages,
-        note=note,
     )
-    lines.extend(["——清洗前后计数——", counts, "——清洗差异与原因——", diff_report])
-    lines.extend(["——原始来源——", raw_source or raw_lines or "（未提供）"])
-    draft_text = _as_text(draft_messages)
-    lines.extend(["——本地草稿——", draft_text or "（未提供）"])
+    lines.extend(["——清洗汇总——", cleanup_summary, "——关键时间戳节选——", source_excerpt])
     lines.extend(["——最终内容——", _as_text(approved_messages) or "（未提供）"])
-    lines.append(f"验证：{verification if verification is not None else 'N/A'}")
+    lines.append(f"验证：{_verification_text(verification)}")
     rpids_text = ",".join(str(x) for x in rpids) if not isinstance(rpids, str) else rpids
-    failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
     lines.append(f"rpids：{rpids_text or '[]'}")
-    lines.append(f"segments：{segments if segments not in (None, '') else 0}")
-    lines.append(f"failures：{failure_text or '[]'}")
-    if note:
-        lines.append(f"审核备注：{note}")
-    file_text = _as_multiline(files)
-    test_text = _as_multiline(tests)
-    lines.extend(["——涉及文件——", file_text or "（未提供）"])
-    lines.extend(["——测试命令与结果——", test_text or "（未提供）"])
     lines.append(f"时间：{beijing_now()}")
     return "\n".join(lines)
 
