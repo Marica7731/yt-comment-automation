@@ -49,6 +49,9 @@ def test_action_payload_and_wdc_sync(tmp_path, monkeypatch):
     saved = json.loads((data_dir / "yt_raw" / f"{video_id}.info.json").read_text())
     assert saved == raw
     assert json.loads((data_dir / "yt_raw" / "fetch_times.json").read_text())[video_id] == 123.0
+    assert youtube_cache_sync.is_pending_action(data_dir, video_id)
+    youtube_cache_sync.mark_processed(data_dir, video_id)
+    assert not youtube_cache_sync.is_pending_action(data_dir, video_id)
 
 
 def test_action_records_individual_failure(tmp_path, monkeypatch):

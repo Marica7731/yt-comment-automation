@@ -9,6 +9,46 @@ from pathlib import Path
 from . import config
 
 
+PENDING_NAME = "action_pending_ids.json"
+
+
+def _pending_path(data_dir: Path) -> Path:
+    return data_dir / "yt_raw" / PENDING_NAME
+
+
+def load_pending(data_dir: Path) -> set[str]:
+    try:
+        payload = json.loads(_pending_path(data_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(payload, list):
+        return set()
+    return {str(item) for item in payload}
+
+
+def is_pending_action(data_dir: Path, video_id: str) -> bool:
+    return str(video_id) in load_pending(data_dir)
+
+
+def mark_processed(data_dir: Path, video_id: str) -> None:
+    pending = load_pending(data_dir)
+    key = str(video_id)
+    if key not in pending:
+        return
+    pending.remove(key)
+    path = _pending_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(sorted(pending)), encoding="utf-8")
+
+
+def _save_pending(data_dir: Path, video_ids: set[str]) -> None:
+    if not video_ids:
+        return
+    path = _pending_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(sorted(video_ids)), encoding="utf-8")
+
+
 def sync(payload_path: Path, data_dir: Path) -> dict:
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     cache_dir = data_dir / "yt_raw"
@@ -36,6 +76,11 @@ def sync(payload_path: Path, data_dir: Path) -> dict:
                 old = list(current.get(video_id) or [])
                 current[video_id] = list(dict.fromkeys(list(ids) + old))[:500]
         path.write_text(json.dumps(current), encoding="utf-8")
+    result_ids = set(payload.get("results") or {})
+    if result_ids:
+        pending = load_pending(data_dir) | result_ids
+        _save_pending(data_dir, pending)
+
     return {
         "synced_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "results": len(payload.get("results") or {}),
