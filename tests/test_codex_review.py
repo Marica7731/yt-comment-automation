@@ -247,3 +247,19 @@ def test_verify_own_comments_normalizes_bilibili_html_entities(monkeypatch):
 
     assert ok is True
     assert "回读通过" in detail
+
+
+def test_list_comments_ignores_messages_json_array(tmp_path: Path):
+    review.review_dir(tmp_path).joinpath("notes.messages.json").write_text("[]", encoding="utf-8")
+    payload = {
+        "bvid": "BV1ListGuard",
+        "title": "title",
+        "part_date": "2026-10-03",
+        "collection": "直播",
+        "source_text": "raw",
+        "draft_messages": ["0:01:00 01. A - B"],
+        "draft_song_count": 1,
+    }
+    review.queue_comment(payload, tmp_path)
+
+    assert [item["bvid"] for item in review.list_comments(data_dir=tmp_path)] == ["BV1ListGuard"]
