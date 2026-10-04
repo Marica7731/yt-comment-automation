@@ -62,6 +62,15 @@ def load_comment(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
     return _load(path)
 
 
+def _count_song_lines(messages: list[str]) -> int:
+    return sum(
+        1
+        for message in messages
+        for line in str(message).splitlines()
+        if line.strip() and clean.extract_first_timestamp_info(line).get("seconds") is not None
+    )
+
+
 def notify_apply_failure(
     bvid: str,
     reason: str,
@@ -154,6 +163,7 @@ def approve_comment(
         {
             "status": "approved",
             "approved_messages": cleaned,
+            "song_count": _count_song_lines(cleaned),
             "reviewer": reviewer,
             "note": note,
             "reviewed_at": now,
@@ -292,6 +302,7 @@ def apply_comment(
         _write_json(data_path, item)
         raise RuntimeError(error) from err
     item["approved_messages"] = messages
+    item["song_count"] = _count_song_lines(messages)
     item["status"] = "applying"
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     _write_json(data_path, item)
