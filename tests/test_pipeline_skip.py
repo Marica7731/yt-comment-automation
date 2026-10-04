@@ -227,7 +227,6 @@ def test_no_artist_opening_markers_filtered():
 
 
 def test_pending_video_skips_before_youtube_for_twelve_hours(tmp_path, monkeypatch):
-    import datetime as dt
     from yt_comment_automation import collections
 
     video = collections.CollectionVideo(
@@ -235,7 +234,8 @@ def test_pending_video_skips_before_youtube_for_twelve_hours(tmp_path, monkeypat
         section="歌枠",
         bvid="BV1PendingGate",
         title="pending gate",
-        part_date=dt.date.today().isoformat(),
+        # 老视频才受 pending 12 小时节流；新视频必须每轮抓（见下一个用例）。
+        part_date="2020-01-01",
         yt_id="abcdefghijk",
     )
     monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
@@ -272,3 +272,44 @@ def test_codex_scope_excludes_pre_takeover_videos(monkeypatch):
     assert config.in_codex_scope("BV1Manual", part_date="2026-10-01") is False
     monkeypatch.setenv("CODEX_SCOPE_BVIDS", "BV1Manual")
     assert config.in_codex_scope("BV1Manual", part_date="2026-10-01") is True
+
+
+def test_new_pending_video_is_not_throttled_by_pending_queue(tmp_path, monkeypatch):
+    """新视频进 pending 队列后仍必须每轮抓，否则会错过延迟贴出的歌单。"""
+    import datetime as dt
+    from yt_comment_automation import collections
+
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1NewPending",
+        title="new pending",
+        part_date=dt.date.today().isoformat(),
+        yt_id="newpendingid",
+    )
+    monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_fetch_bili_video_info",
+        lambda bvid, cookie_map=None: (
+            "newpendingid", "https://youtu.be/newpendingid", []
+        ),
+    )
+    monkeypatch.setattr(pipeline, "_pending_review_status", lambda bvid, data_dir: "pending")
+    # 距上次抓取很久：若仍被 12 小时节流就跳过，若新视频豁免生效则会真正抓取。
+    monkeypatch.setattr(pipeline, "_last_fetch_age", lambda cache_dir, yt_id: 11 * 3600.0)
+
+    called = []
+
+    def fake_fetch(yt_id, **kwargs):
+        called.append(yt_id)
+        return {"comments": [], "description": ""}
+
+    monkeypatch.setattr(pipeline.yt_fetch, "fetch_youtube_raw", fake_fetch)
+
+    result = pipeline.process_video(video, tmp_path, dry_run=False)
+
+    assert result.status != "skipped_no_songs", "新视频不应被 pending 队列节流"
+    assert "newpendingid" in called, "新视频本轮应真正请求 YouTube"

@@ -218,20 +218,29 @@ def _last_fetch_age(cache_dir, yt_id: str) -> float:
     return float("inf")
 
 
+def _is_new_video(part_date: str) -> bool:
+    """投稿日期是否落在「新视频」窗口内（B站投稿 <=2 天）。
+
+    新视频必须每轮重抓：歌单常常延迟出现，若被 pending 审核队列的
+    12 小时节流压住，会在 setlist 刚贴出时整轮错过。
+    """
+    if not part_date:
+        return False
+    try:
+        import datetime as _dt
+
+        return (_dt.date.today() - _dt.date.fromisoformat(part_date)).days <= NEW_VIDEO_DAYS
+    except ValueError:
+        return False
+
+
 def _refetch_gate(cache_dir, yt_id: str, part_date: str) -> tuple[float, float]:
     """返回 (该视频要求的最小重抓间隔秒数, 距上次抓取的秒数)。
 
     新视频 → (0, 0) 不设限；老视频 → 12 小时。没抓过 → age=inf 必抓。
     """
-    if part_date:
-        try:
-            import datetime as _dt
-
-            new = (_dt.date.today() - _dt.date.fromisoformat(part_date)).days <= NEW_VIDEO_DAYS
-        except ValueError:
-            new = False
-        if new:
-            return 0.0, 0.0
+    if _is_new_video(part_date):
+        return 0.0, 0.0
     return OLD_VIDEO_REFETCH_HOURS * 3600.0, _last_fetch_age(cache_dir, yt_id)
 
 
@@ -450,6 +459,10 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         action_pending = youtube_cache_sync.is_pending_action(cache_dir.parent, yt_id)
         if action_pending:
             logger.info("[%s] Action 缓存已同步，本轮强制进入处理", video.bvid)
+            gate_interval = 0.0
+            gate_age = 0.0
+        elif _is_new_video(video.part_date):
+            # 新视频每轮必抓：歌单常延迟出现，pending 队列不得把它节流到 12 小时。
             gate_interval = 0.0
             gate_age = 0.0
         elif _pending_review_status(video.bvid, cache_dir.parent) == "pending":
