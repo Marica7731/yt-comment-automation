@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 import time
 from pathlib import Path
@@ -27,6 +26,7 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
         for item in review.list_comments(data_dir=data_dir, status="pending")
     }
     ignored = config.ignore_bvids()
+    upgrade_ids = pipeline.load_upgrade_targets(data_dir)
     now = time.time()
     ids: list[str] = []
     for video in videos:
@@ -37,19 +37,22 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
             or not config.in_codex_scope(video.bvid, part_date=video.part_date)
         ):
             continue
+        # 新视频豁免必须优先于 pending 12 小时节流：歌单常延迟出现，
+        # 新视频进审核队列后若被节流，就会在 setlist 刚贴出时整轮错过。
         interval = 0.0
-        if video.bvid in pending_bvids:
-            interval = 12 * 3600.0
-        elif video.part_date:
-            try:
-                age_days = (dt.date.today() - dt.date.fromisoformat(video.part_date)).days
-            except ValueError:
-                age_days = 999
-            if age_days > pipeline.NEW_VIDEO_DAYS:
+        if not pipeline._is_new_video(video.part_date):
+            if video.bvid in pending_bvids:
+                interval = 12 * 3600.0
+            elif video.part_date:
                 interval = pipeline.OLD_VIDEO_REFETCH_HOURS * 3600.0
         last = float(fetch_times.get(video.yt_id) or 0.0)
         if not last or now - last >= interval:
             ids.append(video.yt_id)
+
+    # 升级复查候选：上面 `bvid in posted` 已把它们排除，但 WDC 是 cache_only、
+    # force 无效，不走 Action 就永远读不到新鲜缓存。这组目标很小（仅「已发
+    # 歌单不足阈值」的视频），且一旦歌单补足会由 pipeline 主动从台账摘除。
+    ids.extend(upgrade_ids.keys())
     return list(dict.fromkeys(ids))
 
 

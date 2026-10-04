@@ -20,7 +20,7 @@ from . import review
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from . import bili_comment, clean, collections, config, notify, youtube_cache_sync, yt_fetch
 
@@ -218,21 +218,65 @@ def _last_fetch_age(cache_dir, yt_id: str) -> float:
     return float("inf")
 
 
+def _is_new_video(part_date: str) -> bool:
+    """投稿日期是否落在「新视频」窗口内（B站投稿 <=2 天）。
+
+    新视频必须每轮重抓：歌单常常延迟出现，若被 pending 审核队列的
+    12 小时节流压住，会在 setlist 刚贴出时整轮错过。
+    """
+    if not part_date:
+        return False
+    try:
+        import datetime as _dt
+
+        return (_dt.date.today() - _dt.date.fromisoformat(part_date)).days <= NEW_VIDEO_DAYS
+    except ValueError:
+        return False
+
+
 def _refetch_gate(cache_dir, yt_id: str, part_date: str) -> tuple[float, float]:
     """返回 (该视频要求的最小重抓间隔秒数, 距上次抓取的秒数)。
 
     新视频 → (0, 0) 不设限；老视频 → 12 小时。没抓过 → age=inf 必抓。
     """
-    if part_date:
-        try:
-            import datetime as _dt
-
-            new = (_dt.date.today() - _dt.date.fromisoformat(part_date)).days <= NEW_VIDEO_DAYS
-        except ValueError:
-            new = False
-        if new:
-            return 0.0, 0.0
+    if _is_new_video(part_date):
+        return 0.0, 0.0
     return OLD_VIDEO_REFETCH_HOURS * 3600.0, _last_fetch_age(cache_dir, yt_id)
+
+
+def load_upgrade_targets(data_dir: Path) -> dict[str, Any]:
+    """返回 {yt_id: {bvid, ...}}，需要升级复查的视频台账。
+
+    已发布视频被 youtube_targets 排除在 Action 目标之外，而 WDC 是
+    cache_only、force 无效，若不单独记账，upgrade 只能读到永不刷新的缓存。
+    """
+    path = Path(data_dir) / "upgrade_targets.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def forget_upgrade_target(data_dir: Path, yt_id: str) -> None:
+    """歌单已补足、不再需要升级复查时，把该 yt_id 从 Action 台账摘除。"""
+    payload = load_upgrade_targets(data_dir)
+    if yt_id not in payload:
+        return
+    payload.pop(yt_id, None)
+    Path(data_dir).joinpath("upgrade_targets.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def record_upgrade_target(data_dir: Path, bvid: str, yt_id: str) -> None:
+    """把升级复查候选记入台账，交由 GitHub Action 供给新鲜缓存。"""
+    if not yt_id:
+        return
+    payload = load_upgrade_targets(data_dir)
+    payload[yt_id] = {"bvid": bvid, "detected_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    path = Path(data_dir) / "upgrade_targets.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _pending_review_status(bvid: str, data_dir: Path) -> str:
@@ -405,6 +449,8 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     if existing:
         existing_count = _count_own_songlist_lines(existing.message)
         if existing_count >= UPGRADE_THRESHOLD:
+            # 歌单已补足，不再需要 Action 供给新鲜缓存，摘除台账避免无限增长。
+            forget_upgrade_target(cache_dir.parent, video.yt_id)
             result.status = "already_posted"
             result.detail = f"rpid={existing.rpid} 已发 {existing_count} 首（足量）"
             return result
@@ -438,6 +484,10 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     result.yt_id = yt_id
     # 简介提取「主播 + 原标题」，随成功通知发送
     result.desc_profile = notify.extract_desc_profile(desc)
+    if upgrade_mode:
+        # 已发布视频不在 Action 常规目标里；记账让 due_targets 把它加回来，
+        # 否则 cache_only 下只能读到永不刷新的缓存，升级复查形同虚设。
+        record_upgrade_target(cache_dir.parent, video.bvid, yt_id)
 
     # 3. 抓取 YouTube 评论 + 简介
     #    抓取频率按"同一视频两次抓取的间隔"控制（不是轮次间隔）：
@@ -450,6 +500,10 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         action_pending = youtube_cache_sync.is_pending_action(cache_dir.parent, yt_id)
         if action_pending:
             logger.info("[%s] Action 缓存已同步，本轮强制进入处理", video.bvid)
+            gate_interval = 0.0
+            gate_age = 0.0
+        elif _is_new_video(video.part_date):
+            # 新视频每轮必抓：歌单常延迟出现，pending 队列不得把它节流到 12 小时。
             gate_interval = 0.0
             gate_age = 0.0
         elif _pending_review_status(video.bvid, cache_dir.parent) == "pending":
