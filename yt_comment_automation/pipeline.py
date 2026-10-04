@@ -539,7 +539,9 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         else:
             raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
             if not raw_has_timestamp_songlist(raw):
-                logger.info("[%s] 缓存无歌单，强制重新抓取 YouTube", video.bvid)
+                # cache_only 下 force 不生效（yt_fetch 一进去就短路返回缓存），
+                # 这里只是同一份缓存的二次读取；真实重抓只能由 GitHub Action 供给。
+                logger.info("[%s] 缓存无歌单（cache_only，不直连 YouTube，待 Action 刷新）", video.bvid)
                 raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
     except Exception as err:  # noqa: BLE001
         if isinstance(err, yt_fetch.YtCacheMissError):
