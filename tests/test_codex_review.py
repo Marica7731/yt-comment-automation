@@ -85,6 +85,7 @@ def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
     item = review.load_comment("BV1Review", tmp_path)
     assert item["status"] == "approved"
     assert item["approved_messages"] == ["0:01:00 01. A - B"]
+    assert item["song_count"] == 1
     assert item["draft_messages"] == ["0:01:00 01. A - B"]
     assert path.is_file()
 
@@ -233,6 +234,7 @@ def test_comment_apply_marks_processed_and_verifies(tmp_path: Path, monkeypatch)
     assert success_kwargs["verification"]["ok"] is True
     assert success_kwargs["rpids"] == ["r1"]
     assert success_kwargs["segments"] == 1
+    assert success_kwargs["song_count"] == 1
     assert success_kwargs["failures"] == []
 
 def test_verify_own_comments_normalizes_bilibili_html_entities(monkeypatch):
