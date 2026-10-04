@@ -7,6 +7,53 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from yt_comment_automation import clean  # noqa: E402
 
 
+def test_range_timestamp_is_parsed_and_formatted_in_full():
+    items = clean.extract_plain_songs_from_source_timeline(
+        "0:12:01-0:16:36 コネクト / ClariS"
+    )
+    assert len(items) == 1
+    assert items[0].timestamp_seconds == 721
+    assert items[0].timestamp_end_seconds == 996
+    assert (
+        clean.format_timestamp_for_output(
+            items[0].timestamp_label,
+            items[0].timestamp_seconds,
+            True,
+            items[0].timestamp_end_seconds,
+        )
+        == "0:12:01-0:16:36"
+    )
+    assert clean.format_song_items(items, include_timestamps=True).startswith(
+        "0:12:01-0:16:36 01."
+    )
+
+
+def test_single_and_invalid_timestamps_fall_back_to_one_timestamp():
+    single = clean.extract_plain_songs_from_source_timeline(
+        "0:12:01 コネクト / ClariS"
+    )
+    assert len(single) == 1
+    assert single[0].timestamp_end_seconds is None
+    assert (
+        clean.format_timestamp_for_output(
+            single[0].timestamp_label,
+            single[0].timestamp_seconds,
+            True,
+            single[0].timestamp_end_seconds,
+        )
+        == "0:12:01"
+    )
+
+    for invalid in (
+        "0:16:36-0:12:01 コネクト / ClariS",
+        "0:12:01-0:12:01 コネクト / ClariS",
+    ):
+        fallback = clean.extract_plain_songs_from_source_timeline(invalid)
+        assert len(fallback) == 1
+        assert fallback[0].timestamp_end_seconds is None
+        assert fallback[0].song == "コネクト"
+
+
 def test_timestamp_parse():
     assert clean.timestamp_to_seconds("0:03:55") == 235
     assert clean.timestamp_to_seconds("1:00:55") == 3655
