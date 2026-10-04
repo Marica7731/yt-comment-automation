@@ -313,3 +313,49 @@ def test_new_pending_video_is_not_throttled_by_pending_queue(tmp_path, monkeypat
 
     assert result.status != "skipped_no_songs", "新视频不应被 pending 队列节流"
     assert "newpendingid" in called, "新视频本轮应真正请求 YouTube"
+
+def test_upgrade_target_acted_and_pruned(tmp_path, monkeypatch):
+    """upgrade 候选必须进 Action 目标，歌单补足后必须从台账摘除。"""
+    from yt_comment_automation import youtube_targets
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    # 1. 记账 -> 台账可见
+    pipeline.record_upgrade_target(data_dir, "BV1Upgrade", "upgradetvid")
+    assert "upgradetvid" in pipeline.load_upgrade_targets(data_dir)
+
+    # 2. 台账里的 yt_id 要进入 Action 目标（即使该 bvid 已 posted）
+    class Snap:
+        def __init__(self, videos):
+            self.videos = videos
+
+    video = type("V", (), {
+        "bvid": "BV1Upgrade", "yt_id": "upgradetvid",
+        "part_date": "2020-01-01",
+    })()
+    posted_video = type("V", (), {
+        "bvid": "BV1Posted", "yt_id": "postedvid",
+        "part_date": "2020-01-01",
+    })()
+
+    monkeypatch.setattr(
+        youtube_targets.collections, "load_snapshot",
+        lambda path=None: Snap([video, posted_video]),
+    )
+    monkeypatch.setattr(youtube_targets.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(youtube_targets.config, "in_codex_scope", lambda *a, **k: True)
+    monkeypatch.setattr(youtube_targets.review, "list_comments", lambda **k: [])
+    monkeypatch.setattr(
+        pipeline, "load_processed", lambda p: {"BV1Posted", "BV1Upgrade"}
+    )
+    (data_dir / "yt_raw").mkdir()
+    (data_dir / "yt_raw" / "fetch_times.json").write_text("{}")
+
+    ids = youtube_targets.due_targets(data_dir, refresh=False)
+    assert "upgradetvid" in ids, "已发布 upgrade 候选必须由 Action 重抓"
+    assert "postedvid" not in ids, "已发布且无需升级的视频不应进 Action 目标"
+
+    # 3. 歌单补足 -> 台账摘除
+    pipeline.forget_upgrade_target(data_dir, "upgradetvid")
+    assert pipeline.load_upgrade_targets(data_dir) == {}

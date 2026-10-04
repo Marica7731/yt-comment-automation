@@ -20,7 +20,7 @@ from . import review
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from . import bili_comment, clean, collections, config, notify, youtube_cache_sync, yt_fetch
 
@@ -244,6 +244,41 @@ def _refetch_gate(cache_dir, yt_id: str, part_date: str) -> tuple[float, float]:
     return OLD_VIDEO_REFETCH_HOURS * 3600.0, _last_fetch_age(cache_dir, yt_id)
 
 
+def load_upgrade_targets(data_dir: Path) -> dict[str, Any]:
+    """返回 {yt_id: {bvid, ...}}，需要升级复查的视频台账。
+
+    已发布视频被 youtube_targets 排除在 Action 目标之外，而 WDC 是
+    cache_only、force 无效，若不单独记账，upgrade 只能读到永不刷新的缓存。
+    """
+    path = Path(data_dir) / "upgrade_targets.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def forget_upgrade_target(data_dir: Path, yt_id: str) -> None:
+    """歌单已补足、不再需要升级复查时，把该 yt_id 从 Action 台账摘除。"""
+    payload = load_upgrade_targets(data_dir)
+    if yt_id not in payload:
+        return
+    payload.pop(yt_id, None)
+    Path(data_dir).joinpath("upgrade_targets.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def record_upgrade_target(data_dir: Path, bvid: str, yt_id: str) -> None:
+    """把升级复查候选记入台账，交由 GitHub Action 供给新鲜缓存。"""
+    if not yt_id:
+        return
+    payload = load_upgrade_targets(data_dir)
+    payload[yt_id] = {"bvid": bvid, "detected_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    path = Path(data_dir) / "upgrade_targets.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _pending_review_status(bvid: str, data_dir: Path) -> str:
     try:
         return str(review.load_comment(bvid, data_dir=data_dir).get("status") or "")
@@ -414,6 +449,8 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     if existing:
         existing_count = _count_own_songlist_lines(existing.message)
         if existing_count >= UPGRADE_THRESHOLD:
+            # 歌单已补足，不再需要 Action 供给新鲜缓存，摘除台账避免无限增长。
+            forget_upgrade_target(cache_dir.parent, video.yt_id)
             result.status = "already_posted"
             result.detail = f"rpid={existing.rpid} 已发 {existing_count} 首（足量）"
             return result
@@ -447,6 +484,10 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     result.yt_id = yt_id
     # 简介提取「主播 + 原标题」，随成功通知发送
     result.desc_profile = notify.extract_desc_profile(desc)
+    if upgrade_mode:
+        # 已发布视频不在 Action 常规目标里；记账让 due_targets 把它加回来，
+        # 否则 cache_only 下只能读到永不刷新的缓存，升级复查形同虚设。
+        record_upgrade_target(cache_dir.parent, video.bvid, yt_id)
 
     # 3. 抓取 YouTube 评论 + 简介
     #    抓取频率按"同一视频两次抓取的间隔"控制（不是轮次间隔）：

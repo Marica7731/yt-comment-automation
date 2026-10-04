@@ -26,6 +26,7 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
         for item in review.list_comments(data_dir=data_dir, status="pending")
     }
     ignored = config.ignore_bvids()
+    upgrade_ids = pipeline.load_upgrade_targets(data_dir)
     now = time.time()
     ids: list[str] = []
     for video in videos:
@@ -47,6 +48,11 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
         last = float(fetch_times.get(video.yt_id) or 0.0)
         if not last or now - last >= interval:
             ids.append(video.yt_id)
+
+    # 升级复查候选：上面 `bvid in posted` 已把它们排除，但 WDC 是 cache_only、
+    # force 无效，不走 Action 就永远读不到新鲜缓存。这组目标很小（仅「已发
+    # 歌单不足阈值」的视频），且一旦歌单补足会由 pipeline 主动从台账摘除。
+    ids.extend(upgrade_ids.keys())
     return list(dict.fromkeys(ids))
 
 
