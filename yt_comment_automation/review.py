@@ -305,6 +305,36 @@ def reverify_applied(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
     return item
 
 
+def recover_missing_comment(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
+    """仅在接口确认账号自有评论不存在时，把已审核内容补发一次。"""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") != "applied_unverified":
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许补发缺失评论")
+    messages = [str(m) for m in item.get("approved_messages") or [] if str(m).strip()]
+    if not messages:
+        raise RuntimeError(f"{bvid} 缺少已审核内容，无法补发")
+    cookies = bili_comment.load_cookie_map()
+    own = bili_comment.find_own_comments(bvid, cookies)
+    if own:
+        verified, detail = verify_own_comments(bvid, messages, cookies)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        item.update(
+            {
+                "status": "applied" if verified else "applied_unverified",
+                "verification": {"ok": verified, "detail": detail, "checked_at": now},
+                "updated_at": now,
+            }
+        )
+        _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+        return item
+
+    item["status"] = "approved"
+    item["error"] = "原评论回读不存在，已确认后补发"
+    item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return apply_comment(bvid, data_dir=data_dir)
+
+
 def apply_comment(
     bvid: str,
     data_dir: Path | None = None,
