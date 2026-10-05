@@ -9,6 +9,7 @@
   python -m yt_comment_automation.review_cli recover-missing --bvid BV1xxx
   python -m yt_comment_automation.review_cli retry-with-artist --bvid BV1xxx
   python -m yt_comment_automation.review_cli retry-without-artist --bvid BV1xxx
+  python -m yt_comment_automation.review_cli cleanup-retry-without-artist --bvid BV1xxx
 """
 from __future__ import annotations
 
@@ -72,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
     p_retry_artist = sub.add_parser("retry-with-artist", help="未发出时带歌手原文重试一次")
     p_retry_artist.add_argument("--bvid", required=True)
 
+    p_cleanup_retry = sub.add_parser("cleanup-retry-without-artist", help="删除重复评论后发布无歌手版本")
+    p_cleanup_retry.add_argument("--bvid", required=True)
+
     args = parser.parse_args(argv)
     if args.command == "list":
         items = review.list_comments(status=None if args.status == "all" else args.status)
@@ -124,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "retry-with-artist":
         item = review.retry_with_artist(args.bvid)
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification")}, ensure_ascii=False))
+        return 0 if item.get("status") == "applied" else 1
+    if args.command == "cleanup-retry-without-artist":
+        item = review.cleanup_duplicates_and_retry_without_artist(args.bvid)
+        print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification"), "deleted_rpids": item.get("deleted_rpids")}, ensure_ascii=False))
         return 0 if item.get("status") == "applied" else 1
     return 2
 

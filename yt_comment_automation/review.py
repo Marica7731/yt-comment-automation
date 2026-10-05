@@ -415,6 +415,62 @@ def retry_without_artist(bvid: str, data_dir: Path | None = None) -> dict[str, A
     return apply_comment(bvid, data_dir=data_dir)
 
 
+def cleanup_duplicates_and_retry_without_artist(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
+    """删除已知重复评论后，只保留一条去歌手版本。"""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") != "applied_unverified":
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许清理后重试")
+    rpids = list(dict.fromkeys([str(x) for x in (item.get("rpids") or []) + (item.get("previous_rpids") or []) if x]))
+    if not rpids:
+        raise RuntimeError(f"{bvid} 没有可清理的 rpid")
+    cookies = bili_comment.load_cookie_map()
+    deleted: list[str] = []
+    failures: list[str] = []
+    for rpid in rpids:
+        try:
+            response = bili_comment.delete_comment(bvid, rpid, cookies)
+        except Exception as err:  # noqa: BLE001
+            failures.append(f"{rpid}: {err}")
+            continue
+        if response.get("code") == 0:
+            deleted.append(rpid)
+        else:
+            failures.append(f"{rpid}: code={response.get('code')} msg={response.get('message')}")
+    if failures:
+        now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        item.update(
+            {
+                "status": "applied_unverified",
+                "deleted_rpids": deleted,
+                "cleanup_failures": failures,
+                "updated_at": now,
+            }
+        )
+        _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+        raise RuntimeError("重复评论清理失败: " + "; ".join(failures))
+
+    messages = [str(m) for m in item.get("approved_messages") or [] if str(m).strip()]
+    stripped = [_strip_artist_suffix(message) for message in messages]
+    if not stripped or stripped == messages:
+        raise RuntimeError(f"{bvid} 没有可去除的歌手后缀")
+    item.update(
+        {
+            "status": "approved",
+            "approved_messages": stripped,
+            "song_count": _count_song_lines(stripped),
+            "rpids": [],
+            "previous_rpids": rpids,
+            "deleted_rpids": deleted,
+            "cleanup_failures": [],
+            "without_artist_retried": True,
+            "retry_reason": "清理带歌手重复评论后，发布一条不带歌手版本",
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return apply_comment(bvid, data_dir=data_dir)
+
+
 def apply_comment(
     bvid: str,
     data_dir: Path | None = None,
