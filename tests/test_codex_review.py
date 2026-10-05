@@ -429,6 +429,48 @@ def test_retry_with_artist_preserves_original_message_once(tmp_path: Path, monke
     assert result["artist_retried"] is True
 
 
+def test_cleanup_duplicates_then_retry_without_artist(tmp_path: Path, monkeypatch):
+    payload = {
+        "bvid": "BV1CleanupRetry",
+        "yt_id": "yt-cleanup-retry",
+        "title": "cleanup retry",
+        "draft_messages": ["0:01:00 01. A - Artist"],
+        "draft_song_count": 1,
+        "source_text": "0:01:00 A / Artist",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1CleanupRetry", payload["draft_messages"], tmp_path)
+    item = review.load_comment("BV1CleanupRetry", tmp_path)
+    item.update({"status": "applied_unverified", "rpids": ["r-new"], "previous_rpids": ["r-old1", "r-old2"]})
+    review._write_json(review.review_dir(tmp_path) / "BV1CleanupRetry.json", item)
+
+    deleted = []
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {"bili_jct": "csrf"})
+    monkeypatch.setattr(
+        review.bili_comment,
+        "delete_comment",
+        lambda bvid, rpid, cookies: (deleted.append(rpid) or {"code": 0}),
+    )
+    captured = []
+
+    def fake_apply(bvid, data_dir=None, dry_run=False):
+        current = review.load_comment(bvid, data_dir)
+        captured.append(current["approved_messages"])
+        current.update({"status": "applied", "rpids": ["r-clean"]})
+        review._write_json(review.review_dir(data_dir) / f"{bvid}.json", current)
+        return current
+
+    monkeypatch.setattr(review, "apply_comment", fake_apply)
+
+    result = review.cleanup_duplicates_and_retry_without_artist("BV1CleanupRetry", tmp_path)
+
+    assert deleted == ["r-new", "r-old1", "r-old2"]
+    assert captured == [["0:01:00 01. A"]]
+    assert result["status"] == "applied"
+    assert result["deleted_rpids"] == ["r-new", "r-old1", "r-old2"]
+
+
 def test_list_comments_ignores_messages_json_array(tmp_path: Path):
     review.review_dir(tmp_path).joinpath("notes.messages.json").write_text("[]", encoding="utf-8")
     payload = {
