@@ -2,6 +2,8 @@
 
 给 B 站合集视频的评论区自动发布「YouTube 时间戳歌轴」评论的工具。
 
+> 定时任务 `yt-comment-codex-queue` 是独立 cron，每轮从保存的 prompt 新建对话，不依赖旧聊天上下文。每轮先读取 [`docs/AUTOMATION_BACKGROUND.md`](docs/AUTOMATION_BACKGROUND.md) 和 [`docs/HANDOVER.md`](docs/HANDOVER.md)，其中记录了项目身份、WDC 网络边界、审核状态和通知规则。
+
 B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视频）。本项目自动：
 
 1. **检测合集更新**：读取 B 站 UGC 合集（ugc_season）全部视频，对比上次快照找出新增
@@ -15,7 +17,8 @@ YouTube 评论抓取主链路由 GitHub Action 完成：`dev/run_youtube_action.
 先在 WDC 计算到期 ID，更新 `youtube_targets.txt` 并通过 SSH Git 推送触发
 `.github/workflows/fetch-youtube.yml`；轮询 `youtube-action-cache` 分支读取
 payload，再经 SSH 合并到 WDC 的 `data/yt_raw`。WDC 的 `cron_job.sh` 以
-`YOUTUBE_FETCH_MODE=cache_only` 运行，缓存缺失时跳过，不直连 YouTube。
+`YOUTUBE_FETCH_MODE=cache_only` 运行，不直连 YouTube；缓存缺失必须报告为
+`error_cache_miss` 并刷新 Action，禁止降级成 `skipped_no_songs` 或普通跳过。
 官方 YouTube Data API 是另一条已验证主路径：`YOUTUBE_FETCH_BACKEND=official`
 显式启用，key 只存 WDC `private.env`。2026-10-02 已在 WDC 实测
 `videos.list` 与 `commentThreads.list` 均返回 HTTP 200；不使用未配置的 GitHub secret。
@@ -35,6 +38,12 @@ yt_comment_automation/
 tests/
   test_clean.py    清洗规则单元测试
 ```
+
+补充文档：
+
+- `docs/AUTOMATION_BACKGROUND.md`：独立定时任务的持久背景与每轮流程。
+- `docs/HANDOVER.md`：部署、数据、验证纪律和历史事故交接。
+- `RULES.md`：评论清洗规则权威文档。
 
 ## 使用
 
