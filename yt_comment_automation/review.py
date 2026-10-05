@@ -618,5 +618,15 @@ def apply_comment(
         pass
     return item
 def _normalize_comment_for_compare(text: str) -> str:
-    """Normalize Bilibili HTML entities and line endings before comparison."""
-    return html.unescape(text or "").replace("\r\n", "\n").strip()
+    """Normalize Bilibili render changes before exact comparison."""
+    normalized = html.unescape(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    return normalized.translate(
+        str.maketrans(
+            {
+                "【": "[",
+                "】": "]",
+                "［": "[",
+                "］": "]",
+            }
+        )
+    ).strip()
