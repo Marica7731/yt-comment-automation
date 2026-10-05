@@ -328,6 +328,23 @@ def recover_missing_comment(bvid: str, data_dir: Path | None = None) -> dict[str
         _write_json(review_dir(data_dir) / f"{bvid}.json", item)
         return item
 
+    if item.get("rpids"):
+        now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        item.update(
+            {
+                "status": "applied_unverified",
+                "error": "已有 rpid 但顶层回读为空，疑似 B 站隐藏或审核中；不重复发布",
+                "verification": {
+                    "ok": False,
+                    "detail": "已有 rpid，顶层回读为空；拒绝重复发布",
+                    "checked_at": now,
+                },
+                "updated_at": now,
+            }
+        )
+        _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+        return item
+
     item["status"] = "approved"
     item["error"] = "原评论回读不存在，已确认后补发"
     item["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")

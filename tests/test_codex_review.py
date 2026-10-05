@@ -307,7 +307,7 @@ def test_recover_missing_publishes_only_when_own_comments_absent(tmp_path: Path,
     review.queue_comment(payload, tmp_path)
     review.approve_comment("BV1Recover", payload["draft_messages"], tmp_path)
     item = review.load_comment("BV1Recover", tmp_path)
-    item.update({"status": "applied_unverified", "rpids": ["old-rpid"]})
+    item.update({"status": "applied_unverified", "rpids": []})
     review._write_json(review.review_dir(tmp_path) / "BV1Recover.json", item)
 
     monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {"bili_jct": "csrf"})
@@ -326,6 +326,37 @@ def test_recover_missing_publishes_only_when_own_comments_absent(tmp_path: Path,
 
     assert result["status"] == "applied"
     assert applied == ["BV1Recover"]
+
+
+def test_recover_missing_never_republishes_existing_rpid(tmp_path: Path, monkeypatch):
+    payload = {
+        "bvid": "BV1NoDuplicate",
+        "yt_id": "yt-no-duplicate",
+        "title": "no duplicate",
+        "draft_messages": ["0:01:00 01. A - B"],
+        "draft_song_count": 1,
+        "source_text": "0:01:00 A / B",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1NoDuplicate", payload["draft_messages"], tmp_path)
+    item = review.load_comment("BV1NoDuplicate", tmp_path)
+    item.update({"status": "applied_unverified", "rpids": ["existing-rpid"]})
+    review._write_json(review.review_dir(tmp_path) / "BV1NoDuplicate.json", item)
+
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(review.bili_comment, "find_own_comments", lambda bvid, cookies: [])
+    monkeypatch.setattr(
+        review,
+        "apply_comment",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not republish")),
+    )
+
+    result = review.recover_missing_comment("BV1NoDuplicate", tmp_path)
+
+    assert result["status"] == "applied_unverified"
+    assert "不重复发布" in result["error"]
+    assert result["rpids"] == ["existing-rpid"]
 
 
 def test_list_comments_ignores_messages_json_array(tmp_path: Path):
