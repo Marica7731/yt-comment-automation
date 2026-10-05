@@ -1,21 +1,21 @@
 # yt-comment-automation 交接文档
 
-> 最后更新：2026-10-01。本文档面向接手本项目的维护者（人或代理），覆盖架构、部署、数据、机制、坑与验证纪律。接手前必读。
+> 最后更新：2026-10-06。本文档面向接手本项目的维护者（人或代理），覆盖架构、部署、数据、机制、坑与验证纪律。接手前必读；独立定时任务先读 `docs/AUTOMATION_BACKGROUND.md`。
 
 ## 1. 项目是什么
 
 自动监控 B 站 4 个合集（直播/直播2/直播3/凛々咲，497 个自家视频）里的 VTuber 歌枠投稿，抓取对应 YouTube 直播的评论区/简介中的时间戳歌单，清洗成规范格式后作为 B 站评论发布到视频下方，并附带源/发布双时间轴的飞书通知。附带两个附属任务：粉丝回复自动点赞、每日清洗复盘。
 
 - 仓库：`https://github.com/Marica7731/yt-comment-automation`（public，master，无密钥；private.env 被 gitignore）
-- 生产：WDC VPS `/opt/yt-comment-automation`（评论/点赞由 Codex heartbeat 直接触发，每日复盘保留 cron）
+- 生产：WDC VPS `/opt/yt-comment-automation`（评论/点赞由 Codex standalone scheduled task 直接触发，每日复盘保留 cron）
 - 下游消费：`G:\codex-work\plugin` 的油猴插件 + `RULES.md` 共享确定性清洗规则
 
 ## 2. 部署与调度全景（WDC）
 
 | 任务 | cron | 命令 | 日志 |
 |---|---|---|---|
-| 歌单管线 | 无 cron，由 Codex heartbeat 直接触发 | `cron_job.sh`（flock + DRY_RUN=0 + timeout 3600 + run --mode incremental） | `logs/run_*.log`（保留 30 个 ≈10 小时） |
-| 粉丝点赞 | 无 cron，由 Codex heartbeat 直接触发 | `flock -n /tmp/like-fans.lock python3 like_fans.py` | `logs/like_fans.log` |
+| 歌单管线 | 无 WDC cron，由 Codex standalone scheduled task 触发 | `cron_job.sh`（flock + DRY_RUN=0 + timeout 3600 + run --mode incremental） | `logs/run_*.log`（保留 30 个 ≈10 小时） |
+| 粉丝点赞 | 无 WDC cron，由 Codex standalone scheduled task 触发 | `flock -n /tmp/like-fans.lock python3 like_fans.py` | `logs/like_fans.log` |
 | 每日清洗复盘 | `0 0 * * *`(UTC)=北京 8:00 | `flock -n /tmp/daily-review.lock python3 daily_clean_review.py` | `logs/daily_review.log` |
 
 - 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：仅从 WDC `/opt/yt-comment-automation/private.env` 或进程环境读取 `FEISHU_APP_ID/FEISHU_APP_SECRET/MY_FEISHU_OPEN_ID`，通知机器人固定为 `yt-comment-automation`；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据，禁止读取旧 bridge。
@@ -41,9 +41,9 @@
 
 ## 4. Codex 审核与执行链路
 
-- Codex heartbeat 直接触发 WDC 管线，抓取并生成草稿或原始时间戳来源，写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时不发布，Codex 审核后才进入 `approved`。
+- Codex standalone scheduled task 直接触发 WDC 管线，抓取并生成草稿或原始时间戳来源，写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时不发布，Codex 审核后才进入 `approved`。
 - 评论候选、YouTube Action 目标和 `pending` 列表默认只覆盖 `CODEX_SCOPE_START_DATE`（默认 `2026-10-02`）及之后的视频；历史存量不进入每轮扫描。手工指定 `--bvid` 或 `CODEX_SCOPE_BVIDS` 可绕过日期边界。
-- Codex heartbeat 直接触发 `like_fans.py` 合并候选到 `data/like_review.json`，不执行点赞 action；Codex 用 `like_review_cli approve` 批准，随后 `python like_fans.py --apply ...` 才执行。
+- Codex standalone scheduled task 直接触发 `like_fans.py` 合并候选到 `data/like_review.json`，不执行点赞 action；Codex 用 `like_review_cli approve` 批准，随后 `python like_fans.py --apply ...` 才执行。
 - 审核文件是审计账本：`queue/merge` 不覆盖 `approved/applied/rejected`；执行前重新读取服务器真实点赞状态，状态不可确认宁可跳过。
 - 云端不配置任何外部模型凭据；生产链不存在外部模型调用。
 - 审核入口：`review_cli list/show/approve/apply`；点赞入口：`like_review_cli list/show/approve/reject`，执行动作固定为 `like_fans.py --apply`。
@@ -61,7 +61,8 @@
   写 `youtube_targets.txt` 后用 SSH Git 推送触发 GitHub Action `fetch-youtube`；
   Action 按 3 秒最小间隔抓取并把 payload 提交到 `youtube-action-cache` 分支，
   本机轮询该分支后经 SSH 交给 `youtube_cache_sync` 合并；不依赖 GitHub API token。
-  WDC 的 `cron_job.sh` 强制 `YOUTUBE_FETCH_MODE=cache_only`，缺缓存只跳过，
+  WDC 的 `cron_job.sh` 强制 `YOUTUBE_FETCH_MODE=cache_only`，缺缓存必须报告
+  `error_cache_miss` 并刷新 Action，禁止伪装成 `skipped_no_songs`，
   不再直连 YouTube。
 - **自适应翻页**：评论按 `commentId`（缺失回退文本 sha1）对账，第 1 页有新评论才翻下一页，某页全旧即停——但**仅限已发布视频的升级复查**（early_stop=True）；未发布视频必须抓满 5 页（歌单被闲聊顶到后面页时，提前停=永远抓不回）。上限 5 页=100 条触达。
 - 缓存有效性只能由处理结果决定：发布=留缓存，0 首未发布=不落缓存+删旧缓存。静态判定缓存有效性会被骗（闲聊表像歌单）。
@@ -87,7 +88,7 @@
 - 升级模式：已发 <3 首时复查，新歌单严格多于已发且 ≥3 首才删旧发新；新投稿每轮 force 重抓，老投稿 2 小时 TTL。
 - 忽略列表 `IGNORE_BVIDS` 现有 6 个：BV1MW3R6vEoE,BV17KGK62EyU,BV1VERyBnEG6,BV1WAYb6zEoE,BV1one569EZt,BV18ZaZ6hE2F。
 
-### 点赞（like_fans.py，部署在仓库根，由 Codex heartbeat 触发）
+### 点赞（like_fans.py，部署在仓库根，由 Codex standalone scheduled task 触发）
 - msgfeed「回复我的」游标翻页：响应 `cursor{id,time}`，下一页参数 `id` + `reply_time`（实测所得，勿猜其他参数名）；**页内有新赞才继续翻**，整页已赞/重复即停，上限 10 页。
 - msgfeed 点赞不限视频（回复我的=别人回复我们）；**评论区补扫限自家视频**（OWN_BVIDS=processed posted ∪ collections_snapshot）——补扫扫整个评论区，外人视频绝不能扫。
 - 点赞 8 秒频控只在真实点赞后消耗；点赞成功即写 liked_rpids.json。
@@ -97,6 +98,13 @@
 - 成功通知采用紧凑格式：B站/YouTube 链接、状态、歌曲数、标题、合集、commit；清洗部分只汇总原始/最终行数、排除分类计数和 Codex 调整分类计数；源时间戳只保留首尾各 5 行节选；最后展示实际发布内容、verification 与 rpids。不附主播简介、完整简介、本地草稿或逐条删除/修改/新增记录。
 - 评论失败通知沿用同一紧凑结构，只在“原因”后补充非重复的失败详情。429、崩溃、点赞动作与代码修复通知继续保留各自的技术审计字段。
 - 崩溃通知：cli 包 try/except（正式运行）+ 直接触发脚本检查退出码兜底。
+
+### 评论删除安全
+
+- 唯一允许的删除入口是 `review_cli cleanup-retry-without-artist` 调用 `review.py`，最终只由 `bili_comment.delete_comment` 发送 `reply/del`；禁止手工 `curl`、临时脚本和任何绕过该入口的调用。
+- `delete_comment` 强制校验 `bvid/rpid/bili_jct`、cookie `DedeUserID == OWNER_MID`、正数 `aid`，并要求目标 `rpid` 出现在该视频的本账号评论列表。发送前再读一次 `aid` 和归属列表；全部一致才允许请求。
+- 归属回读失败、翻页无法覆盖目标、账号或视频变化、入参无法唯一确认时必须中止，不删除、不重试手工路径。其他用户的评论无论内容或状态如何都不得删除。
+- 实际删除必须读取项目脚本返回值并保留结果；任何部分失败都要报告，禁止用笼统成功掩盖。
 
 ### 复盘（daily_clean_review.py）
 - 对比缓存源时间戳行 vs run json message：被洗掉的源行原文列飞书。匹配必须归一（多版本 SETLIST 的分隔符/序号/时间戳差异），歌名段命中即算保留。列出的缺失行含大量本就该洗掉的行（START/宣伝/框架行），人工扫一眼判断真误杀。
@@ -131,6 +139,7 @@
 ## 9. 文档索引
 
 - `README.md`：项目简介
+- `docs/AUTOMATION_BACKGROUND.md`：独立定时任务的持久背景、网络边界和每轮流程
 - `RULES.md`：R01-R17 清洗规则权威文档（本地/插件共用）
 - `docs/feishu-notify-tutorial.md`：飞书通知通用教程
 - `CODEX_GOAL.md`：目标跟踪约定（完成后重命名归档）
