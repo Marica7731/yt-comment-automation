@@ -252,6 +252,21 @@ def test_verify_own_comments_normalizes_bilibili_html_entities(monkeypatch):
     assert "回读通过" in detail
 
 
+def test_verify_own_comments_normalizes_bilibili_fullwidth_brackets(monkeypatch):
+    class Own:
+        def __init__(self, message):
+            self.message = message
+
+    expected = "0:01:00 01. LEveL - SawanoHiroyuki[nZk]:Aimer"
+    rendered = "0:01:00 01. LEveL - SawanoHiroyuki【nZk】:Aimer"
+    monkeypatch.setattr(review.bili_comment, "find_own_comments", lambda bvid, cookies: [Own(rendered)])
+
+    ok, detail = review.verify_own_comments("BV1Bracket", [expected], {})
+
+    assert ok is True
+    assert "回读通过" in detail
+
+
 def test_reverify_applied_without_republish(tmp_path: Path, monkeypatch):
     payload = {
         "bvid": "BV1Reverify",
