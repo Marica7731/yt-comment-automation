@@ -104,6 +104,10 @@ def main() -> int:
         )
     posted = [r for r in record.results if r["status"] == "posted"]
     print(f"\n本轮成功发布: {len(posted)}")
+    errors = [r for r in record.results if r["status"] in {"error", "error_cache_miss"}]
+    if errors:
+        print(f"本轮错误: {len(errors)}（缓存缺失或抓取失败不得视为正常跳过）")
+        return 1
     return 0
 
 
