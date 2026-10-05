@@ -49,7 +49,7 @@ class VideoResult:
     title: str
     part_date: str
     collection: str
-    status: str = ""  # already_posted / posted / skipped_no_songs / skipped_low_confidence / error / no_yt_link / dry_run
+    status: str = ""  # posted / skipped_throttled / skipped_no_songs / error_cache_miss / error / needs_codex_review
     song_count: int = 0
     source: str = ""  # local / codex_review
     message: str = ""
@@ -82,6 +82,21 @@ def save_processed(data_dir: Path, posted: set[str]) -> None:
     path = data_dir / "processed.json"
     payload = {"updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "posted": sorted(posted)}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _cleanup_no_song_cache(results: list[VideoResult], cache_dir: Path, dry_run: bool) -> None:
+    """只清理真实抓取成功但没有歌单的缓存；节流和缓存缺失必须保留现场。"""
+    if dry_run:
+        return
+    for result in results:
+        if result.status != "skipped_no_songs" or not result.yt_id:
+            continue
+        try:
+            (cache_dir / f"{result.yt_id}.info.json").unlink()
+        except FileNotFoundError:
+            pass
+        except Exception as del_err:  # noqa: BLE001
+            logger.warning("[%s] 清理无效缓存失败（忽略）: %s", result.bvid, del_err)
 
 
 def _fetch_bili_video_info(bvid: str, cookie_map: dict[str, str] | None = None) -> tuple[str, str, list[dict]]:
@@ -516,7 +531,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                 "[%s] 视频距上次抓取 %.1f 小时（ <%d 小时），本轮跳过",
                 video.bvid, gate_age / 3600, gate_interval // 3600,
             )
-            result.status = "skipped_no_songs"
+            result.status = "skipped_throttled"
             result.error = f"视频距上次抓取不足 {gate_interval // 3600} 小时，本轮跳过"
             return result
         if upgrade_mode:
@@ -545,9 +560,9 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                 raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
     except Exception as err:  # noqa: BLE001
         if isinstance(err, yt_fetch.YtCacheMissError):
-            result.status = "skipped_no_songs"
+            result.status = "error_cache_miss"
             result.error = str(err)
-            logger.info("[%s] 跳过 YouTube：Action 缓存缺失", video.bvid)
+            logger.error("[%s] Action 缓存缺失，按生产异常处理", video.bvid)
             return result
         result.status = "error"
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"
@@ -872,17 +887,8 @@ def run_pipeline(
                 notify.send_feishu_message(brief)
             except Exception:  # noqa: BLE001
                 pass
-        # 0 首未发布的视频：本轮缓存内容无效（可能评论后到/抓取波动/闲聊表误判
-        # "有歌单"导致长期不重抓），删缓存让下轮 cron 必然重抓最新评论区
-        if not dry_run:
-            for r in results:
-                if r.status == "skipped_no_songs" and r.yt_id:
-                    try:
-                        (cache_dir / f"{r.yt_id}.info.json").unlink()
-                    except FileNotFoundError:
-                        pass
-                    except Exception as del_err:  # noqa: BLE001
-                        logger.warning("[%s] 清理无效缓存失败（忽略）: %s", r.bvid, del_err)
+        # 只有真实抓取后的 0 首结果可清缓存；节流/缓存缺失不能删除有效现场。
+        _cleanup_no_song_cache(results, cache_dir, dry_run)
         time.sleep(1)
 
     # 保存快照与处理记录

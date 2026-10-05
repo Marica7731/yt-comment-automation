@@ -279,6 +279,32 @@ def verify_own_comments(bvid: str, messages: list[str], cookies: dict[str, str])
         return False, f"评论区回读失败: {err}"
 
 
+def reverify_applied(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
+    """只回读已发布评论，不再次发布；用于修复 applied_unverified。"""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") not in {"applied", "applied_unverified"}:
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许回读验收")
+    messages = [str(m) for m in item.get("approved_messages") or [] if str(m).strip()]
+    if not messages:
+        raise RuntimeError(f"{bvid} 缺少已审核内容，无法回读验收")
+    cookies = bili_comment.load_cookie_map()
+    verified, detail = verify_own_comments(bvid, messages, cookies)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    item.update(
+        {
+            "status": "applied" if verified else "applied_unverified",
+            "verification": {
+                "ok": verified,
+                "detail": detail,
+                "checked_at": now,
+            },
+            "updated_at": now,
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return item
+
+
 def apply_comment(
     bvid: str,
     data_dir: Path | None = None,

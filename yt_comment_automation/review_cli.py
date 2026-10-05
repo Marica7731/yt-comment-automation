@@ -5,6 +5,7 @@
   python -m yt_comment_automation.review_cli show --bvid BV1xxx
   python -m yt_comment_automation.review_cli approve --bvid BV1xxx --messages-file /tmp/msg.json
   python -m yt_comment_automation.review_cli apply --bvid BV1xxx
+  python -m yt_comment_automation.review_cli verify --bvid BV1xxx
 """
 from __future__ import annotations
 
@@ -56,6 +57,9 @@ def main(argv: list[str] | None = None) -> int:
     p_apply.add_argument("--bvid", required=True)
     p_apply.add_argument("--dry-run", action="store_true")
 
+    p_verify = sub.add_parser("verify", help="只回读已发布评论，不重复发布")
+    p_verify.add_argument("--bvid", required=True)
+
     args = parser.parse_args(argv)
     if args.command == "list":
         items = review.list_comments(status=None if args.status == "all" else args.status)
@@ -93,6 +97,10 @@ def main(argv: list[str] | None = None) -> int:
             raise
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification")}, ensure_ascii=False))
         return 0 if item.get("status") in {"applied", "dry_run"} else 1
+    if args.command == "verify":
+        item = review.reverify_applied(args.bvid)
+        print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification")}, ensure_ascii=False))
+        return 0 if item.get("status") == "applied" else 1
     return 2
 
 

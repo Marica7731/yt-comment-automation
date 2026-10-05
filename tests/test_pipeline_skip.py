@@ -258,8 +258,87 @@ def test_pending_video_skips_before_youtube_for_twelve_hours(tmp_path, monkeypat
 
     result = pipeline.process_video(video, tmp_path, dry_run=False)
 
-    assert result.status == "skipped_no_songs"
+    assert result.status == "skipped_throttled"
     assert "不足 12" in result.error
+
+
+def test_cache_miss_is_error_not_normal_skip(tmp_path, monkeypatch):
+    from yt_comment_automation import collections, yt_fetch
+
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1CacheMiss",
+        title="cache miss",
+        part_date="2020-01-01",
+        yt_id="missingcache",
+    )
+    monkeypatch.setenv("YOUTUBE_FETCH_MODE", "cache_only")
+    monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_fetch_bili_video_info",
+        lambda bvid, cookie_map=None: ("missingcache", "https://youtu.be/missingcache", []),
+    )
+    monkeypatch.setattr(pipeline, "_pending_review_status", lambda bvid, data_dir: "none")
+    monkeypatch.setattr(pipeline, "_refetch_gate", lambda cache_dir, yt_id, part_date: (0.0, 0.0))
+
+    result = pipeline.process_video(video, tmp_path, dry_run=False)
+
+    assert result.status == "error_cache_miss"
+    assert "GitHub Action 缓存缺失" in result.error
+    assert result.status != "skipped_no_songs"
+
+
+def test_cleanup_cache_only_for_real_no_song_result(tmp_path):
+    cache_dir = tmp_path / "yt_raw"
+    cache_dir.mkdir()
+    for yt_id in ("throttled", "missing", "empty"):
+        (cache_dir / f"{yt_id}.info.json").write_text("{}", encoding="utf-8")
+
+    results = [
+        pipeline.VideoResult("BV1Throttle", "throttled", "", "", "", status="skipped_throttled"),
+        pipeline.VideoResult("BV1Missing", "missing", "", "", "", status="error_cache_miss"),
+        pipeline.VideoResult("BV1Empty", "empty", "", "", "", status="skipped_no_songs"),
+    ]
+    pipeline._cleanup_no_song_cache(results, cache_dir, dry_run=False)
+
+    assert (cache_dir / "throttled.info.json").is_file()
+    assert (cache_dir / "missing.info.json").is_file()
+    assert not (cache_dir / "empty.info.json").exists()
+
+
+def test_cli_returns_nonzero_for_cache_miss(monkeypatch, capsys):
+    from yt_comment_automation import cli
+
+    monkeypatch.setenv("DRY_RUN", "1")
+    monkeypatch.setattr(
+        pipeline,
+        "run_pipeline",
+        lambda **kwargs: type(
+            "Record",
+            (),
+            {
+                "results": [
+                    {
+                        "bvid": "BV1CacheMiss",
+                        "part_date": "2026-10-05",
+                        "status": "error_cache_miss",
+                        "song_count": 0,
+                        "source": "",
+                        "detail": "",
+                        "error": "GitHub Action 缓存缺失",
+                    }
+                ]
+            },
+        )(),
+    )
+    monkeypatch.setattr("sys.argv", ["yt-comment-automation", "run"])
+
+    assert cli.main() == 1
+    assert "本轮错误: 1" in capsys.readouterr().out
 
 
 def test_codex_scope_excludes_pre_takeover_videos(monkeypatch):

@@ -252,6 +252,48 @@ def test_verify_own_comments_normalizes_bilibili_html_entities(monkeypatch):
     assert "回读通过" in detail
 
 
+def test_reverify_applied_without_republish(tmp_path: Path, monkeypatch):
+    payload = {
+        "bvid": "BV1Reverify",
+        "yt_id": "yt-reverify",
+        "title": "reverify",
+        "draft_messages": ["0:01:00 01. A - B"],
+        "draft_song_count": 1,
+        "source_text": "0:01:00 A / B",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1Reverify", payload["draft_messages"], tmp_path)
+    item = review.load_comment("BV1Reverify", tmp_path)
+    item.update(
+        {
+            "status": "applied_unverified",
+            "rpids": ["r-reverify"],
+            "verification": {"ok": False, "detail": "回读缺失", "checked_at": "old"},
+        }
+    )
+    review._write_json(review.review_dir(tmp_path) / "BV1Reverify.json", item)
+
+    class Own:
+        message = payload["draft_messages"][0]
+
+    publish_calls = []
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {"bili_jct": "csrf"})
+    monkeypatch.setattr(review.bili_comment, "find_own_comments", lambda bvid, cookies: [Own()])
+    monkeypatch.setattr(
+        review.bili_comment,
+        "post_comment_with_replies",
+        lambda *args, **kwargs: publish_calls.append(args),
+    )
+
+    verified = review.reverify_applied("BV1Reverify", tmp_path)
+
+    assert verified["status"] == "applied"
+    assert verified["verification"]["ok"] is True
+    assert verified["rpids"] == ["r-reverify"]
+    assert publish_calls == []
+
+
 def test_list_comments_ignores_messages_json_array(tmp_path: Path):
     review.review_dir(tmp_path).joinpath("notes.messages.json").write_text("[]", encoding="utf-8")
     payload = {
