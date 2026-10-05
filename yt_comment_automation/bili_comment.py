@@ -203,6 +203,24 @@ def delete_comment(bvid: str, rpid: str, cookies: dict[str, str]) -> dict:
     if aid <= 0 or str(config.owner_mid()).strip() != cookie_mid:
         raise RuntimeError("删除归属状态在回读后发生变化，拒绝执行")
 
+    # 发送前再次读取 aid 与本账号评论，防止串参、账号切换或目标转属。
+    rechecked_aid = get_aid(clean_bvid, cookies)
+    rechecked_owner = str(config.owner_mid()).strip()
+    rechecked_ids = {
+        str(cm.rpid)
+        for cm in list_comments(clean_bvid, cookies, max_pages=5)
+        if str(cm.mid) == rechecked_owner
+    }
+    if (
+        rechecked_aid != aid
+        or rechecked_owner != owner_mid
+        or str(cookies.get("DedeUserID") or "").strip() != rechecked_owner
+        or clean_rpid not in rechecked_ids
+        or not re.fullmatch(r"BV[0-9A-Za-z]{10}", clean_bvid)
+        or not re.fullmatch(r"[1-9]\d*", clean_rpid)
+    ):
+        raise RuntimeError("删除前二次归属复核失败，拒绝执行")
+
     payload = {
         "type": 1,
         "oid": aid,

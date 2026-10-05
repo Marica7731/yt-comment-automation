@@ -69,6 +69,17 @@ def test_delete_comment_rejects_cookie_owner_mismatch_before_network(monkeypatch
         bili_comment.delete_comment("BV1ybHt6kELs", "123456", cookies)
 
 
+def test_delete_comment_requires_csrf_before_network(monkeypatch):
+    def fail_get_aid(*args, **kwargs):
+        raise AssertionError("缺少 CSRF 不得触发网络请求")
+
+    monkeypatch.setattr(bili_comment, "get_aid", fail_get_aid)
+    cookies = {"DedeUserID": "3546597260528367"}
+
+    with pytest.raises(RuntimeError, match="bili_jct"):
+        bili_comment.delete_comment("BV1ybHt6kELs", "123456", cookies)
+
+
 def test_delete_comment_rejects_foreign_rpid_before_delete_request(monkeypatch):
     deleted = []
 
@@ -91,15 +102,84 @@ def test_delete_comment_rejects_foreign_rpid_before_delete_request(monkeypatch):
     assert deleted == []
 
 
+def test_delete_comment_aborts_if_ownership_disappears_before_second_read(monkeypatch):
+    deleted = []
+    reads = iter(
+        [
+            [FakeComment("3546597260528367", "123456", "本账号评论")],
+            [FakeComment("888888", "123456", "归属已变化")],
+        ]
+    )
+
+    def unexpected_request(*args, **kwargs):
+        deleted.append(args)
+        raise AssertionError("二次归属复核失败不得调用删除接口")
+
+    monkeypatch.setattr(bili_comment.config, "owner_mid", lambda: "3546597260528367")
+    monkeypatch.setattr(bili_comment, "get_aid", lambda bvid, cookies: 99)
+    monkeypatch.setattr(
+        bili_comment,
+        "list_comments",
+        lambda bvid, cookies, max_pages: next(reads),
+    )
+    monkeypatch.setattr(bili_comment, "_request_json", unexpected_request)
+    cookies = {"bili_jct": "csrf", "DedeUserID": "3546597260528367"}
+
+    with pytest.raises(RuntimeError, match="二次归属复核失败"):
+        bili_comment.delete_comment("BV1ybHt6kELs", "123456", cookies)
+    assert deleted == []
+
+
 def test_delete_comment_allows_verified_own_rpid(monkeypatch):
     calls = []
+    aid_reads = []
+    comment_reads = []
 
     def request_json(url, cookies, referer, data=None):
         calls.append({"url": url, "referer": referer, "data": data})
         return {"code": 0}
 
     monkeypatch.setattr(bili_comment.config, "owner_mid", lambda: "3546597260528367")
-    monkeypatch.setattr(bili_comment, "get_aid", lambda bvid, cookies: 99)
+    monkeypatch.setattr(
+        bili_comment,
+        "get_aid",
+        lambda bvid, cookies: aid_reads.append(bvid) or 99,
+    )
+    monkeypatch.setattr(
+        bili_comment,
+        "list_comments",
+        lambda bvid, cookies, max_pages: comment_reads.append((bvid, max_pages))
+        or [FakeComment("3546597260528367", "123456", "本账号评论")],
+    )
+    monkeypatch.setattr(bili_comment, "_request_json", request_json)
+    cookies = {"bili_jct": "csrf", "DedeUserID": "3546597260528367"}
+
+    response = bili_comment.delete_comment("BV1ybHt6kELs", "123456", cookies)
+
+    assert response == {"code": 0}
+    assert aid_reads == ["BV1ybHt6kELs", "BV1ybHt6kELs"]
+    assert comment_reads == [("BV1ybHt6kELs", 5), ("BV1ybHt6kELs", 5)]
+    assert len(calls) == 1
+    assert calls[0]["url"] == bili_comment.REPLY_DEL_API
+    assert calls[0]["referer"] == "https://www.bilibili.com/video/BV1ybHt6kELs"
+    assert calls[0]["data"] == {
+        "type": 1,
+        "oid": 99,
+        "rpid": "123456",
+        "csrf": "csrf",
+    }
+
+
+def test_delete_comment_rechecks_aid_before_request(monkeypatch):
+    aid_values = iter([99, 100])
+    delete_calls = []
+
+    def request_json(url, cookies, referer, data=None):
+        delete_calls.append(data)
+        return {"code": 0}
+
+    monkeypatch.setattr(bili_comment.config, "owner_mid", lambda: "3546597260528367")
+    monkeypatch.setattr(bili_comment, "get_aid", lambda bvid, cookies: next(aid_values))
     monkeypatch.setattr(
         bili_comment,
         "list_comments",
@@ -108,14 +188,6 @@ def test_delete_comment_allows_verified_own_rpid(monkeypatch):
     monkeypatch.setattr(bili_comment, "_request_json", request_json)
     cookies = {"bili_jct": "csrf", "DedeUserID": "3546597260528367"}
 
-    response = bili_comment.delete_comment("BV1ybHt6kELs", "123456", cookies)
-
-    assert response == {"code": 0}
-    assert len(calls) == 1
-    assert calls[0]["url"] == bili_comment.REPLY_DEL_API
-    assert calls[0]["data"] == {
-        "type": 1,
-        "oid": 99,
-        "rpid": "123456",
-        "csrf": "csrf",
-    }
+    with pytest.raises(RuntimeError, match="二次归属复核失败"):
+        bili_comment.delete_comment("BV1ybHt6kELs", "123456", cookies)
+    assert delete_calls == []

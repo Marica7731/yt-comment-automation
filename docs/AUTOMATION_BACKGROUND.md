@@ -27,6 +27,13 @@
 3. WDC 的 `cron_job.sh` 使用 `YOUTUBE_FETCH_MODE=cache_only`；缓存缺失必须报告为 `error_cache_miss` 或 Action 失败，禁止伪装为 `skipped_no_songs`。
 4. 每条命令必须有 bounded timeout；不执行无界等待。
 
+## 删除评论强门禁
+
+- 删除只能在确有重复评论且属于本项目既定清理流程时触发，且只能通过仓库脚本 `review_cli cleanup-retry-without-artist` → `review.py` → `bili_comment.delete_comment`。禁止手工 `curl`、直接调用 B 站 `reply/del`、绕过 `review.py` 的临时脚本或用其他工具删除。
+- 每次删除必须依次确认：`bvid` 为标准格式、`rpid` 为正整数、cookie 存在 `bili_jct`、cookie `DedeUserID` 等于 `OWNER_MID`、视频 `aid` 为正数、目标 `rpid` 是该精确 `bvid` 下本账号拥有的评论。发送请求前必须再次读取 `aid`、再次列出本账号评论并复核上述入参。
+- 任一校验、回读或二次归属检查失败，必须拒绝删除并报告；不得猜测、不得降级、不得改走手工接口。无法证明“只删除自己”的场景一律不删除。
+- 删除后必须读取项目脚本返回的状态并记录实际结果；禁止把接口返回、通知发送或退出码当作成功而不再审核。
+
 ## 每轮工作顺序
 
 1. 读取最新 `logs/run_*.log`、`data/run_*.json`，检查 `error_cache_miss`、`skipped_throttled`、异常 `skipped_no_songs`、反复跳过的正常稿件和未解释的 `error`。
@@ -37,8 +44,9 @@
 6. 对范围内 pending 歌单读取 `source_text`、`draft_messages`、标题和来源，依据 `RULES.md` 审核；不完整或不可信的候选保持 pending。
 7. 对 approved 歌单执行 `review_cli apply --bvid <bvid>`，亲自读取返回 JSON、`status`、`verification`、`rpids`，并在 WDC 回读自有评论数。
 8. 对 `applied_unverified` 先执行 `review_cli verify --bvid <bvid>`；只有没有历史 rpid 且接口明确返回不存在时才允许一次 `recover-missing`，已有 rpid 不得重复发布。
-9. 对点赞 pending 逐条检查 `content/source/oid/rpid`，排除自己、广告、垃圾和不安全内容；批准后执行 `python3 like_fans.py --apply /opt/yt-comment-automation/data/like_review.json`。
-10. 结束前再次核对队列、最近日志和 crontab；评论/点赞 cron 必须移除，只保留每日复盘 cron。
+9. 只有满足“删除评论强门禁”全部条件时，才允许运行项目清理命令；读取每条删除返回结果，任何归属不明都保留原评论并报告。
+10. 对点赞 pending 逐条检查 `content/source/oid/rpid`，排除自己、广告、垃圾和不安全内容；批准后执行 `python3 like_fans.py --apply /opt/yt-comment-automation/data/like_review.json`。
+11. 结束前再次核对队列、最近日志和 crontab；评论/点赞 cron 必须移除，只保留每日复盘 cron。
 
 ## 状态语义
 
@@ -52,6 +60,7 @@
 ## 通知边界
 
 - 实际发布评论、执行点赞、人工失败、发现旧 AI key/直发分支或完成代码修复时，必须通过 WDC 的 `notify.send_feishu_message` 发送具体报告。
+- 同一 BVID/rpid 在没有新发布动作或状态变化时，验收失败只通知一次；后续轮次只执行只读 `verify` 并保持安静，禁止重复推送同一失败。已由用户确认发布成功但回读延迟的，不得再次发失败消息；回读转成功后只更新状态，不再补发重复失败。
 - 评论成功/失败通知使用项目定义的紧凑格式；点赞、429、崩溃和代码修复可保留技术审计字段。
 - 没有待办、没有异常且没有实际 action 时保持安静，不用泛化状态通知掩盖异常。
 

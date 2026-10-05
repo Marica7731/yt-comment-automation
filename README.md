@@ -109,3 +109,6 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 
 - `private.env`、`runtime/`、`data/` 已在 `.gitignore` 中排除，**不会上传任何 cookie / API Key / IP**
 - 无第三方运行时依赖（标准库 urllib/re/json），测试用 pytest
+- 评论删除只允许通过本项目的 `review_cli cleanup-retry-without-artist` / `review.py` 调用 `bili_comment.delete_comment`；禁止手工 `curl`、直连 `reply/del` 或绕过门禁的脚本。
+- 删除前必须校验标准 `bvid`、正整数 `rpid`、`bili_jct`、cookie `DedeUserID == OWNER_MID`，并两次回读视频 `aid` 与目标 `rpid` 的账号归属；目标必须是同一视频下本账号评论。任何一项无法确认即拒绝删除。
+- 不得删除其他人的评论，也不得用删除动作做网络测试；无法完整验证归属时保持原状并报告。
