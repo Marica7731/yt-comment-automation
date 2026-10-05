@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -164,18 +165,56 @@ def post_comment(bvid: str, message: str, cookies: dict[str, str]) -> dict:
 
 
 def delete_comment(bvid: str, rpid: str, cookies: dict[str, str]) -> dict:
-    """删除本账号在视频下的评论（用于低质量歌单升级为高质量歌单时替换）。"""
-    aid = get_aid(bvid, cookies)
-    bili_jct = cookies.get("bili_jct", "")
+    """删除本账号在指定视频下的评论；删除前强制复核归属。"""
+    clean_bvid = str(bvid or "").strip()
+    clean_rpid = str(rpid or "").strip()
+    if not re.fullmatch(r"BV[0-9A-Za-z]{10}", clean_bvid):
+        raise ValueError(f"非法 bvid，拒绝删除: {bvid!r}")
+    if not re.fullmatch(r"[1-9]\d*", clean_rpid):
+        raise ValueError(f"非法 rpid，拒绝删除: {rpid!r}")
+
+    bili_jct = str(cookies.get("bili_jct") or "").strip()
+    cookie_mid = str(cookies.get("DedeUserID") or "").strip()
+    owner_mid = str(config.owner_mid()).strip()
     if not bili_jct:
-        raise RuntimeError("cookie 缺少 bili_jct，无法删除")
+        raise RuntimeError("cookie 缺少 bili_jct，拒绝删除")
+    if not cookie_mid or cookie_mid != owner_mid:
+        raise RuntimeError(
+            f"cookie 账号 mid={cookie_mid or '缺失'} 与 OWNER_MID={owner_mid} 不一致，拒绝删除"
+        )
+
+    aid = get_aid(clean_bvid, cookies)
+    if not isinstance(aid, int) or aid <= 0:
+        raise RuntimeError(f"非法视频 aid，拒绝删除: {aid!r}")
+
+    own_ids = {
+        str(cm.rpid)
+        for cm in list_comments(clean_bvid, cookies, max_pages=5)
+        if str(cm.mid) == owner_mid
+    }
+    if clean_rpid not in own_ids:
+        raise RuntimeError(
+            f"目标 rpid={clean_rpid} 不属于账号 mid={owner_mid} 在 {clean_bvid} 下的评论，拒绝删除"
+        )
+
+    # 网络回读完成后再次核对全部关键入参，避免状态变化或串参。
+    if clean_bvid != str(bvid).strip() or clean_rpid != str(rpid).strip():
+        raise RuntimeError("删除入参在回读后发生变化，拒绝执行")
+    if aid <= 0 or str(config.owner_mid()).strip() != cookie_mid:
+        raise RuntimeError("删除归属状态在回读后发生变化，拒绝执行")
+
     payload = {
         "type": 1,
         "oid": aid,
-        "rpid": rpid,
+        "rpid": clean_rpid,
         "csrf": bili_jct,
     }
-    return _request_json(REPLY_DEL_API, cookies, f"https://www.bilibili.com/video/{bvid}", payload)
+    return _request_json(
+        REPLY_DEL_API,
+        cookies,
+        f"https://www.bilibili.com/video/{clean_bvid}",
+        payload,
+    )
 
 
 # B站评论长度上限（字符）。官方限制约 1000，保守取 900 留缓冲；
