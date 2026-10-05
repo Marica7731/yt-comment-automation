@@ -110,7 +110,7 @@ def list_comments(bvid: str, cookies: dict[str, str], max_pages: int = 3) -> lis
         url = f"{REPLY_LIST_API}?type=1&oid={aid}&sort=2&pn={page}&ps=20"
         data = _request_json(url, cookies, f"https://www.bilibili.com/video/{bvid}")
         if data.get("code") != 0:
-            break
+            raise RuntimeError(f"评论列表接口异常 {bvid}: code={data.get('code')} msg={data.get('message')}")
         replies = ((data.get("data") or {}).get("replies")) or []
         if not replies:
             break

@@ -294,6 +294,40 @@ def test_reverify_applied_without_republish(tmp_path: Path, monkeypatch):
     assert publish_calls == []
 
 
+def test_recover_missing_publishes_only_when_own_comments_absent(tmp_path: Path, monkeypatch):
+    payload = {
+        "bvid": "BV1Recover",
+        "yt_id": "yt-recover",
+        "title": "recover",
+        "draft_messages": ["0:01:00 01. A - B"],
+        "draft_song_count": 1,
+        "source_text": "0:01:00 A / B",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1Recover", payload["draft_messages"], tmp_path)
+    item = review.load_comment("BV1Recover", tmp_path)
+    item.update({"status": "applied_unverified", "rpids": ["old-rpid"]})
+    review._write_json(review.review_dir(tmp_path) / "BV1Recover.json", item)
+
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {"bili_jct": "csrf"})
+    monkeypatch.setattr(review.bili_comment, "find_own_comments", lambda bvid, cookies: [])
+    applied = []
+
+    def fake_apply(bvid, data_dir=None, dry_run=False):
+        current = review.load_comment(bvid, data_dir)
+        assert current["status"] == "approved"
+        applied.append(bvid)
+        return {"bvid": bvid, "status": "applied", "verification": {"ok": True}}
+
+    monkeypatch.setattr(review, "apply_comment", fake_apply)
+
+    result = review.recover_missing_comment("BV1Recover", tmp_path)
+
+    assert result["status"] == "applied"
+    assert applied == ["BV1Recover"]
+
+
 def test_list_comments_ignores_messages_json_array(tmp_path: Path):
     review.review_dir(tmp_path).joinpath("notes.messages.json").write_text("[]", encoding="utf-8")
     payload = {
