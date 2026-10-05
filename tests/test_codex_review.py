@@ -359,6 +359,76 @@ def test_recover_missing_never_republishes_existing_rpid(tmp_path: Path, monkeyp
     assert result["rpids"] == ["existing-rpid"]
 
 
+def test_retry_without_artist_publishes_stripped_message_once(tmp_path: Path, monkeypatch):
+    payload = {
+        "bvid": "BV1ArtistRetry",
+        "yt_id": "yt-artist-retry",
+        "title": "artist retry",
+        "draft_messages": ["0:01:00 01. A - Artist"],
+        "draft_song_count": 1,
+        "source_text": "0:01:00 A / Artist",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1ArtistRetry", payload["draft_messages"], tmp_path)
+    item = review.load_comment("BV1ArtistRetry", tmp_path)
+    item.update({"status": "applied_unverified", "rpids": ["hidden-rpid"]})
+    review._write_json(review.review_dir(tmp_path) / "BV1ArtistRetry.json", item)
+
+    captured = []
+
+    def fake_apply(bvid, data_dir=None, dry_run=False):
+        current = review.load_comment(bvid, data_dir)
+        captured.append(current["approved_messages"])
+        current.update({"status": "applied", "rpids": ["new-rpid"]})
+        review._write_json(review.review_dir(data_dir) / f"{bvid}.json", current)
+        return current
+
+    monkeypatch.setattr(review, "apply_comment", fake_apply)
+
+    result = review.retry_without_artist("BV1ArtistRetry", tmp_path)
+
+    assert result["status"] == "applied"
+    assert captured == [["0:01:00 01. A"]]
+    assert result["previous_rpids"] == ["hidden-rpid"]
+    assert result["without_artist_retried"] is True
+
+
+def test_retry_with_artist_preserves_original_message_once(tmp_path: Path, monkeypatch):
+    payload = {
+        "bvid": "BV1ArtistOriginal",
+        "yt_id": "yt-artist-original",
+        "title": "artist original",
+        "draft_messages": ["0:01:00 01. A - Artist"],
+        "draft_song_count": 1,
+        "source_text": "0:01:00 A / Artist",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1ArtistOriginal", payload["draft_messages"], tmp_path)
+    item = review.load_comment("BV1ArtistOriginal", tmp_path)
+    item.update({"status": "applied_unverified", "rpids": ["hidden-rpid"]})
+    review._write_json(review.review_dir(tmp_path) / "BV1ArtistOriginal.json", item)
+
+    captured = []
+
+    def fake_apply(bvid, data_dir=None, dry_run=False):
+        current = review.load_comment(bvid, data_dir)
+        captured.append(current["approved_messages"])
+        current.update({"status": "applied", "rpids": ["new-rpid"]})
+        review._write_json(review.review_dir(data_dir) / f"{bvid}.json", current)
+        return current
+
+    monkeypatch.setattr(review, "apply_comment", fake_apply)
+
+    result = review.retry_with_artist("BV1ArtistOriginal", tmp_path)
+
+    assert result["status"] == "applied"
+    assert captured == [payload["draft_messages"]]
+    assert result["previous_rpids"] == ["hidden-rpid"]
+    assert result["artist_retried"] is True
+
+
 def test_list_comments_ignores_messages_json_array(tmp_path: Path):
     review.review_dir(tmp_path).joinpath("notes.messages.json").write_text("[]", encoding="utf-8")
     payload = {

@@ -352,6 +352,69 @@ def recover_missing_comment(bvid: str, data_dir: Path | None = None) -> dict[str
     return apply_comment(bvid, data_dir=data_dir)
 
 
+def _strip_artist_suffix(message: str) -> str:
+    lines = []
+    for line in str(message).splitlines():
+        left, sep, _artist = line.rpartition(" - ")
+        lines.append(left if sep else line)
+    return "\n".join(lines)
+
+
+def retry_with_artist(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
+    """对带歌手原文做一次独立重试；已有历史 rpid 会保留审计。"""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") != "applied_unverified":
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许带歌手重试")
+    if not item.get("rpids"):
+        raise RuntimeError(f"{bvid} 没有历史 rpid，不能执行带歌手重试")
+    if item.get("artist_retried"):
+        raise RuntimeError(f"{bvid} 已执行过带歌手重试，不重复尝试")
+    messages = [str(m) for m in item.get("approved_messages") or [] if str(m).strip()]
+    if not messages:
+        raise RuntimeError(f"{bvid} 缺少已审核内容")
+    item.update(
+        {
+            "status": "approved",
+            "approved_messages": messages,
+            "previous_rpids": list(item.get("rpids") or []),
+            "artist_retried": True,
+            "retry_reason": "带 cookie 自有评论回读为空，按未发出处理，带歌手原文重试一次",
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return apply_comment(bvid, data_dir=data_dir)
+
+
+def retry_without_artist(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
+    """对已发布但被隐藏的单条歌单做一次去歌手变体重试。"""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") != "applied_unverified":
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许去歌手重试")
+    if not item.get("rpids"):
+        raise RuntimeError(f"{bvid} 没有历史 rpid，不能执行去歌手重试")
+    if item.get("without_artist_retried"):
+        raise RuntimeError(f"{bvid} 已执行过去歌手重试，不重复尝试")
+    messages = [str(m) for m in item.get("approved_messages") or [] if str(m).strip()]
+    stripped = [_strip_artist_suffix(message) for message in messages]
+    if not stripped or stripped == messages:
+        raise RuntimeError(f"{bvid} 没有可去除的歌手后缀")
+
+    item.update(
+        {
+            "status": "approved",
+            "approved_messages": stripped,
+            "song_count": _count_song_lines(stripped),
+            "previous_rpids": list(item.get("rpids") or []),
+            "without_artist_retried": True,
+            "retry_reason": "关键词过滤疑似命中，去歌手后重试一次",
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return apply_comment(bvid, data_dir=data_dir)
+
+
 def apply_comment(
     bvid: str,
     data_dir: Path | None = None,
