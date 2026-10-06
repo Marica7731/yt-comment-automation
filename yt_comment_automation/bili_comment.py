@@ -11,6 +11,7 @@ from . import config
 
 VIEW_API = "https://api.bilibili.com/x/web-interface/view"
 REPLY_LIST_API = "https://api.bilibili.com/x/v2/reply"
+REPLY_DETAIL_API = "https://api.bilibili.com/x/v2/reply/reply"
 REPLY_ADD_API = "https://api.bilibili.com/x/v2/reply/add"
 REPLY_DEL_API = "https://api.bilibili.com/x/v2/reply/del"
 UA = (
@@ -147,6 +148,44 @@ def find_own_comments(bvid: str, cookies: dict[str, str]) -> list[BiliComment]:
     owner_mid = config.owner_mid()
     return [cm for cm in list_comments(bvid, cookies) if cm.mid == owner_mid]
 
+
+def find_comment_by_rpid(bvid: str, rpid: str, cookies: dict[str, str]) -> dict:
+    """按记录的顶层 rpid 只读查询评论是否存在。"""
+    clean_bvid = str(bvid or "").strip()
+    clean_rpid = str(rpid or "").strip()
+    if not re.fullmatch(r"BV[0-9A-Za-z]{10}", clean_bvid):
+        raise ValueError(f"非法 bvid，拒绝查询: {bvid!r}")
+    if not re.fullmatch(r"[1-9]\d*", clean_rpid):
+        raise ValueError(f"非法 rpid，拒绝查询: {rpid!r}")
+
+    aid = get_aid(clean_bvid, cookies)
+    url = f"{REPLY_DETAIL_API}?type=1&oid={aid}&root={clean_rpid}&ps=49&pn=1"
+    data = _request_json(url, cookies, f"https://www.bilibili.com/video/{clean_bvid}")
+    result = {
+        "rpid": clean_rpid,
+        "exists": False,
+        "code": int(data.get("code", -1)),
+        "message": str(data.get("message") or ""),
+    }
+    if result["code"] != 0:
+        return result
+
+    payload = data.get("data") or {}
+    candidates = [payload.get("root"), *(payload.get("replies") or [])]
+    match = next((row for row in candidates if row and str(row.get("rpid", "")) == clean_rpid), None)
+    if not match:
+        result["message"] = "接口成功但未返回该 rpid"
+        return result
+
+    result.update(
+        {
+            "exists": True,
+            "mid": str((match.get("member") or {}).get("mid", "")),
+            "ctime": int(match.get("ctime", 0)),
+            "message": (match.get("content") or {}).get("message", "") or "",
+        }
+    )
+    return result
 
 def post_comment(bvid: str, message: str, cookies: dict[str, str]) -> dict:
     """发布评论到视频。返回接口响应 dict。"""

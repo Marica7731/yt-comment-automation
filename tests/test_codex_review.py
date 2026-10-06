@@ -500,3 +500,53 @@ def test_list_comments_ignores_messages_json_array(tmp_path: Path):
     review.queue_comment(payload, tmp_path)
 
     assert [item["bvid"] for item in review.list_comments(data_dir=tmp_path)] == ["BV1ListGuard"]
+
+
+def test_reverify_records_missing_rpid_without_republish(tmp_path: Path, monkeypatch):
+    payload = {
+        "bvid": "BV1MissingRpid",
+        "yt_id": "yt-missing-rpid",
+        "title": "missing rpid",
+        "draft_messages": ["0:01:00 01. A - B"],
+        "draft_song_count": 1,
+        "source_text": "0:01:00 A / B",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1MissingRpid", payload["draft_messages"], tmp_path)
+    item = review.load_comment("BV1MissingRpid", tmp_path)
+    item.update(
+        {
+            "status": "applied_unverified",
+            "rpids": ["316276398065"],
+            "verification": {"ok": False, "detail": "回读缺失", "checked_at": "old"},
+        }
+    )
+    review._write_json(review.review_dir(tmp_path) / "BV1MissingRpid.json", item)
+
+    publish_calls = []
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(review, "verify_own_comments", lambda *args, **kwargs: (False, "回读缺失 1/1 条"))
+    monkeypatch.setattr(
+        review.bili_comment,
+        "find_comment_by_rpid",
+        lambda bvid, rpid, cookies: {
+            "rpid": rpid,
+            "exists": False,
+            "code": 12006,
+            "message": "没有该评论",
+        },
+    )
+    monkeypatch.setattr(
+        review.bili_comment,
+        "post_comment_with_replies",
+        lambda *args, **kwargs: publish_calls.append(args),
+    )
+
+    result = review.reverify_applied("BV1MissingRpid", tmp_path)
+
+    assert result["status"] == "applied_unverified"
+    assert result["verification"]["failure_kind"] == "recorded_rpid_missing"
+    assert result["verification"]["rpid_checks"][0]["code"] == 12006
+    assert "code 12006 没有该评论" in result["verification"]["detail"]
+    assert publish_calls == []

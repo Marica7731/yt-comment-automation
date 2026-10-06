@@ -191,3 +191,48 @@ def test_delete_comment_rechecks_aid_before_request(monkeypatch):
     with pytest.raises(RuntimeError, match="二次归属复核失败"):
         bili_comment.delete_comment("BV1ybHt6kELs", "123456", cookies)
     assert delete_calls == []
+
+
+def test_find_comment_by_rpid_reports_missing(monkeypatch):
+    urls = []
+    monkeypatch.setattr(bili_comment, "get_aid", lambda bvid, cookies: 77)
+
+    def request_json(url, cookies, referer, data=None):
+        urls.append(url)
+        return {"code": 12006, "message": "没有该评论"}
+
+    monkeypatch.setattr(bili_comment, "_request_json", request_json)
+    result = bili_comment.find_comment_by_rpid("BV1ybHt6kELs", "123456", {})
+
+    assert result == {
+        "rpid": "123456",
+        "exists": False,
+        "code": 12006,
+        "message": "没有该评论",
+    }
+    assert urls == [f"{bili_comment.REPLY_DETAIL_API}?type=1&oid=77&root=123456&ps=49&pn=1"]
+
+
+def test_find_comment_by_rpid_parses_existing_root(monkeypatch):
+    monkeypatch.setattr(bili_comment, "get_aid", lambda bvid, cookies: 77)
+    monkeypatch.setattr(
+        bili_comment,
+        "_request_json",
+        lambda *args, **kwargs: {
+            "code": 0,
+            "message": "0",
+            "data": {
+                "root": {
+                    "rpid": 123456,
+                    "ctime": 1790000000,
+                    "member": {"mid": "3546597260528367"},
+                    "content": {"message": "0:01:00 01. A - B"},
+                },
+            },
+        },
+    )
+    result = bili_comment.find_comment_by_rpid("BV1ybHt6kELs", "123456", {})
+
+    assert result["exists"] is True
+    assert result["mid"] == "3546597260528367"
+    assert result["message"] == "0:01:00 01. A - B"
