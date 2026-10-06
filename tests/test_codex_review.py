@@ -602,3 +602,71 @@ def test_reapprove_rejected_repairs_invisible_comment_once(tmp_path: Path, monke
     assert result["rejected_rpids"] == ["rejected-rpid"]
     assert result["previous_rpids"] == ["rejected-rpid"]
     assert result["rejected_reapproved"] is True
+
+
+def test_cleanup_rejected_duplicate_deletes_only_old_comment(tmp_path: Path, monkeypatch):
+    original = "3:26:22 01. シカせんべいのうた - 鹿乃子のこ(潘めぐみ), 虎視虎子(藤田咲)"
+    corrected = "3:26:22 01. シカせんべいのうた - 潘めぐみ, 藤田咲"
+    payload = {
+        "bvid": "BV1DeleteOldCredit",
+        "title": "delete old credit",
+        "draft_messages": [original],
+        "draft_song_count": 1,
+        "source_text": "3:26:22 シカせんべいのうた / 鹿乃子のこ(潘めぐみ), 虎視虎子(藤田咲)",
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1DeleteOldCredit", [corrected], tmp_path)
+    item = review.load_comment("BV1DeleteOldCredit", tmp_path)
+    item.update(
+        {
+            "status": "applied_unverified",
+            "rpids": ["new-rpid"],
+            "rejected_rpids": ["old-rpid"],
+            "rejected_reapproved": True,
+            "verification": {"ok": False, "failure_kind": "recorded_rpid_not_in_readback"},
+        }
+    )
+    review._write_json(review.review_dir(tmp_path) / "BV1DeleteOldCredit.json", item)
+
+    class Comment:
+        def __init__(self, rpid):
+            self.rpid = rpid
+            self.mid = "owner"
+
+    deleted = []
+    monkeypatch.setattr(review.config, "owner_mid", lambda: "owner")
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {"bili_jct": "csrf", "DedeUserID": "owner"})
+    monkeypatch.setattr(review.bili_comment, "get_aid", lambda bvid, cookies: 42)
+    monkeypatch.setattr(
+        review.bili_comment,
+        "list_comments",
+        lambda bvid, cookies, max_pages=5: [Comment("old-rpid"), Comment("new-rpid")],
+    )
+    monkeypatch.setattr(
+        review.bili_comment,
+        "find_comment_by_rpid",
+        lambda bvid, rpid, cookies: {
+            "exists": True,
+            "mid": "owner",
+            "message": original if rpid == "old-rpid" else corrected,
+        },
+    )
+    monkeypatch.setattr(
+        review.bili_comment,
+        "delete_comment",
+        lambda bvid, rpid, cookies: (deleted.append(rpid) or {"code": 0}),
+    )
+
+    def fake_reverify(bvid, data_dir=None):
+        current = review.load_comment(bvid, data_dir)
+        current.update({"status": "applied", "verification": {"ok": True}})
+        return current
+
+    monkeypatch.setattr(review, "reverify_applied", fake_reverify)
+
+    result = review.cleanup_duplicates_and_retry_without_artist("BV1DeleteOldCredit", tmp_path)
+
+    assert deleted == ["old-rpid"]
+    assert result["status"] == "applied"
+    assert result["rpids"] == ["new-rpid"]
+    assert result["approved_messages"] == [corrected]
