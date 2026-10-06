@@ -1,6 +1,6 @@
 # yt-comment-automation 定时任务背景
 
-最后更新：2026-10-06
+最后更新：2026-10-07
 
 ## 项目身份
 
@@ -43,8 +43,8 @@
 5. 读取评论和点赞队列。评论状态为 `pending/approved/applying/applied/applied_unverified`；点赞状态为 `pending/approved/applied/rejected/failed`。
 6. 对范围内 pending 歌单读取 `source_text`、`draft_messages`、标题和来源，依据 `RULES.md` 审核；不完整或不可信的候选保持 pending。
 7. 对 approved 歌单执行 `review_cli apply --bvid <bvid>`，亲自读取返回 JSON、`status`、`verification`、`rpids`，并在 WDC 回读自有评论数。
-8. 对 `applied_unverified` 先执行 `review_cli verify --bvid <bvid>`；只有没有历史 rpid 且接口明确返回不存在时才允许一次 `recover-missing`，已有 rpid 不得重复发布。
-9. 只有满足“删除评论强门禁”全部条件时，才允许运行项目清理命令；读取每条删除返回结果，任何归属不明都保留原评论并报告。
+8. 对 `applied_unverified` 执行 `review_cli verify --bvid <bvid>` 后，必须把原始 `source_text`、生成草稿、最终发布文案和真实回读结果逐项对比。B 站不存在可等待的审核中状态；已有 rpid 但顶层回读不到，按驳回/未发布处理。发现可识别敏感词、谐音关键词或角色名时，先修正文案，再用 `review_cli reapprove-rejected --bvid <bvid> --messages-file <file>` 一次性重发；不得原样重复发布。
+9. 纠正重发后若回读显示旧、新两条并存，只有在“删除评论强门禁”全部满足时才允许运行 `review_cli cleanup-retry-without-artist`；删除带敏感词的旧 rpid、保留修正版，并读取每条删除返回结果。任何归属不明都保留原评论并报告。
 10. 对点赞 pending 逐条检查 `content/source/oid/rpid`，排除自己、广告、垃圾和不安全内容；批准后执行 `python3 like_fans.py --apply /opt/yt-comment-automation/data/like_review.json`。
 11. 结束前再次核对队列、最近日志和 crontab；评论/点赞 cron 必须移除，只保留每日复盘 cron。
 
@@ -53,14 +53,14 @@
 - `skipped_throttled`：距上次真实抓取不足间隔，必须核对间隔账本。
 - `error_cache_miss`：Action 缓存缺失，属于生产阻塞，必须刷新 Action 后重跑。
 - `skipped_no_songs`：只有在缓存存在且原始来源确认无歌单时才可接受。
-- `applied_unverified`：已尝试发布但验收未通过，必须在同一轮读取结果并处理，不得静默结束。
-- `applied` 且 `verification.ok=true`：只有读到这个组合才算评论发布完成。
+- `applied_unverified`：已尝试发布但验收未通过；已有 rpid 而顶层回读不到时按驳回处理，不等待审核。必须在同一轮对比输入、输出和真实回读，识别异常内容后修正重发并处理可见重复，不得静默结束。
+- `applied` 且 `verification.ok=true`：只有读到这个组合才算评论发布完成；禁止仅凭退出码、CLI 返回或“代码执行成功”判断。
 - `like_review` 的 pending/approved 不代表已经点赞；只有 `applied` 才是 action 已执行。
 
 ## 通知边界
 
 - 实际发布评论、执行点赞、人工失败、发现旧 AI key/直发分支或完成代码修复时，必须通过 WDC 的 `notify.send_feishu_message` 发送具体报告。
-- 同一 BVID/rpid 在没有新发布动作或状态变化时，验收失败只通知一次；后续轮次只执行只读 `verify` 并保持安静，禁止重复推送同一失败。已由用户确认发布成功但回读延迟的，不得再次发失败消息；回读转成功后只更新状态，不再补发重复失败。
+- 同一 BVID/rpid 在没有新发布动作或状态变化时，验收失败只通知一次；后续轮次只执行只读 `verify` 并保持安静，禁止重复推送同一失败。纠正重发、删除或状态转成功属于新动作，必须重新通知。
 - 评论成功/失败通知使用项目定义的紧凑格式；点赞、429、崩溃和代码修复可保留技术审计字段。
 - 没有待办、没有异常且没有实际 action 时保持安静，不用泛化状态通知掩盖异常。
 
@@ -70,3 +70,9 @@
 - `docs/HANDOVER.md`：架构、部署、数据、机制、验证纪律和事故经验。
 - `RULES.md`：清洗规则权威文档。
 - 本文件：独立定时任务的持久背景；每次新对话先读本文件和 `docs/HANDOVER.md`。
+
+## 异常整改纪律
+
+- 心跳遇到队列、回读、内容或代码异常时必须主动补救；能通过代码修复防止复发的，完成最小修复、回归测试和提交，不能用只读验收替代处理。
+- 每个异常必须同时核对原始输入、清洗/草稿输出、最终发布内容和 B 站真实回读；退出码和命令是否执行成功只能作为辅助信号。
+- 可明确识别的敏感词、谐音关键词、角色名或其他规则问题，应直接修正文案并按受门禁的一次性流程重发；不得因原代码没有对应规则而放弃整改。
