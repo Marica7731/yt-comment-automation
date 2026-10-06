@@ -524,6 +524,13 @@ def retry_without_artist(bvid: str, data_dir: Path | None = None) -> dict[str, A
 def cleanup_duplicates_and_retry_without_artist(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
     """删除已知重复评论后，只保留一条去歌手版本。"""
     item = load_comment(bvid, data_dir)
+    if (
+        item.get("status") == "applied_unverified"
+        and item.get("rejected_reapproved")
+        and item.get("rejected_rpids")
+        and item.get("rpids")
+    ):
+        return _cleanup_rejected_duplicate(bvid, data_dir=data_dir)
     if item.get("status") != "applied_unverified":
         raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许清理后重试")
     rpids = list(dict.fromkeys([str(x) for x in (item.get("rpids") or []) + (item.get("previous_rpids") or []) if x]))
@@ -734,3 +741,53 @@ def _normalize_comment_for_compare(text: str) -> str:
             }
         )
     ).strip()
+
+
+def _cleanup_rejected_duplicate(
+    bvid: str,
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
+    item = load_comment(bvid, data_dir)
+    if item.get("status") != "applied_unverified" or not item.get("rejected_reapproved"):
+        raise RuntimeError(f"{bvid} 不是已完成一次驳回重发的状态，拒绝清理")
+    old_rpids = [str(x) for x in item.get("rejected_rpids") or [] if str(x).strip()]
+    new_rpids = [str(x) for x in item.get("rpids") or [] if str(x).strip()]
+    if len(old_rpids) != 1 or len(new_rpids) != 1 or old_rpids[0] == new_rpids[0]:
+        raise RuntimeError(f"{bvid} 缺少唯一旧/新 rpid 对，拒绝清理")
+    cookies = bili_comment.load_cookie_map()
+    owner_mid = str(config.owner_mid()).strip()
+    if not str(cookies.get("bili_jct") or "").strip():
+        raise RuntimeError("cookie 缺少 bili_jct，拒绝删除")
+    if str(cookies.get("DedeUserID") or "").strip() != owner_mid:
+        raise RuntimeError("cookie DedeUserID 与 OWNER_MID 不一致，拒绝删除")
+    aid = bili_comment.get_aid(bvid, cookies)
+    if not isinstance(aid, int) or aid <= 0:
+        raise RuntimeError(f"非法视频 aid，拒绝删除: {aid!r}")
+    own = bili_comment.list_comments(bvid, cookies, max_pages=5)
+    own_ids = {str(cm.rpid) for cm in own if str(cm.mid) == owner_mid}
+    if old_rpids[0] not in own_ids or new_rpids[0] not in own_ids:
+        raise RuntimeError("旧/新 rpid 不同时属于本账号，拒绝删除")
+    old_check = bili_comment.find_comment_by_rpid(bvid, old_rpids[0], cookies)
+    new_check = bili_comment.find_comment_by_rpid(bvid, new_rpids[0], cookies)
+    old_message = html.unescape(str(old_check.get("message") or ""))
+    new_message = html.unescape(str(new_check.get("message") or ""))
+    if not old_check.get("exists") or str(old_check.get("mid")) != owner_mid:
+        raise RuntimeError("旧 rpid 归属回读失败，拒绝删除")
+    if not new_check.get("exists") or str(new_check.get("mid")) != owner_mid:
+        raise RuntimeError("新 rpid 归属回读失败，拒绝删除")
+    if "鹿乃子のこ" not in old_message or "潘めぐみ, 藤田咲" not in new_message:
+        raise RuntimeError("无法确认旧评论含角色名且新评论为修正版，拒绝删除")
+    response = bili_comment.delete_comment(bvid, old_rpids[0], cookies)
+    if response.get("code") != 0:
+        raise RuntimeError(f"旧重复评论删除失败: {response}")
+    item = reverify_applied(bvid, data_dir=data_dir)
+    item.update(
+        {
+            "deleted_rpids": [old_rpids[0]],
+            "cleanup_failures": [],
+            "cleanup_note": "已删除带角色名旧评论，保留修正版",
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return item
