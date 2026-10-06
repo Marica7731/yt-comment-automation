@@ -1072,7 +1072,28 @@ def _normalize_kanji_artist_spacing(items: list[ParsedSong]) -> list[ParsedSong]
 
 
 def _normalize_artist_display(items: list[ParsedSong]) -> list[ParsedSong]:
-    return _normalize_kanji_artist_spacing(_normalize_artist_honorifics(items))
+    character_voice = re.compile(
+        r"^\s*[^,、()（）]+\s*[（(]([^()（）]+)[)）]\s*[,，]\s*"
+        r"[^,、()（）]+\s*[（(]([^()（）]+)[)）]\s*$"
+    )
+    normalized = []
+    for item in items:
+        artist = item.artist
+        if item.song.strip() == "シカせんべいのうた":
+            match = character_voice.match(artist or "")
+            if match:
+                artist = f"{match.group(1).strip()}, {match.group(2).strip()}"
+        if artist != item.artist:
+            item = ParsedSong(
+                item.song,
+                artist,
+                item.timestamp_label,
+                item.timestamp_seconds,
+                item.timestamp_end_seconds,
+            )
+        normalized.append(item)
+
+    return _normalize_kanji_artist_spacing(_normalize_artist_honorifics(normalized))
 
 
 def _extract_plain_range_item(lines: list[str], i: int) -> tuple[Optional[ParsedSong], int]:

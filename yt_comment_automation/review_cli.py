@@ -67,6 +67,15 @@ def main(argv: list[str] | None = None) -> int:
     p_recover = sub.add_parser("recover-missing", help="确认评论不存在后补发一次")
     p_recover.add_argument("--bvid", required=True)
 
+    p_reapprove = sub.add_parser(
+        "reapprove-rejected",
+        help="顶层不可见按驳回处理，保存修正文案后重发一次",
+    )
+    p_reapprove.add_argument("--bvid", required=True)
+    p_reapprove.add_argument("--messages-file", required=True)
+    p_reapprove.add_argument("--reviewer", default="codex")
+    p_reapprove.add_argument("--note", default="")
+
     p_retry = sub.add_parser("retry-without-artist", help="被隐藏时去歌手重试一次")
     p_retry.add_argument("--bvid", required=True)
 
@@ -132,6 +141,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "cleanup-retry-without-artist":
         item = review.cleanup_duplicates_and_retry_without_artist(args.bvid)
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification"), "deleted_rpids": item.get("deleted_rpids")}, ensure_ascii=False))
+        return 0 if item.get("status") == "applied" else 1
+    if args.command == "reapprove-rejected":
+        item = review.reapprove_rejected(
+            args.bvid,
+            _messages_from_file(args.messages_file),
+            reviewer=args.reviewer,
+            note=args.note,
+        )
+        print(
+            json.dumps(
+                {
+                    "bvid": item["bvid"],
+                    "status": item.get("status"),
+                    "verification": item.get("verification"),
+                    "previous_rpids": item.get("previous_rpids"),
+                    "rpids": item.get("rpids"),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0 if item.get("status") == "applied" else 1
     return 2
 

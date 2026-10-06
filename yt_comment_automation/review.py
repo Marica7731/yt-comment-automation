@@ -411,6 +411,61 @@ def _strip_artist_suffix(message: str) -> str:
     return "\n".join(lines)
 
 
+def reapprove_rejected(
+    bvid: str,
+    messages: list[str],
+    data_dir: Path | None = None,
+    reviewer: str = "codex",
+    note: str = "",
+) -> dict[str, Any]:
+    """One-shot repost after a top-level-invisible comment is treated as rejected."""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") != "applied_unverified":
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许按驳回重发")
+    verification = item.get("verification") or {}
+    if verification.get("failure_kind") != "recorded_rpid_not_in_readback":
+        raise RuntimeError(f"{bvid} 不是已有 rpid 但顶层不可见的驳回状态")
+    if item.get("rejected_reapproved"):
+        raise RuntimeError(f"{bvid} 已执行过驳回修正重发，不重复执行")
+    old_messages = [str(m) for m in item.get("approved_messages") or [] if str(m).strip()]
+    corrected = [str(m).strip() for m in messages if str(m).strip()]
+    if not corrected or corrected == old_messages:
+        raise RuntimeError(f"{bvid} 缺少与原发布内容不同的修正文案")
+
+    rejected = list(
+        dict.fromkeys(
+            [str(x) for x in item.get("rejected_rpids") or [] if x]
+            + [str(x) for x in item.get("rpids") or [] if x]
+        )
+    )
+    previous = list(
+        dict.fromkeys(
+            [str(x) for x in item.get("previous_rpids") or [] if x]
+            + rejected
+        )
+    )
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    item.pop("verification", None)
+    item.update(
+        {
+            "status": "approved",
+            "approved_messages": corrected,
+            "song_count": _count_song_lines(corrected),
+            "reviewer": reviewer,
+            "note": note or "顶层不可见按驳回处理，移除敏感关键词后重发",
+            "reviewed_at": now,
+            "updated_at": now,
+            "rpids": [],
+            "previous_rpids": previous,
+            "rejected_rpids": rejected,
+            "rejected_reapproved": True,
+            "rejection_reason": "top_level_invisible_treated_as_rejected",
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return apply_comment(bvid, data_dir=data_dir)
+
+
 def retry_with_artist(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
     """对带歌手原文做一次独立重试；已有历史 rpid 会保留审计。"""
     item = load_comment(bvid, data_dir)
