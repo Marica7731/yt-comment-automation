@@ -279,6 +279,60 @@ def verify_own_comments(bvid: str, messages: list[str], cookies: dict[str, str])
         return False, f"评论区回读失败: {err}"
 
 
+def _check_recorded_rpids(
+    bvid: str, rpids: list[str], cookies: dict[str, str]
+) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    for raw_rpid in rpids:
+        rpid = str(raw_rpid or "").strip()
+        if not rpid:
+            continue
+        try:
+            checks.append(bili_comment.find_comment_by_rpid(bvid, rpid, cookies))
+        except Exception as err:  # noqa: BLE001
+            checks.append({"rpid": rpid, "exists": None, "error": str(err)})
+    return checks
+
+
+def _build_verification(
+    bvid: str,
+    verified: bool,
+    detail: str,
+    rpids: list[str],
+    cookies: dict[str, str],
+) -> dict[str, Any]:
+    checks = [] if verified else _check_recorded_rpids(bvid, rpids, cookies)
+    if checks:
+        parts = []
+        for check in checks:
+            rpid = check.get("rpid", "")
+            if check.get("exists"):
+                parts.append(f"{rpid}=存在")
+            elif check.get("code") is not None:
+                parts.append(f"{rpid}=code {check.get('code')} {check.get('message', '')}")
+            else:
+                parts.append(f"{rpid}={check.get('error', '查询失败')}")
+        detail = f"{detail}；记录 rpid 查询: " + ", ".join(parts)
+
+    payload: dict[str, Any] = {
+        "ok": verified,
+        "detail": detail,
+        "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+    if not verified:
+        if checks and all(check.get("exists") is False and check.get("code") == 12006 for check in checks):
+            failure_kind = "recorded_rpid_missing"
+        elif any(check.get("exists") for check in checks):
+            failure_kind = "recorded_rpid_not_in_readback"
+        elif checks:
+            failure_kind = "rpid_lookup_error"
+        else:
+            failure_kind = "readback_missing"
+        payload["failure_kind"] = failure_kind
+        payload["rpid_checks"] = checks
+    return payload
+
+
 def reverify_applied(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
     """只回读已发布评论，不再次发布；用于修复 applied_unverified。"""
     item = load_comment(bvid, data_dir)
@@ -290,14 +344,11 @@ def reverify_applied(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
     cookies = bili_comment.load_cookie_map()
     verified, detail = verify_own_comments(bvid, messages, cookies)
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    verification = _build_verification(bvid, verified, detail, item.get("rpids") or [], cookies)
     item.update(
         {
             "status": "applied" if verified else "applied_unverified",
-            "verification": {
-                "ok": verified,
-                "detail": detail,
-                "checked_at": now,
-            },
+            "verification": verification,
             "updated_at": now,
         }
     )
@@ -533,17 +584,14 @@ def apply_comment(
         raise RuntimeError(error)
 
     verified, verify_detail = verify_own_comments(bvid, messages, cookies)
+    verification = _build_verification(bvid, verified, verify_detail, rpids, cookies)
     item.update(
         {
             "status": "applied" if verified else "applied_unverified",
             "rpids": rpids,
             "segments": segments,
             "failures": failures,
-            "verification": {
-                "ok": verified,
-                "detail": verify_detail,
-                "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-            },
+            "verification": verification,
             "applied_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         }
@@ -551,6 +599,7 @@ def apply_comment(
     item.pop("error", None)
     _write_json(data_path, item)
     _mark_processed(Path(data_dir or config.data_dir()), bvid)
+    stored_verify_detail = str((item.get("verification") or {}).get("detail") or verify_detail)
 
     try:
         commit = notify.git_summary()
@@ -588,7 +637,7 @@ def apply_comment(
         else:
             brief = notify.build_failure_brief(
                 bvid=bvid,
-                reason=f"评论已发布但回读验收失败：{verify_detail}",
+                reason=f"评论已发布但回读验收失败：{stored_verify_detail}",
                 title=item.get("title", ""),
                 collection=item.get("collection", ""),
                 files=[
@@ -598,7 +647,7 @@ def apply_comment(
                 ],
                 tests=[
                     f"review_cli apply --bvid {bvid} → status={item.get('status', '')}",
-                    f"verification → {verify_detail}",
+                    f"verification → {stored_verify_detail}",
                 ],
                 yt_link=f"https://youtu.be/{item.get('yt_id', '')}" if item.get("yt_id") else "",
                 source_text=item.get("source_text", ""),
