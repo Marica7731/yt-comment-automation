@@ -550,3 +550,55 @@ def test_reverify_records_missing_rpid_without_republish(tmp_path: Path, monkeyp
     assert result["verification"]["rpid_checks"][0]["code"] == 12006
     assert "code 12006 没有该评论" in result["verification"]["detail"]
     assert publish_calls == []
+
+
+def test_reapprove_rejected_repairs_invisible_comment_once(tmp_path: Path, monkeypatch):
+    original = "3:26:22 01. シカせんべいのうた - 鹿乃子のこ(潘めぐみ), 虎視虎子(藤田咲)"
+    corrected = "3:26:22 01. シカせんべいのうた - 潘めぐみ, 藤田咲"
+    payload = {
+        "bvid": "BV1RejectedRepost",
+        "yt_id": "yt-rejected-repost",
+        "title": "rejected repost",
+        "draft_messages": [original],
+        "draft_song_count": 1,
+        "source_text": "3:26:22 シカせんべいのうた / 鹿乃子のこ(潘めぐみ), 虎視虎子(藤田咲)",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1RejectedRepost", [original], tmp_path)
+    item = review.load_comment("BV1RejectedRepost", tmp_path)
+    item.update(
+        {
+            "status": "applied_unverified",
+            "rpids": ["rejected-rpid"],
+            "verification": {
+                "ok": False,
+                "failure_kind": "recorded_rpid_not_in_readback",
+                "detail": "顶层不可见",
+            },
+        }
+    )
+    review._write_json(review.review_dir(tmp_path) / "BV1RejectedRepost.json", item)
+
+    captured = []
+
+    def fake_apply(bvid, data_dir=None, dry_run=False):
+        current = review.load_comment(bvid, data_dir)
+        assert current["status"] == "approved"
+        captured.append(current["approved_messages"])
+        current.update({"status": "applied", "rpids": ["visible-rpid"]})
+        review._write_json(review.review_dir(data_dir) / f"{bvid}.json", current)
+        return current
+
+    monkeypatch.setattr(review, "apply_comment", fake_apply)
+    result = review.reapprove_rejected(
+        "BV1RejectedRepost",
+        [corrected],
+        tmp_path,
+    )
+
+    assert result["status"] == "applied"
+    assert captured == [[corrected]]
+    assert result["rejected_rpids"] == ["rejected-rpid"]
+    assert result["previous_rpids"] == ["rejected-rpid"]
+    assert result["rejected_reapproved"] is True

@@ -179,6 +179,29 @@ def test_kanji_spacing_compression():
     assert normalized[0].artist == "奥華子"
 
 
+def test_character_names_removed_for_requested_song():
+    items = [
+        clean.ParsedSong(
+            "シカせんべいのうた",
+            "鹿乃子のこ(潘めぐみ), 虎視虎子(藤田咲)",
+            "3:26:22",
+            12382,
+        )
+    ]
+    normalized = clean._normalize_artist_display(items)
+    assert normalized[0].artist == "潘めぐみ, 藤田咲"
+    assert (
+        clean.format_song_items(normalized, include_timestamps=True)
+        == "3:26:22 01. シカせんべいのうた - 潘めぐみ, 藤田咲"
+    )
+
+
+def test_other_character_voice_credit_is_unchanged():
+    items = [clean.ParsedSong("God knows...", "涼宮ハルヒ(平野綾)")]
+    normalized = clean._normalize_artist_display(items)
+    assert normalized[0].artist == "涼宮ハルヒ(平野綾)"
+
+
 def test_format_song_items_two_digit():
     items = [
         clean.ParsedSong("a", "A", "0:00:10", 10),
