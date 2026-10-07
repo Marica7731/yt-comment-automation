@@ -548,6 +548,11 @@ def test_cleanup_delete_only_removes_comment_without_republish(tmp_path: Path, m
     assert deleted == ["123456"]
     assert result["status"] == "deleted"
     assert result["deleted_rpids"] == ["123456"]
+    assert result["verification"] == {
+        "ok": True,
+        "detail": "删除后回读确认目标不存在",
+        "checked_at": result["verification"]["checked_at"],
+    }
     assert result["rpids"] == []
     assert result["delete_results"] == [{"rpid": "123456", "response": {"code": 0, "message": ""}}]
 
