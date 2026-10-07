@@ -466,6 +466,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if existing_count >= UPGRADE_THRESHOLD:
             # 歌单已补足，不再需要 Action 供给新鲜缓存，摘除台账避免无限增长。
             forget_upgrade_target(cache_dir.parent, video.yt_id)
+            youtube_cache_sync.mark_processed(cache_dir.parent, video.yt_id)
             result.status = "already_posted"
             result.detail = f"rpid={existing.rpid} 已发 {existing_count} 首（足量）"
             return result
