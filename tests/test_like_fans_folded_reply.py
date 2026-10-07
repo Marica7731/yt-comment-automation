@@ -60,3 +60,13 @@ def test_external_like_is_written_to_dedup_state_once():
 
     assert namespace["liked_set"] == {"316395831537"}
     assert saved == [("316395831537",)]
+
+
+def test_snapshot_loader_accepts_current_top_level_list_schema():
+    namespace = _load_functions({"snapshot_bvids"}, {})
+
+    current_schema = [{"bvid": "BV1ruH16JEFP"}]
+    legacy_schema = {"videos": [{"bvid": "BV1BgH16UEmE"}]}
+
+    assert namespace["snapshot_bvids"](current_schema) == {"BV1ruH16JEFP"}
+    assert namespace["snapshot_bvids"](legacy_schema) == {"BV1BgH16UEmE"}
