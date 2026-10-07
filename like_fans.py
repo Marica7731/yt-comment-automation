@@ -102,6 +102,26 @@ def _bvid_from_uri(uri: str) -> str | None:
 def is_own_video(bvid: str | None) -> bool:
     return bool(bvid) and bvid in OWN_BVIDS
 
+
+def collect_video_oids(items):
+    """Collect own-video oids from every msgfeed page, not just the final page."""
+    video_oids = {}
+    for it in items:
+        ii = it.get("item") or {}
+        bvid = _bvid_from_uri(ii.get("uri", ""))
+        if bvid and is_own_video(bvid) and ii.get("subject_id") is not None:
+            video_oids[bvid] = ii["subject_id"]
+    return video_oids
+
+
+def remember_liked(rpid):
+    """Persist an externally liked reply so later runs cannot toggle it off."""
+    key = str(rpid)
+    if key not in liked_set:
+        liked_set.add(key)
+        save_liked_set()
+
+
 BASE_MSGFEED = (
     "https://api.bilibili.com/x/msgfeed/reply?platform=web&build=0&mobi_app=web&web_location=0.0"
 )
@@ -317,8 +337,10 @@ def process_items(items):
 cursor_id = cursor_time = None
 page = 0
 total_items = 0
+all_items = []
 while True:
     items, cursor = fetch_msgfeed_page(cursor_id, cursor_time)
+    all_items.extend(items)
     page += 1
     total_items += len(items)
     print(f"第{page}页消息: {len(items)} 条", flush=True)
@@ -342,12 +364,7 @@ while True:
 
 # 2. 评论区补扫：折叠评论（纯表情等）可能不进 msgfeed，msgfeed 聚合也只显示
 #    同会话最新一条——对涉及视频的评论区直接扫一遍，未赞的粉丝评论补赞。
-video_oids = {}
-for it in items:
-    ii = it.get("item") or {}
-    bvid = _bvid_from_uri(ii.get("uri", ""))
-    if bvid and is_own_video(bvid) and ii.get("subject_id") is not None:
-        video_oids[bvid] = ii["subject_id"]
+video_oids = collect_video_oids(all_items)
 for bvid, oid in video_oids.items():
     for pn in (1, 2, 3):
         try:
@@ -369,7 +386,10 @@ for bvid, oid in video_oids.items():
             content2 = (rp.get("content") or {}).get("message", "")
             if mid2 == OWNER_MID:
                 continue
-            if str(rpid2) in liked_set or rp.get("action") == 1:
+            if str(rpid2) in liked_set:
+                continue
+            if rp.get("action") == 1:
+                remember_liked(rpid2)
                 continue
             created = add_review_candidate(oid, rpid2, content2, f"sweep:{bvid}", bvid)
             if not created:
