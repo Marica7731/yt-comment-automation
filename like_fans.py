@@ -80,6 +80,21 @@ item_uri = {}  # oid → 视频页 uri（楼中楼兜底时反查 bvid 用）
 # 补扫扫的是整个评论区，外人视频（我们只是观众）绝不能扫（10-01 误赞
 # 死了啦😭/转生踢我 事故）。msgfeed 点赞不限视频：回复我们的都赞。
 OWN_BVIDS: set[str] = set()
+
+
+def snapshot_bvids(snapshot):
+    """Read both the current top-level list and legacy {videos: [...]} schemas."""
+    videos = (
+        snapshot if isinstance(snapshot, list)
+        else (snapshot.get("videos") if isinstance(snapshot, dict) else [])
+    ) or []
+    return {
+        str(video["bvid"])
+        for video in videos
+        if isinstance(video, dict) and video.get("bvid")
+    }
+
+
 try:
     _p = json.loads((DATA_DIR / "processed.json").read_text(encoding="utf-8"))
     OWN_BVIDS.update(_p.get("posted") or [])
@@ -87,9 +102,7 @@ except (OSError, ValueError):
     pass
 try:
     _snap = json.loads((DATA_DIR / "collections_snapshot.json").read_text(encoding="utf-8"))
-    for _v in (_snap.get("videos") if isinstance(_snap, dict) else []) or []:
-        if isinstance(_v, dict) and _v.get("bvid"):
-            OWN_BVIDS.add(_v["bvid"])
+    OWN_BVIDS.update(snapshot_bvids(_snap))
 except (OSError, ValueError):
     pass
 
