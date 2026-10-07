@@ -486,6 +486,72 @@ def test_cleanup_duplicates_then_retry_without_artist(tmp_path: Path, monkeypatc
     assert result["deleted_rpids"] == ["r-new", "r-old1", "r-old2"]
 
 
+def test_cleanup_delete_only_removes_comment_without_republish(tmp_path: Path, monkeypatch):
+    message = "0:01:00 01. Not A Song"
+    payload = {
+        "bvid": "BV1DeleteOnly",
+        "yt_id": "yt-delete-only",
+        "title": "delete only",
+        "draft_messages": [message],
+        "draft_song_count": 1,
+        "source_text": "0:01:00 Not A Song",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1DeleteOnly", [message], tmp_path)
+    item = review.load_comment("BV1DeleteOnly", tmp_path)
+    item.update({"status": "applied", "rpids": ["123456"], "verification": {"ok": True}})
+    review._write_json(review.review_dir(tmp_path) / "BV1DeleteOnly.json", item)
+
+    deleted = []
+    monkeypatch.setattr(review.config, "owner_mid", lambda: "owner")
+    monkeypatch.setattr(
+        review.bili_comment,
+        "load_cookie_map",
+        lambda: {"bili_jct": "csrf", "DedeUserID": "owner"},
+    )
+    monkeypatch.setattr(review.bili_comment, "get_aid", lambda bvid, cookies: 42)
+
+    class Comment:
+        rpid = "123456"
+        mid = "owner"
+
+    monkeypatch.setattr(
+        review.bili_comment,
+        "list_comments",
+        lambda bvid, cookies, max_pages=5: [Comment()],
+    )
+    monkeypatch.setattr(
+        review.bili_comment,
+        "find_comment_by_rpid",
+        lambda bvid, rpid, cookies: (
+            {"exists": False, "code": 12006}
+            if deleted
+            else {"exists": True, "mid": "owner", "message": message}
+        ),
+    )
+    monkeypatch.setattr(
+        review.bili_comment,
+        "delete_comment",
+        lambda bvid, rpid, cookies: (deleted.append(rpid) or {"code": 0, "message": ""}),
+    )
+    monkeypatch.setattr(
+        review,
+        "apply_comment",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("delete-only must not republish")),
+    )
+
+    result = review.cleanup_duplicates_and_retry_without_artist(
+        "BV1DeleteOnly", tmp_path, delete_only=True
+    )
+
+    assert deleted == ["123456"]
+    assert result["status"] == "deleted"
+    assert result["deleted_rpids"] == ["123456"]
+    assert result["rpids"] == []
+    assert result["delete_results"] == [{"rpid": "123456", "response": {"code": 0, "message": ""}}]
+
+
 def test_list_comments_ignores_messages_json_array(tmp_path: Path):
     review.review_dir(tmp_path).joinpath("notes.messages.json").write_text("[]", encoding="utf-8")
     payload = {
