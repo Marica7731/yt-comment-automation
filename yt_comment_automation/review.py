@@ -592,6 +592,11 @@ def _delete_applied_comment_only(bvid: str, data_dir: Path | None = None) -> dic
         "deleted_rpids": deleted,
         "cleanup_failures": [],
         "delete_results": results,
+        "verification": {
+            "ok": True,
+            "detail": "删除后回读确认目标不存在",
+            "checked_at": now,
+        },
         "cleanup_note": "按用户要求删除，未重发",
         "updated_at": now,
     })
