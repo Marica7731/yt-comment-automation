@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -14,6 +15,7 @@ from . import config
 
 OPEN_STATUSES = {"pending", "approved"}
 DONE_STATUSES = {"applied", "rejected"}
+LIKE_FRESHNESS_SECONDS = 180
 
 
 def review_path(data_dir: Path | str | None = None) -> Path:
@@ -23,6 +25,36 @@ def review_path(data_dir: Path | str | None = None) -> Path:
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%d %H:%M:%S%z"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _list_freshness_error(item: dict[str, Any], now: datetime | None = None) -> str | None:
+    fetched = _parse_timestamp(item.get("fetched_at") or item.get("queued_at"))
+    if fetched is None:
+        return "缺少列表获取时间"
+    current = now or datetime.now(timezone.utc)
+    age = (current - fetched).total_seconds()
+    if age < -5:
+        return "列表获取时间在未来"
+    if age > LIKE_FRESHNESS_SECONDS:
+        return f"列表已过期 {age:.0f}s > {LIKE_FRESHNESS_SECONDS}s"
+    return None
 
 
 def _write(path: Path, payload: dict[str, Any]) -> None:
@@ -92,6 +124,7 @@ def merge_candidates(
         if existing is None:
             candidate.setdefault("status", "pending")
             candidate.setdefault("queued_at", _now())
+            candidate.setdefault("fetched_at", candidate.get("queued_at"))
             by_key[key] = candidate
             continue
         if existing.get("status") in DONE_STATUSES:
@@ -99,6 +132,11 @@ def merge_candidates(
         # 审核中的候选只补充内容，不降级状态。
         candidate.setdefault("status", existing.get("status", "pending"))
         candidate.setdefault("queued_at", existing.get("queued_at") or _now())
+        if existing.get("status") == "failed" and existing.get("result") == "stale_list":
+            candidate["status"] = "pending"
+            candidate.pop("error", None)
+            candidate.pop("result", None)
+        candidate["fetched_at"] = _now()
         candidate["reviewed_at"] = existing.get("reviewed_at", "")
         by_key[key] = candidate
     payload["candidates"] = list(by_key.values())
@@ -145,6 +183,12 @@ def approve(
         if max_count < 1:
             raise ValueError("max_count 必须大于 0")
         payload["max_count"] = max_count
+    else:
+        approved_count = sum(
+            1 for item in payload.get("candidates") or [] if item.get("status") == "approved"
+        )
+        if approved_count:
+            payload["max_count"] = approved_count
     _write(target, payload)
     return payload
 
@@ -192,13 +236,31 @@ def apply_approved(
     """执行已批准点赞；每条 action 前复核真实状态，逐条保存结果。"""
     target = Path(path) if path else review_path()
     payload = load_review(target)
-    approved = [item for item in payload.get("candidates") or [] if item.get("status") == "approved"]
+    all_approved = [item for item in payload.get("candidates") or [] if item.get("status") == "approved"]
+    liked = liked_set if liked_set is not None else set()
+    liked_count = skipped_count = failed_count = 0
+    fresh: list[dict[str, Any]] = []
+    stale: list[str] = []
+    for item in all_approved:
+        freshness_error = _list_freshness_error(item)
+        if freshness_error:
+            item.update({"status": "failed", "result": "stale_list", "error": freshness_error})
+            stale.append(str(item.get("rpid")))
+            failed_count += 1
+        else:
+            fresh.append(item)
+    approved = fresh
+    if stale:
+        _write(target, payload)
+    if not approved:
+        payload["last_applied_at"] = _now()
+        _write(target, payload)
+        result = summarize(payload)
+        result.update({"liked": 0, "skipped": 0, "failed": failed_count, "executed": [], "stale": stale})
+        return result
     max_count = payload.get("max_count")
     if max_count is not None and len(approved) > int(max_count):
         raise ValueError(f"审核通过 {len(approved)} 条，超过 max_count={max_count}")
-
-    liked = liked_set if liked_set is not None else set()
-    liked_count = skipped_count = failed_count = 0
     for item in approved:
         oid, rpid = item.get("oid"), item.get("rpid")
         key = str(rpid)
@@ -262,6 +324,7 @@ def apply_approved(
             "skipped": skipped_count,
             "failed": failed_count,
             "executed": [dict(item) for item in approved],
+            "stale": stale,
         }
     )
     return result

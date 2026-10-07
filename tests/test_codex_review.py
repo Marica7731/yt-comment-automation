@@ -1,5 +1,6 @@
 """Codex 审核队列的持久化、批准和执行测试。"""
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -66,6 +67,52 @@ def test_like_review_unavailable_state_never_posts(tmp_path: Path):
     assert result["failed"] == 1
     assert sent == []
     assert like_review.load_review(path)["candidates"][0]["status"] == "failed"
+
+
+def test_like_apply_rejects_stale_list_without_action(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    stale_at = (datetime.now(timezone.utc) - timedelta(seconds=181)).strftime("%Y-%m-%dT%H:%M:%S%z")
+    like_review.merge_candidates(
+        [{"oid": 9, "rpid": 90, "content": "fresh?", "queued_at": stale_at}], path
+    )
+    like_review.approve(["90"], path)
+    sent = []
+    resolved = []
+
+    result = like_review.apply_approved(
+        lambda oid, rpid: (resolved.append(rpid) or False),
+        lambda oid, rpid: (sent.append(rpid) or {"code": 0}),
+        path,
+        sleep=lambda _: None,
+    )
+
+    assert result["liked"] == 0
+    assert result["failed"] == 1
+    assert result["stale"] == ["90"]
+    assert resolved == []
+    assert sent == []
+    item = like_review.load_review(path)["candidates"][0]
+    assert item["status"] == "failed"
+    assert item["result"] == "stale_list"
+    assert "列表已过期" in item["error"]
+
+
+def test_like_approval_refreshes_batch_cap(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.merge_candidates(
+        [{"oid": 10, "rpid": 100, "content": "a"}, {"oid": 11, "rpid": 101, "content": "b"}], path
+    )
+    payload = like_review.approve(["100"], path, max_count=1)
+    payload = like_review.approve(["101"], path)
+    assert payload["max_count"] == 2
+    result = like_review.apply_approved(
+        lambda oid, rpid: False,
+        lambda oid, rpid: {"code": 0},
+        path,
+        sleep=lambda _: None,
+    )
+    assert result["liked"] == 2
+    assert result["failed"] == 0
 
 
 def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):

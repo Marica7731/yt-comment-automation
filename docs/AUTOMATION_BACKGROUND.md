@@ -46,6 +46,7 @@
 8. 对 `applied_unverified` 执行 `review_cli verify --bvid <bvid>` 后，必须把原始 `source_text`、生成草稿、最终发布文案和真实回读结果逐项对比。B 站不存在可等待的审核中状态；已有 rpid 但顶层回读不到，按驳回/未发布处理。发现可识别敏感词、谐音关键词或角色名时，先修正文案，再用 `review_cli reapprove-rejected --bvid <bvid> --messages-file <file>` 一次性重发；不得原样重复发布。
 9. 纠正重发后若回读显示旧、新两条并存，只有在“删除评论强门禁”全部满足时才允许运行 `review_cli cleanup-retry-without-artist`；删除带敏感词的旧 rpid、保留修正版，并读取每条删除返回结果。任何归属不明都保留原评论并报告。
 10. 对点赞 pending 逐条检查 `content/source/oid/rpid`，排除自己、广告、垃圾和不安全内容；批准后执行 `python3 like_fans.py --apply /opt/yt-comment-automation/data/like_review.json`。
+   点赞列表必须在执行前 3 分钟内重新抓取；`apply_approved` 以 `fetched_at`（旧数据回退 `queued_at`）执行硬门禁，缺时间戳或超过 180 秒的候选标记 `failed/result=stale_list`，绝不发 action。
 11. 结束前再次核对队列、最近日志和 crontab；评论/点赞 cron 必须移除，只保留每日复盘 cron。
 
 ## 状态语义
