@@ -266,7 +266,7 @@ liked, skipped_liked, skipped_self, failed = [], [], [], []
 
 
 def process_items(items):
-    """处理一页 msgfeed 条目，返回本页新增点赞数。"""
+    """处理一页 msgfeed 条目，返回本页新增审核候选数。"""
     new_likes = 0
     for it in items:
         replyer = str((it.get("user") or {}).get("mid") or "")
@@ -297,7 +297,7 @@ def process_items(items):
                 continue
             print(f"  ↻复核确认未赞，补赞 rpid={rpid} {content[:30]!r}", flush=True)
 
-        add_review_candidate(
+        created = add_review_candidate(
             oid,
             rpid,
             content,
@@ -306,6 +306,8 @@ def process_items(items):
             item.get("uri", ""),
             root_id=item.get("root_id", ""),
         )
+        if not created:
+            continue
         new_likes += 1
         print(f"  ⋯待审核 rpid={rpid} {content[:30]!r}", flush=True)
     return new_likes
@@ -369,7 +371,9 @@ for bvid, oid in video_oids.items():
                 continue
             if str(rpid2) in liked_set or rp.get("action") == 1:
                 continue
-            add_review_candidate(oid, rpid2, content2, f"sweep:{bvid}", bvid)
+            created = add_review_candidate(oid, rpid2, content2, f"sweep:{bvid}", bvid)
+            if not created:
+                continue
             print(f"  ⋯待审核(评论区补扫 {bvid}) rpid={rpid2} {content2[:30]!r}", flush=True)
         if len(replies) < 20:
             break
