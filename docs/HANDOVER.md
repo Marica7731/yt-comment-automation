@@ -19,7 +19,7 @@
 | 每日清洗复盘 | `0 0 * * *`(UTC)=北京 8:00 | `flock -n /tmp/daily-review.lock python3 daily_clean_review.py` | `logs/daily_review.log` |
 
 - 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：仅从 WDC `/opt/yt-comment-automation/private.env` 或进程环境读取 `FEISHU_APP_ID/FEISHU_APP_SECRET/MY_FEISHU_OPEN_ID`，通知机器人固定为 `yt-comment-automation`；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据，禁止读取旧 bridge。
-- `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲`、`IGNORE_BVIDS`（6 个无歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
+- `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲`、`IGNORE_BVIDS`（7 个无歌单/非完整歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
 - **所有 B 站 API 请求必须带 cookie**（裸请求 412，换 UA 没用）。
 - 本地对应仓库：`G:\codex-work\yt-comment-automation`。发布流程：本地改 → commit/push → WDC `git pull` → 实跑验证。
 
@@ -89,7 +89,7 @@
 - reply/action 点赞是 **toggle**：只有确认服务器当前未赞才发。判态用顶层评论列表的 `action` 字段（**reaction 恒 null 是陷阱**）；mid 一律 str() 归一比较（接口给字符串）。
 - 超长评论主评论+楼中楼续写；多 P 视频每 P 一条主评论（时间戳按 pages[].duration 重算，区间标签会退化为开始时间——已知降级）。
 - 升级模式：已发 <3 首时复查，新歌单严格多于已发且 ≥3 首才删旧发新；新投稿每轮 force 重抓，老投稿 2 小时 TTL。
-- 忽略列表 `IGNORE_BVIDS` 现有 6 个：BV1MW3R6vEoE,BV17KGK62EyU,BV1VERyBnEG6,BV1WAYb6zEoE,BV1one569EZt,BV18ZaZ6hE2F。
+- 忽略列表 `IGNORE_BVIDS` 现有 7 个：BV1MW3R6vEoE,BV17KGK62EyU,BV1VERyBnEG6,BV1WAYb6zEoE,BV1one569EZt,BV18ZaZ6hE2F,BV1ZehV6LEMc。
 
 ### 点赞（like_fans.py，部署在仓库根，由 Codex standalone scheduled task 触发）
 - msgfeed「回复我的」游标翻页：响应 `cursor{id,time}`，下一页参数 `id` + `reply_time`（实测所得，勿猜其他参数名）；**页内有新赞才继续翻**，整页已赞/重复即停，上限 10 页。
