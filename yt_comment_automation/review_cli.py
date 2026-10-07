@@ -44,7 +44,11 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_list = sub.add_parser("list", help="列出审核队列")
-    p_list.add_argument("--status", choices=["pending", "approved", "applying", "applied", "applied_unverified", "all"], default="all")
+    p_list.add_argument(
+        "--status",
+        choices=["pending", "approved", "applying", "applied", "applied_unverified", "deleted", "all"],
+        default="all",
+    )
 
     p_show = sub.add_parser("show", help="显示一个审核文件")
     p_show.add_argument("--bvid", required=True)
@@ -84,6 +88,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_cleanup_retry = sub.add_parser("cleanup-retry-without-artist", help="删除重复评论后发布无歌手版本")
     p_cleanup_retry.add_argument("--bvid", required=True)
+    p_cleanup_retry.add_argument(
+        "--delete-only",
+        action="store_true",
+        help="按完整归属门禁删除已发布评论，不重发",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "list":
@@ -139,9 +148,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification")}, ensure_ascii=False))
         return 0 if item.get("status") == "applied" else 1
     if args.command == "cleanup-retry-without-artist":
-        item = review.cleanup_duplicates_and_retry_without_artist(args.bvid)
+        item = review.cleanup_duplicates_and_retry_without_artist(
+            args.bvid, delete_only=args.delete_only
+        )
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification"), "deleted_rpids": item.get("deleted_rpids")}, ensure_ascii=False))
-        return 0 if item.get("status") == "applied" else 1
+        return 0 if item.get("status") in {"applied", "deleted"} else 1
     if args.command == "reapprove-rejected":
         item = review.reapprove_rejected(
             args.bvid,

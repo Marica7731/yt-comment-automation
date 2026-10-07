@@ -521,9 +521,91 @@ def retry_without_artist(bvid: str, data_dir: Path | None = None) -> dict[str, A
     return apply_comment(bvid, data_dir=data_dir)
 
 
-def cleanup_duplicates_and_retry_without_artist(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
+def _delete_applied_comment_only(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
+    """Delete the recorded comment only; never republish after deletion."""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") not in {"applied", "applied_unverified"}:
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许删除")
+    rpids = list(dict.fromkeys(str(x) for x in item.get("rpids") or [] if str(x).strip()))
+    if not rpids:
+        raise RuntimeError("没有可删除的 rpid")
+
+    cookies = bili_comment.load_cookie_map()
+    owner_mid = str(config.owner_mid()).strip()
+    if not str(cookies.get("bili_jct") or "").strip():
+        raise RuntimeError("cookie 缺少 bili_jct，拒绝删除")
+    if str(cookies.get("DedeUserID") or "").strip() != owner_mid:
+        raise RuntimeError("cookie DedeUserID 与 OWNER_MID 不一致，拒绝删除")
+    aid = bili_comment.get_aid(bvid, cookies)
+    if not isinstance(aid, int) or aid <= 0:
+        raise RuntimeError(f"非法视频 aid，拒绝删除: {aid!r}")
+    own_ids = {
+        str(cm.rpid)
+        for cm in bili_comment.list_comments(bvid, cookies, max_pages=5)
+        if str(cm.mid) == owner_mid
+    }
+    segments = bili_comment.split_message_by_lines(str((item.get("approved_messages") or [""])[0]))
+    expected = _normalize_comment_for_compare(segments[0]) if segments else ""
+    if not expected:
+        raise RuntimeError("缺少已审核内容，无法确认删除目标")
+
+    for rpid in rpids:
+        if not re.fullmatch(r"[1-9][0-9]*", rpid) or rpid not in own_ids:
+            raise RuntimeError(f"目标 rpid={rpid} 不属于本账号，拒绝删除")
+        check = bili_comment.find_comment_by_rpid(bvid, rpid, cookies)
+        if not check.get("exists") or str(check.get("mid") or "") != owner_mid:
+            raise RuntimeError(f"目标 rpid={rpid} 归属回读失败，拒绝删除")
+        if _normalize_comment_for_compare(str(check.get("message") or "")) != expected:
+            raise RuntimeError(f"目标 rpid={rpid} 内容与审核记录不一致，拒绝删除")
+
+    deleted: list[str] = []
+    results: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for rpid in rpids:
+        response = bili_comment.delete_comment(bvid, rpid, cookies)
+        results.append({"rpid": rpid, "response": response})
+        if response.get("code") != 0:
+            failures.append(f"{rpid}: code={response.get('code')} msg={response.get('message')}")
+            continue
+        if bili_comment.find_comment_by_rpid(bvid, rpid, cookies).get("exists"):
+            failures.append(f"{rpid}: 删除后仍可回读")
+        else:
+            deleted.append(rpid)
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    if failures:
+        item.update({
+            "status": "applied_unverified",
+            "rpids": [rpid for rpid in rpids if rpid not in deleted],
+            "deleted_rpids": deleted,
+            "cleanup_failures": failures,
+            "delete_results": results,
+            "updated_at": now,
+        })
+        _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+        raise RuntimeError("删除失败: " + "; ".join(failures))
+
+    item.update({
+        "status": "deleted",
+        "rpids": [],
+        "previous_rpids": rpids,
+        "deleted_rpids": deleted,
+        "cleanup_failures": [],
+        "delete_results": results,
+        "cleanup_note": "按用户要求删除，未重发",
+        "updated_at": now,
+    })
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return item
+
+
+def cleanup_duplicates_and_retry_without_artist(
+    bvid: str, data_dir: Path | None = None, delete_only: bool = False
+) -> dict[str, Any]:
     """删除已知重复评论后，只保留一条去歌手版本。"""
     item = load_comment(bvid, data_dir)
+    if delete_only:
+        return _delete_applied_comment_only(bvid, data_dir=data_dir)
     if (
         item.get("status") == "applied_unverified"
         and item.get("rejected_reapproved")

@@ -54,6 +54,7 @@
 - `error_cache_miss`：Action 缓存缺失，属于生产阻塞，必须刷新 Action 后重跑。
 - `skipped_no_songs`：只有在缓存存在且原始来源确认无歌单时才可接受。
 - `applied_unverified`：已尝试发布但验收未通过；已有 rpid 而顶层回读不到时按驳回处理，不等待审核。必须在同一轮对比输入、输出和真实回读，识别异常内容后修正重发并处理可见重复，不得静默结束。
+- `deleted`：评论已通过 `review_cli cleanup-retry-without-artist --delete-only` 删除，且删除后回读确认目标不存在；该终态不会自动重发。
 - `applied` 且 `verification.ok=true`：只有读到这个组合才算评论发布完成；禁止仅凭退出码、CLI 返回或“代码执行成功”判断。
 - `like_review` 的 pending/approved 不代表已经点赞；只有 `applied` 才是 action 已执行。
 

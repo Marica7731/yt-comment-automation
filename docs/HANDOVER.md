@@ -105,6 +105,7 @@
 ### 评论删除安全
 
 - 唯一允许的删除入口是 `review_cli cleanup-retry-without-artist` 调用 `review.py`，最终只由 `bili_comment.delete_comment` 发送 `reply/del`；禁止手工 `curl`、临时脚本和任何绕过该入口的调用。
+- 用户明确要求删除已发布评论时，可在同一入口使用 `--delete-only`；该模式仍执行完整归属和内容回读，成功后记录 `deleted` 终态，不自动重发。
 - `delete_comment` 强制校验 `bvid/rpid/bili_jct`、cookie `DedeUserID == OWNER_MID`、正数 `aid`，并要求目标 `rpid` 出现在该视频的本账号评论列表。发送前再读一次 `aid` 和归属列表；全部一致才允许请求。
 - 归属回读失败、翻页无法覆盖目标、账号或视频变化、入参无法唯一确认时必须中止，不删除、不重试手工路径。其他用户的评论无论内容或状态如何都不得删除。
 - 实际删除必须读取项目脚本返回值并保留结果；任何部分失败都要报告，禁止用笼统成功掩盖。
