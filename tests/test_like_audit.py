@@ -88,3 +88,28 @@ def test_summarize_flags_unliked_folded_reply_missing_from_queue():
     assert len(summary["potential_missing"]) == 1
     assert summary["potential_missing"][0]["rpid"] == "101"
     assert summary["potential_missing"][0]["folded"] is True
+
+
+def test_summarize_reads_folder_is_folded_schema():
+    comments = {
+        "11": [
+            {
+                "page": 1,
+                "replies": [
+                    {
+                        "rpid": 201,
+                        "member": {"mid": "999"},
+                        "content": {"message": "folder folded reply"},
+                        "action": 0,
+                        "reply_control": {},
+                        "folder": {"has_folded": True, "is_folded": True, "rule": ""},
+                    }
+                ],
+            }
+        ]
+    }
+
+    summary = summarize([], comments, [], set())
+
+    assert summary["potential_missing"][0]["rpid"] == "201"
+    assert summary["potential_missing"][0]["folded"] is True

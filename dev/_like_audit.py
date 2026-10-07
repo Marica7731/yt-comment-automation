@@ -217,7 +217,8 @@ def summarize(
                         "content": content,
                         "action": reply.get("action"),
                         "reaction_status": ((reply.get("reaction") or {}).get("status")),
-                        "folded": bool((reply.get("reply_control") or {}).get("fold_text")),
+                        "folded": bool((reply.get("reply_control") or {}).get("fold_text"))
+                        or bool((reply.get("folder") or {}).get("is_folded")),
                         "queue_status": queue.get(rpid),
                         "in_liked_set": rpid in liked_rpids,
                     }
