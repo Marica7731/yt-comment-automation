@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from yt_comment_automation import youtube_action, youtube_cache_sync, yt_fetch
+from yt_comment_automation import (
+    bili_comment,
+    collections,
+    pipeline,
+    youtube_action,
+    youtube_cache_sync,
+    yt_fetch,
+)
 
 
 def test_cache_only_reads_action_cache_without_network(tmp_path, monkeypatch):
@@ -63,3 +70,47 @@ def test_action_records_individual_failure(tmp_path, monkeypatch):
     assert payload["results"] == {}
     assert payload["failures"][0]["video_id"] == "abcdefghijk"
     assert "blocked" in payload["failures"][0]["error"]
+
+
+def test_already_sufficient_comment_consumes_action_pending(tmp_path, monkeypatch):
+    video_id = "abcdefghijk"
+    data_dir = tmp_path / "data"
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(
+        json.dumps(
+            {
+                "results": {video_id: {"id": video_id, "comments": []}},
+                "failures": [],
+                "fetch_times.json": {video_id: 123.0},
+                "yt_comment_ids.json": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    youtube_cache_sync.sync(payload_path, data_dir)
+    assert youtube_cache_sync.is_pending_action(data_dir, video_id)
+
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1ActionDone",
+        title="action done",
+        part_date="2026-10-01",
+        yt_id=video_id,
+    )
+    existing = bili_comment.BiliComment(
+        rpid="315000000001",
+        mid="3546597260528367",
+        uname="owner",
+        ctime=0,
+        like=0,
+        message=("0:01:00 01. Song A - Artist A\n0:02:00 02. Song B - Artist B\n0:03:00 03. Song C - Artist C"),
+    )
+    monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: existing)
+
+    result = pipeline.process_video(video, data_dir / "yt_raw", dry_run=False)
+
+    assert result.status == "already_posted"
+    assert not youtube_cache_sync.is_pending_action(data_dir, video_id)
