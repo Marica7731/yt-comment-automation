@@ -221,7 +221,7 @@ def strip_transliteration_parens_from_line(line: str) -> str:
         return line
 
     def repl(match: re.Match) -> str:
-        leading, open_b, inner, close_b = match.group(1), match.group(2), match.group(3), match.group(4)
+        inner = match.group(3)
         content = (inner or "").strip()
         if looks_like_romanization_or_translation(content):
             return ""
@@ -303,7 +303,7 @@ def strip_trailing_latin_annotation_suffix(text: str) -> str:
                 return before
 
     def repl(match: re.Match) -> str:
-        leading, open_b, inner, close_b = match.group(1), match.group(2), match.group(3), match.group(4)
+        open_b, inner, close_b = match.group(2), match.group(3), match.group(4)
         before = raw[: match.start()].strip()
         content = (inner or "").strip()
         matched = {")": "(", "）": "（", "]": "[", "］": "［"}
@@ -688,6 +688,9 @@ def is_obviously_non_song_text(text: str) -> bool:
     if re.match(r"^(開始|开始|结束|終了|end|start|スタート)$", t, re.IGNORECASE):
         return True
     if re.match(r"^(talk|mc|雑談|聊天|感想|告知|返场|休息)$", t, re.IGNORECASE):
+        return True
+    # 无歌手裸标题中的直播环节标记，避免被 R17 的宽松路径当成歌名。
+    if re.fullmatch(r"スパチャ読み|じゃんけん|:_?おつりんね::_?りんね:", t, re.IGNORECASE):
         return True
     # 简介歌单常见非歌行（BV15wYE68EBb）
     if re.match(r"^(エンドカード|エンドロール|end\s*card|end\s*roll|cm|提供)$", t, re.IGNORECASE):

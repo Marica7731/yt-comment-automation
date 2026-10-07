@@ -148,6 +148,20 @@ def test_promotion_line_filtered():
     assert clean.is_obviously_non_song_text("0:01:13 開始🦋") or True  # 时间戳行会先剥离时间戳再判定
 
 
+def test_live_segment_bare_titles_filtered():
+    """BV1KqH16wEsJ/BV1eHH163Ewh：无歌手直播环节不得进入 R17 歌单。"""
+    source = "\n".join(
+        [
+            "01:48:16 スパチャ読み",
+            "3:18:32 じゃんけん",
+            "3:19:22 :_おつりんね::_りんね:",
+        ]
+    )
+    assert clean.extract_plain_songs_from_source_timeline(source) == []
+    for title in ("スパチャ読み", "じゃんけん", ":_おつりんね::_りんね:"):
+        assert clean.is_obviously_non_song_text(title) is True
+
+
 def test_original_numbered_format_kept():
     # 「01. バラライカ」带空格序号会先被 strip_leading_timeline_decorations 剥离
     line = "0:03:55 01. バラライカ / 月島きらり starring 久住小春（モーニング娘。）"
