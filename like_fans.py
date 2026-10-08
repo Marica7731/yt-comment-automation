@@ -18,6 +18,7 @@ import urllib.request
 sys.path.insert(0, '/opt/yt-comment-automation')
 from yt_comment_automation import bili_comment, config
 from yt_comment_automation import like_review
+from yt_comment_automation.reply_state import reply_is_liked
 from yt_comment_automation.req_pace import pace
 
 OWNER_MID = "3546597260528367"
@@ -181,7 +182,7 @@ def resolve_real_liked(oid, rpid, root_id=None):
             replies = (dd.get("data") or {}).get("replies") or []
             for rp in replies:
                 if rp.get("rpid") == rpid:
-                    return ((rp.get("reaction") or {}).get("status") == 1) or (rp.get("action") == 1)
+                    return reply_is_liked(rp)
             if len(replies) < 20:
                 break
         root = str(root_id or "") or root_id_by_rpid.get(str(rpid), "")
@@ -204,7 +205,7 @@ def resolve_real_liked(oid, rpid, root_id=None):
                 dd = json.loads(resp_d.read().decode("utf-8"))
             for rp in ((dd.get("data") or {}).get("replies")) or []:
                 if rp.get("rpid") == rpid:
-                    return ((rp.get("reaction") or {}).get("status") == 1) or (rp.get("action") == 1)
+                    return reply_is_liked(rp)
         return None
     except Exception as detail_err:  # noqa: BLE001
         print(f"  ⚠️状态复核失败 rpid={rpid}: {detail_err}", flush=True)
@@ -401,7 +402,7 @@ for bvid, oid in video_oids.items():
                 continue
             if str(rpid2) in liked_set:
                 continue
-            if rp.get("action") == 1:
+            if reply_is_liked(rp):
                 remember_liked(rpid2)
                 continue
             created = add_review_candidate(oid, rpid2, content2, f"sweep:{bvid}", bvid)

@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from yt_comment_automation import bili_comment, config  # noqa: E402
+from yt_comment_automation.reply_state import reply_is_liked  # noqa: E402
 from yt_comment_automation.req_pace import pace  # noqa: E402
 
 OWNER_MID = "3546597260528367"
@@ -215,7 +216,8 @@ def summarize(
                         "rpid": rpid,
                         "mid": str(((reply.get("member") or {}).get("mid")) or ""),
                         "content": content,
-                        "action": reply.get("action"),
+                        "action": int(reply_is_liked(reply)),
+                        "raw_action": reply.get("action"),
                         "reaction_status": ((reply.get("reaction") or {}).get("status")),
                         "folded": bool((reply.get("reply_control") or {}).get("fold_text"))
                         or bool((reply.get("folder") or {}).get("is_folded")),
