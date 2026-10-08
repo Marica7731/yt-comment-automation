@@ -232,17 +232,19 @@ def apply_approved(
     save_liked_set: Callable[[], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     reviewer: str = "codex",
+    now: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
     """执行已批准点赞；每条 action 前复核真实状态，逐条保存结果。"""
     target = Path(path) if path else review_path()
     payload = load_review(target)
+    clock = now or (lambda: datetime.now(timezone.utc))
     all_approved = [item for item in payload.get("candidates") or [] if item.get("status") == "approved"]
     liked = liked_set if liked_set is not None else set()
     liked_count = skipped_count = failed_count = 0
     fresh: list[dict[str, Any]] = []
     stale: list[str] = []
     for item in all_approved:
-        freshness_error = _list_freshness_error(item)
+        freshness_error = _list_freshness_error(item, now=clock())
         if freshness_error:
             item.update({"status": "failed", "result": "stale_list", "error": freshness_error})
             stale.append(str(item.get("rpid")))
@@ -264,6 +266,13 @@ def apply_approved(
     for item in approved:
         oid, rpid = item.get("oid"), item.get("rpid")
         key = str(rpid)
+        freshness_error = _list_freshness_error(item, now=clock())
+        if freshness_error:
+            item.update({"status": "failed", "result": "stale_list", "error": freshness_error})
+            stale.append(str(item.get("rpid")))
+            failed_count += 1
+            _write(target, payload)
+            continue
         item["attempted_at"] = _now()
         item["executor"] = reviewer
         if key in liked:
@@ -289,6 +298,13 @@ def apply_approved(
         if real is None:
             item.update({"status": "failed", "result": "verify_unavailable"})
             item.setdefault("error", "复核不到真实状态，宁漏勿撤")
+            failed_count += 1
+            _write(target, payload)
+            continue
+        freshness_error = _list_freshness_error(item, now=clock())
+        if freshness_error:
+            item.update({"status": "failed", "result": "stale_list", "error": freshness_error})
+            stale.append(str(item.get("rpid")))
             failed_count += 1
             _write(target, payload)
             continue

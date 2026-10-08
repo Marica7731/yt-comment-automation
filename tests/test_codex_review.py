@@ -97,6 +97,78 @@ def test_like_apply_rejects_stale_list_without_action(tmp_path: Path):
     assert "列表已过期" in item["error"]
 
 
+def test_like_apply_rechecks_freshness_between_actions(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    base = datetime.now(timezone.utc)
+    fetched_at = (base - timedelta(seconds=170)).strftime("%Y-%m-%dT%H:%M:%S%z")
+    like_review.merge_candidates(
+        [
+            {"oid": 1, "rpid": 91, "content": "a", "queued_at": fetched_at},
+            {"oid": 2, "rpid": 92, "content": "b", "queued_at": fetched_at},
+        ],
+        path,
+    )
+    like_review.approve(["91", "92"], path)
+    clock = [base]
+    sent = []
+
+    def fake_sleep(seconds: float) -> None:
+        clock[0] += timedelta(seconds=seconds)
+
+    def resolve(oid, rpid) -> bool:
+        if rpid == 92:
+            clock[0] += timedelta(seconds=174)
+        return False
+
+    result = like_review.apply_approved(
+        resolve,
+        lambda oid, rpid: (sent.append(rpid) or {"code": 0}),
+        path,
+        sleep=fake_sleep,
+        now=lambda: clock[0],
+    )
+
+    assert result["liked"] == 1
+    assert result["failed"] == 1
+    assert result["stale"] == ["92"]
+    assert sent == [91]
+    items = {str(item["rpid"]): item for item in like_review.load_review(path)["candidates"]}
+    assert items["91"]["status"] == "applied"
+    assert items["92"]["status"] == "failed"
+    assert items["92"]["result"] == "stale_list"
+
+
+def test_like_apply_rechecks_freshness_immediately_before_action(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    base = datetime.now(timezone.utc)
+    fetched_at = (base - timedelta(seconds=170)).strftime("%Y-%m-%dT%H:%M:%S%z")
+    like_review.merge_candidates(
+        [{"oid": 3, "rpid": 93, "content": "c", "queued_at": fetched_at}],
+        path,
+    )
+    like_review.approve(["93"], path)
+    clock = [base]
+    sent = []
+
+    def resolve(oid, rpid) -> bool:
+        clock[0] += timedelta(seconds=15)
+        return False
+
+    result = like_review.apply_approved(
+        resolve,
+        lambda oid, rpid: (sent.append(rpid) or {"code": 0}),
+        path,
+        sleep=lambda _: None,
+        now=lambda: clock[0],
+    )
+
+    assert result["liked"] == 0
+    assert result["failed"] == 1
+    assert result["stale"] == ["93"]
+    assert sent == []
+    assert like_review.load_review(path)["candidates"][0]["result"] == "stale_list"
+
+
 def test_like_approval_refreshes_batch_cap(tmp_path: Path):
     path = tmp_path / "like_review.json"
     like_review.merge_candidates(
