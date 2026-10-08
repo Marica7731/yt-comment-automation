@@ -161,13 +161,33 @@ def fetch_msgfeed_page(cursor_id=None, cursor_time=None):
     return d.get("items") or [], d.get("cursor") or {}
 
 
+def resolve_from_msgfeed(oid, rpid):
+    """Use a fresh msgfeed entry as the fallback for folded/unlisted replies."""
+    cursor_id = cursor_time = None
+    for _ in range(10):
+        items, cursor = fetch_msgfeed_page(cursor_id, cursor_time)
+        for entry in items:
+            inner = entry.get("item") or {}
+            if str(inner.get("subject_id")) != str(oid):
+                continue
+            if str(inner.get("source_id")) != str(rpid):
+                continue
+            state = inner.get("like_state")
+            if state is not None:
+                return state == 1
+        if cursor.get("is_end"):
+            break
+        cursor_id, cursor_time = cursor.get("id"), cursor.get("time")
+    return None
+
+
 def resolve_real_liked(oid, rpid, root_id=None):
     """读该条评论的真实点赞状态。
 
     粉丝回复多为视频顶层评论（msgfeed 聚合只显示最新一条），所以先查视频
-    顶层评论列表（action/reaction 是活字段），查不到再兜底查我们主评论楼中楼。
-    msgfeed 提供 root_id 时优先按该楼层复核；缺失时才回退自有主评论。
-    返回 True=已赞 False=未赞 None=两处都查不到（复核失败宁漏勿撤）。
+    顶层评论列表（up_action.like/reaction 是活字段），查不到再查 msgfeed。
+    msgfeed 提供 root_id 时优先按该楼层复核；缺失时回退自有主评论，再回退 msgfeed。
+    返回 True=已赞 False=未赞 None=所有来源都查不到（复核失败宁漏勿撤）。
     """
     try:
         for pn in (1, 2, 3):
@@ -206,7 +226,7 @@ def resolve_real_liked(oid, rpid, root_id=None):
             for rp in ((dd.get("data") or {}).get("replies")) or []:
                 if rp.get("rpid") == rpid:
                     return reply_is_liked(rp)
-        return None
+        return resolve_from_msgfeed(oid, rpid)
     except Exception as detail_err:  # noqa: BLE001
         print(f"  ⚠️状态复核失败 rpid={rpid}: {detail_err}", flush=True)
         return None
@@ -315,14 +335,17 @@ def process_items(items):
             print(f"  ⊘自己排除 mid={replyer} {content[:30]!r}", flush=True)
             continue
 
-        if str(rpid) in liked_set or item.get("like_state", 0) != 0:
-            # 可能已赞：先复核真实状态，确认未赞才补，其余跳过（绝不盲发 action）
-            real = resolve_real_liked(oid, rpid)
+        if item.get("like_state") == 1:
+            skipped_liked.append(content)
+            if str(rpid) not in liked_set:
+                liked_set.add(str(rpid))
+                save_liked_set()
+            print(f"  =已赞跳过 rpid={rpid} {content[:30]!r}", flush=True)
+            continue
+        if str(rpid) in liked_set:
+            real = resolve_real_liked(oid, rpid, root_id=item.get("root_id", ""))
             if real is True:
                 skipped_liked.append(content)
-                if str(rpid) not in liked_set:
-                    liked_set.add(str(rpid))
-                    save_liked_set()
                 print(f"  =已赞跳过 rpid={rpid} {content[:30]!r}", flush=True)
                 continue
             if real is None:
