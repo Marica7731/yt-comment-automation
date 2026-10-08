@@ -67,6 +67,7 @@ def test_process_items_passes_msgfeed_root_id_to_state_check():
         "OWNER_MID": "owner",
         "skipped_self": [],
         "liked_set": {"123"},
+        "review_statuses": {},
         "resolve_real_liked": resolve,
         "save_liked_set": lambda: None,
         "add_review_candidate": lambda *args, **kwargs: False,
