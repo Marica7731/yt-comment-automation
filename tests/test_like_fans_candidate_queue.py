@@ -36,7 +36,7 @@ def _load_candidate_gate(existing_review: dict) -> tuple[dict, object]:
     return namespace["review_statuses"], namespace["add_review_candidate"]
 
 
-def _load_process_items(add_result: bool):
+def _load_process_items(add_result: bool, review_statuses: dict | None = None):
     tree = ast.parse((ROOT / "like_fans.py").read_text(encoding="utf-8"))
     function = next(
         node
@@ -53,6 +53,7 @@ def _load_process_items(add_result: bool):
         "OWNER_MID": "owner",
         "skipped_self": [],
         "liked_set": set(),
+        "review_statuses": review_statuses or {},
         "resolve_real_liked": lambda oid, rpid: False,
         "save_liked_set": lambda: None,
         "add_review_candidate": add_review_candidate,
@@ -62,8 +63,8 @@ def _load_process_items(add_result: bool):
     return namespace["process_items"], namespace
 
 
-def _feed(add_result: bool) -> tuple[int, str]:
-    process_items, namespace = _load_process_items(add_result)
+def _feed(add_result: bool, review_statuses: dict | None = None) -> tuple[int, str]:
+    process_items, namespace = _load_process_items(add_result, review_statuses)
     item = {
         "user": {"mid": "fan"},
         "item": {
@@ -92,6 +93,11 @@ def test_new_candidate_is_counted_and_logged():
     count, output = _feed(add_result=True)
     assert count == 1
     assert "123" in output
+
+def test_existing_pending_is_counted_for_pagination_without_duplicate_log():
+    count, output = _feed(add_result=True, review_statuses={"123": "pending"})
+    assert count == 1
+    assert "123" not in output
 
 def test_stale_list_candidate_can_requeue_on_fresh_msgfeed():
     statuses, add_candidate = _load_candidate_gate(
@@ -133,7 +139,7 @@ def _load_candidate_namespace(existing_review: dict) -> dict:
     exec(compile(module, str(ROOT / "like_fans.py"), "exec"), namespace)
     return namespace
 
-def test_existing_pending_refreshes_without_counting_as_new():
+def test_existing_pending_refreshes_and_counts_for_pagination():
     namespace = _load_candidate_namespace(
         {"candidates": [
             {"rpid": 92, "status": "pending", "root_id": "77"},
@@ -142,7 +148,7 @@ def test_existing_pending_refreshes_without_counting_as_new():
     )
     assert namespace["add_review_candidate"](
         1, 92, "fresh", "msgfeed", bvid="BV1test", uri="", root_id=""
-    ) is False
+    ) is True
     assert namespace["review_candidates"]["92"]["content"] == "fresh"
     assert namespace["review_candidates"]["92"]["root_id"] == "77"
     assert namespace["add_review_candidate"](

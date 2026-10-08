@@ -74,6 +74,8 @@ def add_review_candidate(oid, rpid, content, source, bvid="", uri="", root_id=""
         "uri": uri or "",
         "root_id": normalized_root_id or root_id_by_rpid.get(key, ""),
     }
+    if existing_status == "pending":
+        return True
     return existing_status is None
 
 headers = {
@@ -327,7 +329,7 @@ liked, skipped_liked, skipped_self, failed = [], [], [], []
 
 
 def process_items(items):
-    """处理一页 msgfeed 条目，返回本页新增审核候选数。"""
+    """处理一页 msgfeed 条目，返回本页新增或待刷新候选数。"""
     new_likes = 0
     for it in items:
         replyer = str((it.get("user") or {}).get("mid") or "")
@@ -373,7 +375,8 @@ def process_items(items):
         if not created:
             continue
         new_likes += 1
-        print(f"  ⋯待审核 rpid={rpid} {content[:30]!r}", flush=True)
+        if review_statuses.get(str(rpid)) is None:
+            print(f"  ⋯待审核 rpid={rpid} {content[:30]!r}", flush=True)
     return new_likes
 
 
@@ -395,7 +398,7 @@ while True:
     new_likes = process_items(items)
     cur = cursor or {}
     if new_likes == 0:
-        print(f"第{page}页无新增点赞，停止翻页", flush=True)
+        print(f"第{page}页无新增或待刷新点赞，停止翻页", flush=True)
         break
     if cur.get("is_end"):
         print("已到末页", flush=True)
