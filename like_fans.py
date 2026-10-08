@@ -60,7 +60,10 @@ def add_review_candidate(oid, rpid, content, source, bvid="", uri="", root_id=""
     normalized_root_id = str(root_id or "")
     if normalized_root_id:
         root_id_by_rpid[key] = normalized_root_id
-    if key in liked_set or key in review_candidates or key in review_statuses:
+    existing_status = review_statuses.get(key)
+    if key in liked_set or key in review_candidates:
+        return False
+    if existing_status is not None and existing_status != "pending":
         return False
     review_candidates[key] = {
         "oid": oid,
@@ -69,9 +72,9 @@ def add_review_candidate(oid, rpid, content, source, bvid="", uri="", root_id=""
         "source": source,
         "bvid": bvid or "",
         "uri": uri or "",
-        "root_id": normalized_root_id,
+        "root_id": normalized_root_id or root_id_by_rpid.get(key, ""),
     }
-    return True
+    return existing_status is None
 
 headers = {
     "User-Agent": UA,

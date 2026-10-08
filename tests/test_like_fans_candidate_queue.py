@@ -26,7 +26,11 @@ def _load_candidate_gate(existing_review: dict) -> tuple[dict, object]:
         "existing_review": existing_review,
         "review_candidates": {},
         "liked_set": set(),
-        "root_id_by_rpid": {},
+        "root_id_by_rpid": {
+            str(item["rpid"]): str(item.get("root_id") or "")
+            for item in existing_review.get("candidates") or []
+            if item.get("root_id")
+        },
     }
     exec(compile(module, str(ROOT / "like_fans.py"), "exec"), namespace)
     return namespace["review_statuses"], namespace["add_review_candidate"]
@@ -103,3 +107,45 @@ def test_stale_list_candidate_can_requeue_on_fresh_msgfeed():
     assert add_candidate(
         1, 90, "fresh", "msgfeed", bvid="BV1test", uri="", root_id=""
     ) is True
+
+def _load_candidate_namespace(existing_review: dict) -> dict:
+    tree = ast.parse((ROOT / "like_fans.py").read_text(encoding="utf-8"))
+    body = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if "review_statuses" in targets:
+                body.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name == "add_review_candidate":
+            body.append(node)
+    module = ast.Module(body=body, type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {
+        "existing_review": existing_review,
+        "review_candidates": {},
+        "liked_set": set(),
+        "root_id_by_rpid": {
+            str(item["rpid"]): str(item.get("root_id") or "")
+            for item in existing_review.get("candidates") or []
+            if item.get("root_id")
+        },
+    }
+    exec(compile(module, str(ROOT / "like_fans.py"), "exec"), namespace)
+    return namespace
+
+def test_existing_pending_refreshes_without_counting_as_new():
+    namespace = _load_candidate_namespace(
+        {"candidates": [
+            {"rpid": 92, "status": "pending", "root_id": "77"},
+            {"rpid": 91, "status": "applied"},
+        ]}
+    )
+    assert namespace["add_review_candidate"](
+        1, 92, "fresh", "msgfeed", bvid="BV1test", uri="", root_id=""
+    ) is False
+    assert namespace["review_candidates"]["92"]["content"] == "fresh"
+    assert namespace["review_candidates"]["92"]["root_id"] == "77"
+    assert namespace["add_review_candidate"](
+        1, 91, "ignored", "msgfeed", bvid="BV1test", uri="", root_id=""
+    ) is False
+    assert "91" not in namespace["review_candidates"]
