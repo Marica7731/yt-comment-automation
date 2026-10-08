@@ -43,6 +43,10 @@ existing_review = like_review.load_review(REVIEW_PATH)
 review_statuses = {
     str(item.get("rpid")): str(item.get("status") or "pending")
     for item in existing_review.get("candidates") or []
+    if not (
+        str(item.get("status") or "") == "failed"
+        and str(item.get("result") or "") == "stale_list"
+    )
 }
 root_id_by_rpid = {
     str(item.get("rpid")): str(item.get("root_id") or "")

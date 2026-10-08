@@ -10,6 +10,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def _load_candidate_gate(existing_review: dict) -> tuple[dict, object]:
+    tree = ast.parse((ROOT / "like_fans.py").read_text(encoding="utf-8"))
+    body = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if "review_statuses" in targets:
+                body.append(node)
+        elif isinstance(node, ast.FunctionDef) and node.name == "add_review_candidate":
+            body.append(node)
+    module = ast.Module(body=body, type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {
+        "existing_review": existing_review,
+        "review_candidates": {},
+        "liked_set": set(),
+        "root_id_by_rpid": {},
+    }
+    exec(compile(module, str(ROOT / "like_fans.py"), "exec"), namespace)
+    return namespace["review_statuses"], namespace["add_review_candidate"]
+
 
 def _load_process_items(add_result: bool):
     tree = ast.parse((ROOT / "like_fans.py").read_text(encoding="utf-8"))
@@ -67,3 +88,18 @@ def test_new_candidate_is_counted_and_logged():
     count, output = _feed(add_result=True)
     assert count == 1
     assert "123" in output
+
+def test_stale_list_candidate_can_requeue_on_fresh_msgfeed():
+    statuses, add_candidate = _load_candidate_gate(
+        {
+            "candidates": [
+                {"rpid": 90, "status": "failed", "result": "stale_list"},
+                {"rpid": 91, "status": "applied"},
+            ]
+        }
+    )
+    assert "90" not in statuses
+    assert statuses["91"] == "applied"
+    assert add_candidate(
+        1, 90, "fresh", "msgfeed", bvid="BV1test", uri="", root_id=""
+    ) is True
