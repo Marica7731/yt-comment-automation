@@ -33,6 +33,9 @@ def is_pending_action(data_dir: Path, video_id: str) -> bool:
 def mark_processed(data_dir: Path, video_id: str) -> None:
     pending = load_pending(data_dir)
     key = str(video_id)
+    if not pending:
+        _pending_path(data_dir).unlink(missing_ok=True)
+        return
     if key not in pending:
         return
     pending.remove(key)
