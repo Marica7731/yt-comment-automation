@@ -503,6 +503,18 @@ def test_empty_raw_is_marked_raw_fetch_invalid(tmp_path, monkeypatch):
         part_date="2026-10-09",
         yt_id="emptyrawid",
     )
+    cache_dir = tmp_path / "yt_raw"
+    cache_dir.mkdir()
+    pipeline.review.queue_comment(
+        {
+            "bvid": video.bvid,
+            "yt_id": video.yt_id,
+            "title": video.title,
+            "draft_messages": [],
+            "source_text": "old audit only",
+        },
+        tmp_path,
+    )
     monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
     monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
     monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
@@ -522,7 +534,7 @@ def test_empty_raw_is_marked_raw_fetch_invalid(tmp_path, monkeypatch):
         lambda *args, **kwargs: pytest.fail("empty raw must not overwrite pending review state"),
     )
 
-    result = pipeline.process_video(video, tmp_path, dry_run=False)
+    result = pipeline.process_video(video, cache_dir, dry_run=False)
 
     assert result.status == "raw_fetch_invalid"
     assert "raw_fetch_invalid" in result.error

@@ -878,3 +878,38 @@ def _cleanup_rejected_duplicate(
     )
     _write_json(review_dir(data_dir) / f"{bvid}.json", item)
     return item
+
+
+def mark_raw_fetch_invalid(
+    bvid: str,
+    reason: str,
+    data_dir: Path | None = None,
+    started_at: str = "",
+    finished_at: str = "",
+) -> dict[str, Any]:
+    """将未发布候选标记为本次强制抓取无效，禁止进入审核或发布。"""
+    item = load_comment(bvid, data_dir)
+    status = str(item.get("status") or "")
+    if status not in {"pending", "failed"}:
+        raise RuntimeError(f"{bvid} 当前状态 {status} 不允许标记 raw_fetch_invalid")
+    failures = [str(x) for x in item.get("failures") or [] if str(x).strip()]
+    if reason not in failures:
+        failures.append(reason)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    item.update(
+        {
+            "status": "failed",
+            "result": "raw_fetch_invalid",
+            "error": reason,
+            "failures": failures,
+            "raw_fetch": {
+                "started_at": started_at,
+                "finished_at": finished_at,
+                "cache_used": False,
+                "force": True,
+            },
+            "updated_at": now,
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return item

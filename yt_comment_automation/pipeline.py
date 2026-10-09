@@ -595,11 +595,20 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     comments = list(dict.fromkeys(comments))
 
     # 同轮强制抓取的直接返回值为空时，禁止用 B 站简介或旧队列内容兜底。
-    # 这类结果按数据门禁保持既有 pending，并在 run 记录中显式标记。
+    # 这类结果按数据门禁标记 failed/raw_fetch_invalid，并在 run 记录中显式标记。
     if not any(str(comment).strip() for comment in comments) and not str(description or "").strip():
         result.status = "raw_fetch_invalid"
         result.error = "raw_fetch_invalid: forced raw returned empty description/comments"
-        result.detail = "raw_fetch_invalid；保持 pending，禁止 approve/apply"
+        result.detail = "raw_fetch_invalid；原 pending 已标记 failed，禁止 approve/apply"
+        try:
+            review.mark_raw_fetch_invalid(
+                video.bvid,
+                result.error,
+                data_dir=cache_dir.parent,
+                finished_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            )
+        except FileNotFoundError:
+            result.detail += "；审核文件不存在，未写入 failed"
         logger.error("[%s] %s", video.bvid, result.detail)
         return result
 
