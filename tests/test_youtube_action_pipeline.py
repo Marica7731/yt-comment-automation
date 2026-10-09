@@ -119,7 +119,8 @@ def test_already_sufficient_comment_consumes_action_pending(tmp_path, monkeypatc
     assert not (data_dir / "yt_raw" / "action_pending_ids.json").exists()
 
 
-def test_deleted_video_returns_to_due_targets(tmp_path, monkeypatch):
+@pytest.mark.parametrize("review_status", ["deleted", "pending"])
+def test_recheck_video_returns_to_due_targets(tmp_path, monkeypatch, review_status):
     from datetime import date
 
     video = collections.CollectionVideo(
@@ -151,13 +152,15 @@ def test_deleted_video_returns_to_due_targets(tmp_path, monkeypatch):
     monkeypatch.setattr(
         youtube_targets.review,
         "deleted_bvids",
-        lambda data_dir=None: {"BV1Deleted"},
+        lambda data_dir=None: (
+            {"BV1Deleted"} if review_status == "deleted" else set()
+        ),
     )
     monkeypatch.setattr(
         youtube_targets.review,
         "list_comments",
         lambda data_dir=None, status=None: (
-            [{"bvid": "BV1Deleted"}] if status == "pending" else []
+            [{"bvid": "BV1Deleted"}] if status == review_status else []
         ),
     )
     monkeypatch.setattr(
@@ -174,7 +177,10 @@ def test_deleted_video_returns_to_due_targets(tmp_path, monkeypatch):
     assert youtube_targets.due_targets(tmp_path) == ["abcdefghijk"]
 
 
-def test_deleted_video_is_reprocessed_without_auto_repost(tmp_path, monkeypatch):
+@pytest.mark.parametrize("review_status", ["deleted", "pending"])
+def test_recheck_video_is_processed_without_auto_repost(
+    tmp_path, monkeypatch, review_status
+):
     video = collections.CollectionVideo(
         collection="直播",
         section="歌枠",
@@ -209,13 +215,15 @@ def test_deleted_video_is_reprocessed_without_auto_repost(tmp_path, monkeypatch)
     monkeypatch.setattr(
         pipeline.review,
         "deleted_bvids",
-        lambda data_dir=None: {"BV1Deleted"},
+        lambda data_dir=None: (
+            {"BV1Deleted"} if review_status == "deleted" else set()
+        ),
     )
     monkeypatch.setattr(
         pipeline.review,
         "list_comments",
         lambda data_dir=None, status=None: (
-            [{"bvid": "BV1Deleted"}] if status == "deleted" else []
+            [{"bvid": "BV1Deleted"}] if status == review_status else []
         ),
     )
     monkeypatch.setattr(
