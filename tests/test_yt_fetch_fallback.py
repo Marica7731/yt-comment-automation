@@ -145,6 +145,62 @@ def test_official_api_parser_extracts_description_and_replies(tmp_path, monkeypa
     ]
 
 
+def test_innertube_parser_excludes_blocked_comment_author():
+    blocked_id = "UC5efbPKzrDaVfMaH5ghB8Bg"
+    data = {
+        "contents": [
+            {
+                "commentEntityPayload": {
+                    "properties": {"commentId": "blocked", "content": {"content": "bad setlist"}},
+                    "author": {"channelId": blocked_id, "displayName": "@changed-name"},
+                }
+            },
+            {
+                "commentEntityPayload": {
+                    "properties": {"commentId": "allowed", "content": {"content": "good setlist"}},
+                    "author": {"channelId": "UCallowed", "displayName": "trusted"},
+                }
+            },
+        ]
+    }
+
+    assert blocked_id in yt_fetch.BLOCKED_COMMENT_AUTHOR_CHANNEL_IDS
+    assert yt_fetch._extract_comment_entries(data) == [
+        {"id": "allowed", "text": "good setlist"}
+    ]
+
+
+def test_official_parser_excludes_blocked_comment_author():
+    items = [
+        {
+            "snippet": {
+                "topLevelComment": {
+                    "id": "blocked",
+                    "snippet": {
+                        "authorChannelId": {"value": "UC5efbPKzrDaVfMaH5ghB8Bg"},
+                        "textOriginal": "bad setlist",
+                    },
+                },
+            }
+        },
+        {
+            "snippet": {
+                "topLevelComment": {
+                    "id": "allowed",
+                    "snippet": {
+                        "authorChannelId": {"value": "UCallowed"},
+                        "textOriginal": "good setlist",
+                    },
+                },
+            }
+        },
+    ]
+
+    assert yt_fetch._official_comment_entries(items) == [
+        {"id": "allowed", "text": "good setlist"}
+    ]
+
+
 def test_request_gap_is_configurable(monkeypatch):
     from yt_comment_automation import req_pace
 
