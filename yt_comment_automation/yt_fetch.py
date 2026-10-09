@@ -448,7 +448,9 @@ def _extract_description_candidates(data: Any) -> list[str]:
             body = item.get(key)
             if isinstance(body, dict):
                 content = body.get("content")
-                if isinstance(content, str) and _is_timestamp_candidate_text(content):
+                if isinstance(content, str):
+                    # 简介正文必须原样返回；没有时间戳也属于有效 raw，
+                    # 否则管线会把“无歌单”误判为 raw_fetch_invalid。
                     texts.append(content)
         simple_text = item.get("simpleText")
         if isinstance(simple_text, str) and _is_timestamp_candidate_text(simple_text):

@@ -153,3 +153,10 @@ def test_request_gap_is_configurable(monkeypatch):
     monkeypatch.setattr(req_pace, "pace", lambda gap: seen.append(gap))
     yt_fetch._throttle()
     assert seen == [3.0]
+
+
+def test_description_candidates_keep_full_body_without_timestamps():
+    content = "#新人Vtuber #歌枠\n\nこれは歌单ではなく通常の简介です。"
+    data = {"attributedDescription": {"content": content}, "simpleText": "页面噪声"}
+
+    assert yt_fetch._extract_description_candidates(data) == [content]
