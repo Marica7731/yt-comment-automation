@@ -770,6 +770,8 @@ def run_pipeline(
     data_dir = config.data_dir()
     cache_dir = data_dir / "yt_raw"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    # 入口先清空历史内容，避免外部超时或中途异常留下可供下一轮采信的缓存。
+    _remove_content_caches([], cache_dir, dry_run)
 
     bili_comment.load_cookie_map()  # 启动时先验证发布凭据，process_video 再按视频加载
     posted = load_processed(data_dir)
