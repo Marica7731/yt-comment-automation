@@ -37,14 +37,16 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
             or not config.in_codex_scope(video.bvid, part_date=video.part_date)
         ):
             continue
-        # 新视频豁免必须优先于 pending 12 小时节流：歌单常延迟出现，
-        # 新视频进审核队列后若被节流，就会在 setlist 刚贴出时整轮错过。
+        # 新视频无条件进入本轮；不读取 fetch_times，也不受 pending 节流影响。
+        if pipeline._is_new_video(video.part_date):
+            ids.append(video.yt_id)
+            continue
+
         interval = 0.0
-        if not pipeline._is_new_video(video.part_date):
-            if video.bvid in pending_bvids:
-                interval = 12 * 3600.0
-            elif video.part_date:
-                interval = pipeline.OLD_VIDEO_REFETCH_HOURS * 3600.0
+        if video.bvid in pending_bvids:
+            interval = 12 * 3600.0
+        elif video.part_date:
+            interval = pipeline.OLD_VIDEO_REFETCH_HOURS * 3600.0
         last = float(fetch_times.get(video.yt_id) or 0.0)
         if not last or now - last >= interval:
             ids.append(video.yt_id)
