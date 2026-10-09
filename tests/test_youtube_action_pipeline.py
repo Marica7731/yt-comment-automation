@@ -114,3 +114,4 @@ def test_already_sufficient_comment_consumes_action_pending(tmp_path, monkeypatc
 
     assert result.status == "already_posted"
     assert not youtube_cache_sync.is_pending_action(data_dir, video_id)
+    assert not (data_dir / "yt_raw" / "action_pending_ids.json").exists()

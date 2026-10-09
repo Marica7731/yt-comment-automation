@@ -38,7 +38,10 @@ def mark_processed(data_dir: Path, video_id: str) -> None:
     pending.remove(key)
     path = _pending_path(data_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(sorted(pending)), encoding="utf-8")
+    if pending:
+        path.write_text(json.dumps(sorted(pending)), encoding="utf-8")
+    else:
+        path.unlink(missing_ok=True)
 
 
 def _save_pending(data_dir: Path, video_ids: set[str]) -> None:

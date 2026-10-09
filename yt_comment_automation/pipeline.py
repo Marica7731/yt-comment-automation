@@ -105,9 +105,9 @@ def _remove_content_caches(results: list[VideoResult], cache_dir: Path, dry_run:
         ledger_path = cache_dir / ledger_name
         if ledger_path.is_file():
             try:
-                ledger_path.write_text("{}", encoding="utf-8")
+                ledger_path.unlink()
             except OSError as ledger_err:
-                logger.warning("[%s] 清空抓取账本失败（忽略）: %s", ledger_name, ledger_err)
+                logger.warning("[%s] 删除抓取账本失败（忽略）: %s", ledger_name, ledger_err)
 
 
 def _fetch_bili_video_info(bvid: str, cookie_map: dict[str, str] | None = None) -> tuple[str, str, list[dict]]:
