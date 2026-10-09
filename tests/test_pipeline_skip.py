@@ -1,4 +1,6 @@
 
+import pytest
+
 from yt_comment_automation.pipeline import raw_has_timestamp_songlist  # noqa: E402
 from yt_comment_automation import pipeline  # noqa: E402
 
@@ -488,3 +490,40 @@ def test_upgrade_target_acted_and_pruned(tmp_path, monkeypatch):
     # 3. 歌单补足 -> 台账摘除
     pipeline.forget_upgrade_target(data_dir, "upgradetvid")
     assert pipeline.load_upgrade_targets(data_dir) == {}
+
+
+def test_empty_raw_is_marked_raw_fetch_invalid(tmp_path, monkeypatch):
+    from yt_comment_automation import collections
+
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1EmptyRaw",
+        title="empty raw",
+        part_date="2026-10-09",
+        yt_id="emptyrawid",
+    )
+    monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_fetch_bili_video_info",
+        lambda bvid, cookie_map=None: ("emptyrawid", "https://youtu.be/emptyrawid", []),
+    )
+    monkeypatch.setattr(
+        pipeline.yt_fetch,
+        "fetch_youtube_raw",
+        lambda *args, **kwargs: {"comments": [], "description": ""},
+    )
+    monkeypatch.setattr(
+        pipeline.review,
+        "queue_comment",
+        lambda *args, **kwargs: pytest.fail("empty raw must not overwrite pending review state"),
+    )
+
+    result = pipeline.process_video(video, tmp_path, dry_run=False)
+
+    assert result.status == "raw_fetch_invalid"
+    assert "raw_fetch_invalid" in result.error
+    assert "pending" in result.detail
