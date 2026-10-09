@@ -906,7 +906,7 @@ def mark_raw_fetch_invalid(
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     item.update(
         {
-            "status": "failed",
+            "status": "pending",
             "result": "raw_fetch_invalid",
             "error": reason,
             "failures": failures,
