@@ -216,3 +216,13 @@ def test_description_candidates_keep_full_body_without_timestamps():
     data = {"attributedDescription": {"content": content}, "simpleText": "页面噪声"}
 
     assert yt_fetch._extract_description_candidates(data) == [content]
+
+def test_description_candidates_ignore_timestamp_recommendation_when_body_exists():
+    content = "#歌枠\n0:04:34 メッセージ"
+    data = {
+        "attributedDescriptionBodyText": {"content": content},
+        "simpleText": "Santo Rosário | Sexta-feira | 04:00 | 10/10/2025 | Live Ao vivo",
+        "runs": [{"text": "22:30～復活配信だぁああ✨アコギ弾き語り配信"}],
+    }
+
+    assert yt_fetch._extract_description_candidates(data) == [content]

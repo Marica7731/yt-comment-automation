@@ -451,7 +451,7 @@ def _is_timestamp_candidate_text(text: str) -> bool:
 
 
 def _extract_description_candidates(data: Any) -> list[str]:
-    texts: list[str] = []
+    bodies: list[str] = []
     for item in _walk_dicts(data):
         # 视频简介主体（YT 新版结构：attributedDescription.content）
         for key in ("attributedDescription", "attributedDescriptionBodyText"):
@@ -461,7 +461,14 @@ def _extract_description_candidates(data: Any) -> list[str]:
                 if isinstance(content, str):
                     # 简介正文必须原样返回；没有时间戳也属于有效 raw，
                     # 否则管线会把“无歌单”误判为 raw_fetch_invalid。
-                    texts.append(content)
+                    bodies.append(content)
+    # 找到完整正文时禁止再拼页面碎片：推荐视频标题也可能含时间戳，
+    # 会跨视频污染简介并伪造 SETLIST 候选。
+    if bodies:
+        return list(dict.fromkeys(bodies))
+
+    texts: list[str] = []
+    for item in _walk_dicts(data):
         simple_text = item.get("simpleText")
         if isinstance(simple_text, str) and _is_timestamp_candidate_text(simple_text):
             texts.append(simple_text)
@@ -470,7 +477,7 @@ def _extract_description_candidates(data: Any) -> list[str]:
             joined = "".join(run.get("text", "") for run in runs if isinstance(run, dict))
             if _is_timestamp_candidate_text(joined):
                 texts.append(joined)
-    # 简介主体放最前（含 SETLIST 的整段），其余碎片在后
+    # 仅在页面没有完整正文时使用结构相近的时间戳碎片兜底
     return list(dict.fromkeys(texts))
 
 
