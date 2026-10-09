@@ -210,6 +210,8 @@ def test_is_junk_song_title_filters_onomatopoeia():
     assert is_junk_song_title("うんぽころこ") is False
     assert is_junk_song_title("ハーモニカ") is False
     assert is_junk_song_title("ﾋﾟﾖﾋﾟﾖ") is False
+    assert is_junk_song_title("sssSTART") is True
+    assert is_junk_song_title("START") is True
 
 
 def test_description_setlist_detected_as_songlist():

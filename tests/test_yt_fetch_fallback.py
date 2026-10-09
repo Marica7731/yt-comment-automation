@@ -61,6 +61,27 @@ def test_innertube_429_without_key_keeps_original_error(tmp_path, monkeypatch):
         raise AssertionError("429 should be re-raised when no API key is configured")
 
 
+def test_innertube_page_structure_error_falls_back_to_official(tmp_path, monkeypatch):
+    expected = {"id": "abcdefghijk", "comments": [], "description": "fresh"}
+    monkeypatch.setenv("YOUTUBE_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("YOUTUBE_FETCH_MODE", "auto")
+    monkeypatch.setenv("YOUTUBE_FETCH_BACKEND", "auto")
+    monkeypatch.setattr(
+        yt_fetch,
+        "_fetch_youtube_innertube_raw",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            yt_fetch.YtFetchError("ytInitialData not found")
+        ),
+    )
+    monkeypatch.setattr(
+        yt_fetch,
+        "_fetch_youtube_official_raw",
+        lambda *args, **kwargs: expected,
+    )
+
+    assert yt_fetch.fetch_youtube_raw("abcdefghijk", cache_dir=tmp_path) == expected
+
+
 def test_official_api_fallback_failure_is_auditable(tmp_path, monkeypatch):
     monkeypatch.setenv("YOUTUBE_API_KEY", "test-key-not-real")
     monkeypatch.setattr(
