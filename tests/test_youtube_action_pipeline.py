@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -119,15 +120,23 @@ def test_already_sufficient_comment_consumes_action_pending(tmp_path, monkeypatc
 
 
 def test_deleted_video_returns_to_due_targets(tmp_path, monkeypatch):
+    from datetime import date
+
     video = collections.CollectionVideo(
         collection="直播",
         section="歌枠",
         bvid="BV1Deleted",
         title="deleted",
-        part_date="2020-01-01",
+        part_date=date.today().isoformat(),
         yt_id="abcdefghijk",
     )
     snapshot = collections.CollectionSnapshot(videos=[video])
+    raw_dir = tmp_path / "yt_raw"
+    raw_dir.mkdir()
+    (raw_dir / "fetch_times.json").write_text(
+        json.dumps({"abcdefghijk": time.time()}),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(
         youtube_targets.collections,
@@ -147,7 +156,9 @@ def test_deleted_video_returns_to_due_targets(tmp_path, monkeypatch):
     monkeypatch.setattr(
         youtube_targets.review,
         "list_comments",
-        lambda data_dir=None, status=None: [],
+        lambda data_dir=None, status=None: (
+            [{"bvid": "BV1Deleted"}] if status == "pending" else []
+        ),
     )
     monkeypatch.setattr(
         youtube_targets.pipeline,
