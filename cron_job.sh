@@ -9,7 +9,8 @@ fi
 
 export DRY_RUN=0
 export DATA_DIR=/opt/yt-comment-automation/data
-export YOUTUBE_FETCH_MODE=cache_only
+# 内容证据必须由 WDC 当轮抓取；处理结束不留原始内容缓存。
+export YOUTUBE_FETCH_MODE=auto
 cd /opt/yt-comment-automation
 LOG_DIR=/opt/yt-comment-automation/logs
 mkdir -p "$LOG_DIR"
