@@ -24,8 +24,9 @@
 
 1. 本机只允许运行 `dev/run_youtube_action.py` 来推送目标、触发 GitHub Action、等待 payload 并同步 WDC；脚本内部通过 SSH/Git 完成网络编排。
 2. 所有 YouTube 和 B 站网络请求、评论发布、点赞 action 都必须经 `ssh -o BatchMode=yes vps-wdc` 在 WDC 执行。
-3. WDC 的 `cron_job.sh` 使用 `YOUTUBE_FETCH_MODE=cache_only`；缓存缺失必须报告为 `error_cache_miss` 或 Action 失败，禁止伪装为 `skipped_no_songs`。
-4. 每条命令必须有 bounded timeout；不执行无界等待。
+3. WDC 的 `cron_job.sh` 使用 `YOUTUBE_FETCH_MODE=auto`，内容必须当轮 `cache_dir=None, force=True` 新抓；抓取失败或返回空必须报告 `raw_fetch_invalid`/Action 失败，禁止伪装为 `skipped_no_songs`，禁止读取旧 payload 代替。
+4. 每次内容处理结束清空 `data/yt_raw/*.info.json`、`history/`、`fetch_times.json` 与 `yt_comment_ids.json`；不得给下一轮保留可采信的原始内容。
+5. 每条命令必须有 bounded timeout；不执行无界等待。
 
 ## 删除评论强门禁
 
@@ -36,9 +37,9 @@
 
 ## 每轮工作顺序
 
-1. 读取最新 `logs/run_*.log`、`data/run_*.json`，检查 `error_cache_miss`、`skipped_throttled`、异常 `skipped_no_songs`、反复跳过的正常稿件和未解释的 `error`。
-2. 在本机运行 `python3 dev/run_youtube_action.py --timeout 360 --poll-interval 5`，核对目标数、`fetched`、`failures` 和 WDC `sync`。
-3. 在 WDC 运行 `bash cron_job.sh`，读取最新日志和 run 记录。
+1. 读取最新 `logs/run_*.log`、`data/run_*.json`，检查 `raw_fetch_invalid`、Action 失败、异常 `skipped_no_songs`、反复跳过和未解释的 `error`。
+2. 在 WDC 对本轮 pending/待审核 ID 执行 `yt_fetch.fetch_youtube_raw(..., cache_dir=None, force=True)`，亲自读取同轮返回的 raw；失败或空结果保持 pending。
+3. 按需运行 Action 与 WDC `bash cron_job.sh` 做管线健康检查；Action payload 只能触发处理，不能替代步骤 2 的内容证据。
 4. 在 WDC 运行 `flock -n /tmp/like-fans.lock python3 like_fans.py >> logs/like_fans.log 2>&1`，该步骤只合并候选。
 5. 读取评论和点赞队列。评论状态为 `pending/approved/applying/applied/applied_unverified`；点赞状态为 `pending/approved/applied/rejected/failed`。
 6. 对范围内 pending 歌单读取 `source_text`、`draft_messages`、标题和来源，依据 `RULES.md` 审核；不完整或不可信的候选保持 pending。
@@ -51,9 +52,8 @@
 
 ## 状态语义
 
-- `skipped_throttled`：距上次真实抓取不足间隔，必须核对间隔账本。
-- `error_cache_miss`：Action 缓存缺失，属于生产阻塞，必须刷新 Action 后重跑。
-- `skipped_no_songs`：只有在缓存存在且原始来源确认无歌单时才可接受。
+- `raw_fetch_invalid`：同轮强制抓取失败、返回空或时间异常；必须保持 pending，禁止 approve/apply。
+- `skipped_no_songs`：只有同轮 `cache_dir=None, force=True` 返回的 raw 已亲自确认无歌单时才可接受。
 - `applied_unverified`：已尝试发布但验收未通过；已有 rpid 而顶层回读不到时按驳回处理，不等待审核。必须在同一轮对比输入、输出和真实回读，识别异常内容后修正重发并处理可见重复，不得静默结束。
 - `deleted`：评论已通过 `review_cli cleanup-retry-without-artist --delete-only` 删除，且删除后回读确认目标不存在；该终态不会自动重发。
 - `applied` 且 `verification.ok=true`：只有读到这个组合才算评论发布完成；禁止仅凭退出码、CLI 返回或“代码执行成功”判断。

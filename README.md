@@ -13,12 +13,10 @@ B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视
 5. **审核后发布 + 飞书通知**：Codex 批准后由 WDC 发布；超长评论自动切分主评论 + 楼中楼续写
    （B 站链接 / 油管链接 / 评论时间 / 歌曲数量）
 
-YouTube 评论抓取主链路由 GitHub Action 完成：`dev/run_youtube_action.py`
-先在 WDC 计算到期 ID，更新 `youtube_targets.txt` 并通过 SSH Git 推送触发
-`.github/workflows/fetch-youtube.yml`；轮询 `youtube-action-cache` 分支读取
-payload，再经 SSH 合并到 WDC 的 `data/yt_raw`。WDC 的 `cron_job.sh` 以
-`YOUTUBE_FETCH_MODE=cache_only` 运行，不直连 YouTube；缓存缺失必须报告为
-`error_cache_miss` 并刷新 Action，禁止降级成 `skipped_no_songs` 或普通跳过。
+YouTube 内容证据必须由 WDC 当轮强制抓取：`yt_fetch.fetch_youtube_raw(..., cache_dir=None, force=True)`。
+`dev/run_youtube_action.py` 仍负责 Action 编排与同步，但 payload 缓存不能代替新抓结果。
+WDC 的 `cron_job.sh` 使用 `YOUTUBE_FETCH_MODE=auto` 直接抓取；每次内容处理结束后清空
+`data/yt_raw/*.info.json`、`history/`、`fetch_times.json` 和 `yt_comment_ids.json`，下一轮没有旧内容可读。
 官方 YouTube Data API 是另一条已验证主路径：`YOUTUBE_FETCH_BACKEND=official`
 显式启用，key 只存 WDC `private.env`。2026-10-02 已在 WDC 实测
 `videos.list` 与 `commentThreads.list` 均返回 HTTP 200；不使用未配置的 GitHub secret。
@@ -28,7 +26,7 @@ payload，再经 SSH 合并到 WDC 的 `data/yt_raw`。WDC 的 `cron_job.sh` 以
 ```
 yt_comment_automation/
   collections.py   B站合集抓取 + 新增检测
-  yt_fetch.py      油管评论/简介抓取（无 cookie，原始 JSON 落盘缓存）
+  yt_fetch.py      油管评论/简介抓取（无 cookie；内容结果仅在当前调用内存中使用）
   clean.py         本地规则清洗：时间戳/歌名/歌手提取
   bili_comment.py  B站评论：cookie 加载、已有评论检测、发布
   notify.py        飞书文本消息
@@ -88,7 +86,7 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 当前项目 `yt-comment-automation` 飞书机器人；不读取旧 bridge |
 | `YOUTUBE_API_KEY` | 已在 WDC 实测通过的 YouTube Data API v3 key；只存 WDC `private.env`，不写入 Git 或 GitHub Actions secret |
 | `YOUTUBE_FETCH_BACKEND` | `official`（显式启用已验证 API 主路径）、`auto`（Innertube，429 且有 key 时恢复） |
-| `YOUTUBE_FETCH_MODE` | `auto`（默认）或 `cache_only`；生产 cron 强制 `cache_only` |
+| `YOUTUBE_FETCH_MODE` | 生产 cron 固定 `auto`；内容抓取必须 `cache_dir=None, force=True` |
 | `YOUTUBE_REQUEST_MIN_GAP_SECONDS` | YouTube 相邻请求最小间隔；GitHub Action workflow 使用 3 秒 |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
 
@@ -103,7 +101,7 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 
 - 已发布过「时间戳歌轴评论」的视频自动跳过（按 owner mid + 评论内容含 ≥3 条时间戳编号判定）
 - 处理记录存 `data/processed.json`，合集快照存 `data/collections_snapshot.json`，可安全重跑
-- 油管原始 JSON 缓存于 `data/yt_raw/<id>.info.json`，二次运行免抓取
+- 油管原始 JSON 不保留到下一轮；管线结束即清空 `data/yt_raw` 与 history
 
 ## 机密与安全
 

@@ -94,6 +94,37 @@ def test_scattered_chat_not_cut():
     assert _is_songlist_comment(mixed) is True
 
 
+def test_raw_chat_vs_fresh_structured_setlist():
+    """真实新抓样例：感谢语/反应时间点不是歌单，独立 Setlist 才是。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+
+    thanks_chat = """おつかささまでした！今日も楽しかったです
+11:09【テレキャスタービーボーイ】まっ！
+14:17【エゴロック】へい！
+18:05「沼ってけよ」ｲｹﾎﾞ♡
+27:43「大好きっすよ」(*ﾉｪﾉ)ｷｬｰ"""
+    assert _is_songlist_comment(thanks_chat) is False
+
+    real_setlist = """🐺☽ ໋꙳ Setlist 🐺🌟🎶
+『11:10』テレキャスタービーボーイ(long ver.) / すりぃ
+『14:16』エゴロック / すりぃ
+『21:21』コールボーイ / syudou"""
+    assert _is_songlist_comment(real_setlist) is True
+
+    achievement_chat = """配信ありがとうございました
+1:00:22 達成の瞬間:_uooo:
+1:47:35 日付が変わる瞬間の話題
+2:16:03 「黙れる？」
+2:58:09 かわいい"""
+    assert _is_songlist_comment(achievement_chat) is False
+
+    real_small_setlist = """- Setlist - 🕊️🌸
+0:24:19 遺書 - キタニタツヤ
+0:50:05 SUN - 星野源
+0:59:45 HOT LIMIT - T.M.Revolution"""
+    assert _is_songlist_comment(real_small_setlist) is True
+
+
 def test_scattered_chat_multiple_timestamps_not_songlist():
     """BV1ZehV6LEMc 式：感想夹多个时间戳（25:39、40:58）不是歌单。"""
     from yt_comment_automation.pipeline import _is_songlist_comment
@@ -226,7 +257,7 @@ def test_no_artist_opening_markers_filtered():
     assert ("すずめ", "") in songs
 
 
-def test_pending_video_skips_before_youtube_for_twelve_hours(tmp_path, monkeypatch):
+def test_pending_video_always_refetches_without_cache_gate(tmp_path, monkeypatch):
     from yt_comment_automation import collections
 
     video = collections.CollectionVideo(
@@ -234,7 +265,6 @@ def test_pending_video_skips_before_youtube_for_twelve_hours(tmp_path, monkeypat
         section="歌枠",
         bvid="BV1PendingGate",
         title="pending gate",
-        # 老视频才受 pending 12 小时节流；新视频必须每轮抓（见下一个用例）。
         part_date="2020-01-01",
         yt_id="abcdefghijk",
     )
@@ -248,66 +278,84 @@ def test_pending_video_skips_before_youtube_for_twelve_hours(tmp_path, monkeypat
             "abcdefghijk", "https://youtu.be/abcdefghijk", []
         ),
     )
-    monkeypatch.setattr(pipeline, "_pending_review_status", lambda bvid, data_dir: "pending")
-    monkeypatch.setattr(pipeline, "_last_fetch_age", lambda cache_dir, yt_id: 11 * 3600.0)
+    calls = []
 
-    def fail_if_called(*args, **kwargs):
-        raise AssertionError("pending 12 小时门控内不应请求 YouTube")
+    def fake_fetch(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"comments": [], "description": ""}
 
-    monkeypatch.setattr(pipeline.yt_fetch, "fetch_youtube_raw", fail_if_called)
+    monkeypatch.setattr(pipeline.yt_fetch, "fetch_youtube_raw", fake_fetch)
 
     result = pipeline.process_video(video, tmp_path, dry_run=False)
 
-    assert result.status == "skipped_throttled"
-    assert "不足 12" in result.error
+    assert result.status != "skipped_throttled"
+    assert len(calls) == 1
+    assert calls[0][1]["cache_dir"] is None
+    assert calls[0][1]["force"] is True
 
 
-def test_cache_miss_is_error_not_normal_skip(tmp_path, monkeypatch):
+def test_fetch_failure_is_error_not_normal_skip(tmp_path, monkeypatch):
     from yt_comment_automation import collections, yt_fetch
 
     video = collections.CollectionVideo(
         collection="直播",
         section="歌枠",
-        bvid="BV1CacheMiss",
-        title="cache miss",
+        bvid="BV1FetchError",
+        title="fetch error",
         part_date="2020-01-01",
-        yt_id="missingcache",
+        yt_id="fetcherror",
     )
-    monkeypatch.setenv("YOUTUBE_FETCH_MODE", "cache_only")
+    monkeypatch.setenv("YOUTUBE_FETCH_MODE", "auto")
     monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
     monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
     monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
     monkeypatch.setattr(
         pipeline,
         "_fetch_bili_video_info",
-        lambda bvid, cookie_map=None: ("missingcache", "https://youtu.be/missingcache", []),
+        lambda bvid, cookie_map=None: ("fetcherror", "https://youtu.be/fetcherror", []),
     )
-    monkeypatch.setattr(pipeline, "_pending_review_status", lambda bvid, data_dir: "none")
-    monkeypatch.setattr(pipeline, "_refetch_gate", lambda cache_dir, yt_id, part_date: (0.0, 0.0))
+
+    def failed_fetch(*args, **kwargs):
+        raise yt_fetch.YtFetchError("forced fetch failed")
+
+    monkeypatch.setattr(pipeline.yt_fetch, "fetch_youtube_raw", failed_fetch)
 
     result = pipeline.process_video(video, tmp_path, dry_run=False)
 
-    assert result.status == "error_cache_miss"
-    assert "GitHub Action 缓存缺失" in result.error
+    assert result.status == "error"
+    assert "forced fetch failed" in result.error
     assert result.status != "skipped_no_songs"
 
 
-def test_cleanup_cache_only_for_real_no_song_result(tmp_path):
+def test_remove_all_content_caches_and_ledgers(tmp_path):
     cache_dir = tmp_path / "yt_raw"
     cache_dir.mkdir()
-    for yt_id in ("throttled", "missing", "empty"):
+    for yt_id in ("posted", "missing", "empty"):
         (cache_dir / f"{yt_id}.info.json").write_text("{}", encoding="utf-8")
+        history = cache_dir / "history" / yt_id
+        history.mkdir(parents=True)
+        (history / "old.info.json").write_text("{}", encoding="utf-8")
+    (cache_dir / "fetch_times.json").write_text(
+        '{"posted": 1, "missing": 2, "empty": 3, "other": 4}', encoding="utf-8"
+    )
+    (cache_dir / "yt_comment_ids.json").write_text(
+        '{"posted": [], "missing": [], "empty": [], "other": []}', encoding="utf-8"
+    )
 
     results = [
-        pipeline.VideoResult("BV1Throttle", "throttled", "", "", "", status="skipped_throttled"),
-        pipeline.VideoResult("BV1Missing", "missing", "", "", "", status="error_cache_miss"),
+        pipeline.VideoResult("BV1Posted", "posted", "", "", "", status="applied"),
+        pipeline.VideoResult("BV1Missing", "missing", "", "", "", status="error"),
         pipeline.VideoResult("BV1Empty", "empty", "", "", "", status="skipped_no_songs"),
     ]
-    pipeline._cleanup_no_song_cache(results, cache_dir, dry_run=False)
+    pipeline._remove_content_caches(results, cache_dir, dry_run=False)
 
-    assert (cache_dir / "throttled.info.json").is_file()
-    assert (cache_dir / "missing.info.json").is_file()
-    assert not (cache_dir / "empty.info.json").exists()
+    assert not list(cache_dir.glob("*.info.json"))
+    assert not list((cache_dir / "history").glob("*"))
+    import json
+    fetch_times = json.loads((cache_dir / "fetch_times.json").read_text())
+    comment_ids = json.loads((cache_dir / "yt_comment_ids.json").read_text())
+    assert fetch_times == {}
+    assert comment_ids == {}
 
 
 def test_cli_returns_nonzero_for_cache_miss(monkeypatch, capsys):

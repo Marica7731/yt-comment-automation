@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 from . import review
 import time
 from dataclasses import dataclass, field
@@ -84,19 +85,29 @@ def save_processed(data_dir: Path, posted: set[str]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _cleanup_no_song_cache(results: list[VideoResult], cache_dir: Path, dry_run: bool) -> None:
-    """只清理真实抓取成功但没有歌单的缓存；节流和缓存缺失必须保留现场。"""
+def _remove_content_caches(results: list[VideoResult], cache_dir: Path, dry_run: bool) -> None:
+    """清空全部原始内容缓存与抓取账本；结果参数保留用于调用点审计。"""
+    del results
     if dry_run:
         return
-    for result in results:
-        if result.status != "skipped_no_songs" or not result.yt_id:
-            continue
+
+    for cache_path in cache_dir.glob("*.info.json"):
         try:
-            (cache_dir / f"{result.yt_id}.info.json").unlink()
-        except FileNotFoundError:
-            pass
-        except Exception as del_err:  # noqa: BLE001
-            logger.warning("[%s] 清理无效缓存失败（忽略）: %s", result.bvid, del_err)
+            cache_path.unlink()
+        except OSError as del_err:
+            logger.warning("[%s] 删除原始内容缓存失败（忽略）: %s", cache_path, del_err)
+
+    history_root = cache_dir / "history"
+    if history_root.is_dir():
+        shutil.rmtree(history_root, ignore_errors=True)
+
+    for ledger_name in ("fetch_times.json", "yt_comment_ids.json"):
+        ledger_path = cache_dir / ledger_name
+        if ledger_path.is_file():
+            try:
+                ledger_path.write_text("{}", encoding="utf-8")
+            except OSError as ledger_err:
+                logger.warning("[%s] 清空抓取账本失败（忽略）: %s", ledger_name, ledger_err)
 
 
 def _fetch_bili_video_info(bvid: str, cookie_map: dict[str, str] | None = None) -> tuple[str, str, list[dict]]:
@@ -188,6 +199,22 @@ _FEELING_MARKS = re.compile(
     r"ありがとう|おつ|良い[ー~～]?$|いい[ー~～]?$)",
     re.IGNORECASE,
 )
+
+
+# 感谢/观后感开头的评论必须有至少两行明确的“歌名 / 歌手”结构，
+# 否则时间点只能是直播片段、台词或反应，不能当歌单。
+_CONVERSATIONAL_OPENER = re.compile(
+    r"(?:おつかささまでした|お疲れ様でした|配信ありがとうございました|"
+    r"ありがとうございました|おつイズ|おつにじゅ|コラボ配信おつ)",
+    re.IGNORECASE,
+)
+
+_TIMESTAMP_REACTION_MARKERS = re.compile(
+    r"(?:ここ好き|のところ|達成の瞬間|日付が変わる瞬間|話題|黙れる|かわいい|"
+    r"いけいけ|沼ってけよ|大好きっすよ|合いの手|めっちゃ良かった|面白すぎ)",
+    re.IGNORECASE,
+)
+
 
 
 def _looks_like_song_line_rest(rest: str) -> bool:
@@ -326,41 +353,36 @@ def is_junk_song_title(song: str) -> bool:
 
 
 def _is_songlist_comment(text: str) -> bool:
-    """判定一条评论是否「结构化歌单」而非零散感想。
-
-    核心区分（不是看条数，是看时间戳行密度 + 内容）：
-    - 歌单：密集的时间戳行（如 Setlist 每行「时间戳 歌名/歌手」），
-      或「歌名 + 时间戳」无分隔符格式（如「ライラック 11:10」），
-      或「时间戳单独一行 + 下一行歌名」跨行格式（如「3:40\\nミックスナッツ/ Official髭男dism」）
-    - 感想：零星 1 个时间戳夹在聊天里（如「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」）
-    - 纯标记：全是開始/MC/雑談/あくび 等标记行，不算歌单
-
-    判定：≥2 个「歌曲时间戳行」（时间戳行去掉时间戳后像歌名、且不含纯标记词；
-    时间戳单独成行时看下一行是否像歌名）。
-    不设密度阈值（避免把「半歌单半感想」的评论一刀砍掉）。
-    """
+    """判定评论是否为结构化歌单；感谢语、反应和直播片段一律排除。"""
     ts_re = re.compile(r"(?:^|[^\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
-    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
     if len(lines) < 2:
         return False
+
     song_ts_lines = 0
+    strong_song_ts_lines = 0
     for idx, line in enumerate(lines):
         if not ts_re.search(line):
             continue
         rest = ts_re.sub("", line).strip()
         if not rest:
-            # 时间戳单独一行 → 看下一行是否有歌名（跨行歌单格式）
-            if idx + 1 < len(lines):
-                rest = lines[idx + 1].strip()
-                if ts_re.search(rest):
-                    continue  # 下一行也是时间戳开头，不是歌名
-            else:
+            if idx + 1 >= len(lines):
+                continue
+            rest = lines[idx + 1].strip()
+            if ts_re.search(rest):
                 continue
         if _NON_SONG_TS_MARKERS.search(rest):
+            continue
+        if _TIMESTAMP_REACTION_MARKERS.search(rest):
             continue
         if not _looks_like_song_line_rest(rest):
             continue
         song_ts_lines += 1
+        if _SONG_LINE_SEPARATORS.search(rest) or re.match(r"^\d{1,3}\s*[.．:：]", rest):
+            strong_song_ts_lines += 1
+
+    if any(_CONVERSATIONAL_OPENER.search(line) for line in lines[:3]):
+        return strong_song_ts_lines >= 2
     return song_ts_lines >= 2
 
 
@@ -515,50 +537,14 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     try:
         action_pending = youtube_cache_sync.is_pending_action(cache_dir.parent, yt_id)
         if action_pending:
-            logger.info("[%s] Action 缓存已同步，本轮强制进入处理", video.bvid)
-            gate_interval = 0.0
-            gate_age = 0.0
-        elif _is_new_video(video.part_date):
-            # 新视频每轮必抓：歌单常延迟出现，pending 队列不得把它节流到 12 小时。
-            gate_interval = 0.0
-            gate_age = 0.0
-        elif _pending_review_status(video.bvid, cache_dir.parent) == "pending":
-            gate_interval = PENDING_RECHECK_HOURS * 3600.0
-            gate_age = _last_fetch_age(cache_dir, yt_id)
-        else:
-            gate_interval, gate_age = _refetch_gate(cache_dir, yt_id, video.part_date)
-        if gate_interval and gate_age < gate_interval:
-            logger.info(
-                "[%s] 视频距上次抓取 %.1f 小时（ <%d 小时），本轮跳过",
-                video.bvid, gate_age / 3600, gate_interval // 3600,
-            )
-            result.status = "skipped_throttled"
-            result.error = f"视频距上次抓取不足 {gate_interval // 3600} 小时，本轮跳过"
-            return result
-        if upgrade_mode:
-            # 已发低质量评论的复查必须看最新评论区（否则读旧数据 → already_posted 死循环）。
-            # 频率按 B站发布时间分级（part_date 已有，零额外请求）：
-            # 一周内新投稿歌单常延迟出现 → 每轮 force 重抓；更早的老投稿 → 2 小时一次。
-            import datetime as _dt
-
-            fresh = False
-            if video.part_date:
-                try:
-                    fresh = (_dt.date.today() - _dt.date.fromisoformat(video.part_date)).days <= UPGRADE_FRESH_DAYS
-                except ValueError:
-                    fresh = False
-            # 已发布视频的复查：新内容必在最新排序第1页，某页全旧可提前停
-            if fresh:
-                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True, early_stop=True)
-            else:
-                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, max_age_seconds=UPGRADE_CHECK_TTL, early_stop=True)
-        else:
-            raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir)
-            if not raw_has_timestamp_songlist(raw):
-                # cache_only 下 force 不生效（yt_fetch 一进去就短路返回缓存），
-                # 这里只是同一份缓存的二次读取；真实重抓只能由 GitHub Action 供给。
-                logger.info("[%s] 缓存无歌单（cache_only，不直连 YouTube，待 Action 刷新）", video.bvid)
-                raw = yt_fetch.fetch_youtube_raw(yt_id, cache_dir=cache_dir, force=True)
+            logger.info("[%s] Action payload 已同步，本轮仍重新抓取内容", video.bvid)
+        # 内容证据必须来自本轮网络返回；不读写 raw 缓存或 history。
+        raw = yt_fetch.fetch_youtube_raw(
+            yt_id,
+            cache_dir=None,
+            force=True,
+            early_stop=upgrade_mode,
+        )
     except Exception as err:  # noqa: BLE001
         if isinstance(err, yt_fetch.YtCacheMissError):
             result.status = "error_cache_miss"
@@ -599,16 +585,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     comments = [c.get("text", "") for c in raw.get("comments", [])]
     description = raw.get("description", "")
 
-    # 合并 history 轮转的历次抓取：YouTube 评论返回内容有波动（同一视频不同轮
-    # 抓到不同评论子集），真歌单可能只出现在某一次抓取里，合并积累才能不漏。
-    try:
-        for hist_path in sorted((cache_dir / "history" / yt_id).glob("*.info.json")):
-            hist = json.loads(hist_path.read_text(encoding="utf-8"))
-            comments.extend(c.get("text", "") for c in hist.get("comments", []) if c.get("text"))
-            if not description and hist.get("description"):
-                description = hist.get("description", "")
-    except Exception as merge_err:  # noqa: BLE001
-        logger.warning("[%s] 合并 history 缓存失败（忽略）: %s", video.bvid, merge_err)
+    # 不合并 history：历史内容没有可信有效期，只使用本次网络返回值。
     comments = list(dict.fromkeys(comments))
 
     # 3b. 只保留「结构化歌单评论」，零散感想评论（夹 1 个时间戳的聊天）不进入候选，
@@ -888,9 +865,10 @@ def run_pipeline(
                 notify.send_feishu_message(brief)
             except Exception:  # noqa: BLE001
                 pass
-        # 只有真实抓取后的 0 首结果可清缓存；节流/缓存缺失不能删除有效现场。
-        _cleanup_no_song_cache(results, cache_dir, dry_run)
         time.sleep(1)
+
+    # 内容处理完成后不保留任何原始 JSON、history 或抓取内容账本。
+    _remove_content_caches(results, cache_dir, dry_run)
 
     # 保存快照与处理记录
     if not dry_run:

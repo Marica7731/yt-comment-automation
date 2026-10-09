@@ -30,10 +30,10 @@
 | `processed.json` | 已发布 bvid 集合（posted 立即落盘，防崩溃重复发） | 高 |
 | `collections_snapshot.json` | 合集视频快照（list 结构，每轮覆盖） | 中 |
 | `run_*.json` | 每轮运行明细，含 message 字段（发布内容落盘，复盘用） | 中 |
-| `yt_raw/<ytid>.info.json` | YouTube 抓取缓存（**无歌单的结果不落缓存**） | 中 |
-| `yt_raw/history/<ytid>/*.info.json` | 覆盖前轮转，留 3 份（解析前与主缓存合并） | 中 |
-| `yt_raw/fetch_times.json` | 每视频上次真实抓取时刻账本（重抓间隔依据） | 高 |
-| `yt_raw/yt_comment_ids.json` | 评论 id 账本（自适应翻页对账，每视频 500 条） | 中 |
+| `yt_raw/<ytid>.info.json` | 仅允许当前调用临时存在；管线结束必须删除 | 高 |
+| `yt_raw/history/` | 禁止保留；每次处理结束整目录删除 | 高 |
+| `yt_raw/fetch_times.json` | 处理结束清空；不得作为是否新抓的依据 | 高 |
+| `yt_raw/yt_comment_ids.json` | 处理结束清空；不得跨轮影响内容判断 | 高 |
 | `data/liked_rpids.json`（仓库根 data/） | 已点赞 rpid 集合（防 toggle 重复） | 高 |
 | `codex_review/*.json` | 歌单待审核/已批准/已发布账本，直接触发不覆盖终态 | 高 |
 | `like_review.json` | 点赞候选与 Codex 批准/执行结果，直接触发合并不覆盖终态 | 高 |
@@ -54,7 +54,7 @@
 ## 5. 关键机制与坑（按事故沉淀，改动前必读）
 
 ### 抓取（yt_fetch.py）
-- **抓取频率按"同一视频两次抓取的间隔"控制**：新视频（B站投稿 ≤2 天）每轮抓，老视频 ≥12 小时（`_refetch_gate`，上次抓取时刻查 `fetch_times.json` 账本——无歌单不落主缓存所以 mtime 不可用）。不到间隔跳过该视频本轮，**绝不用缓存内容顶替**。
+- **内容抓取没有缓存有效期**：每次审核/发布判断必须 `cache_dir=None, force=True` 重新请求；旧 raw、history、fetch_times 和 payload 永远不可作为内容依据。
 - **全局请求节流 2 秒**：`req_pace.py` 跨进程共享时钟（fcntl 文件锁），YouTube 抓取与 B 站请求、点赞脚本共用。风控看出口 IP 总速率。
 - **429 重试最多 5 次**（Retry-After 优先，退避 2/4/8/16/30s），任一次成功放行；飞书 429 通知一轮只发一条。
 - 已验证主路径之一：`YOUTUBE_FETCH_BACKEND=official` 显式使用 YouTube Data API v3；key 只存 WDC
@@ -64,11 +64,10 @@
   写 `youtube_targets.txt` 后用 SSH Git 推送触发 GitHub Action `fetch-youtube`；
   Action 按 3 秒最小间隔抓取并把 payload 提交到 `youtube-action-cache` 分支，
   本机轮询该分支后经 SSH 交给 `youtube_cache_sync` 合并；不依赖 GitHub API token。
-  WDC 的 `cron_job.sh` 强制 `YOUTUBE_FETCH_MODE=cache_only`，缺缓存必须报告
-  `error_cache_miss` 并刷新 Action，禁止伪装成 `skipped_no_songs`，
-  不再直连 YouTube。
+  WDC 的 `cron_job.sh` 使用 `YOUTUBE_FETCH_MODE=auto` 当轮抓取；内容证据固定
+  `cache_dir=None, force=True`，Action payload 只触发处理，禁止代替新抓返回值。
 - **自适应翻页**：评论按 `commentId`（缺失回退文本 sha1）对账，第 1 页有新评论才翻下一页，某页全旧即停——但**仅限已发布视频的升级复查**（early_stop=True）；未发布视频必须抓满 5 页（歌单被闲聊顶到后面页时，提前停=永远抓不回）。上限 5 页=100 条触达。
-- 缓存有效性只能由处理结果决定：发布=留缓存，0 首未发布=不落缓存+删旧缓存。静态判定缓存有效性会被骗（闲聊表像歌单）。
+- 缓存不保留：每次内容处理结束清空 `yt_raw/*.info.json`、整个 `history/`、`fetch_times.json` 与 `yt_comment_ids.json`；发布与否都不留原始内容缓存。
 - 简介提取必须认 `attributedDescription`（新版 YouTube 页面正文在这，simpleText 常为空）。
 - 评论排序优先「新しい順」（sortFilterSubMenuRenderer 的 continuation token），热门排序会漏置顶歌单。
 
