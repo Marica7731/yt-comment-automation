@@ -355,11 +355,8 @@ def test_remove_all_content_caches_and_ledgers(tmp_path):
 
     assert not list(cache_dir.glob("*.info.json"))
     assert not list((cache_dir / "history").glob("*"))
-    import json
-    fetch_times = json.loads((cache_dir / "fetch_times.json").read_text())
-    comment_ids = json.loads((cache_dir / "yt_comment_ids.json").read_text())
-    assert fetch_times == {}
-    assert comment_ids == {}
+    assert not (cache_dir / "fetch_times.json").exists()
+    assert not (cache_dir / "yt_comment_ids.json").exists()
 
 
 def test_cli_returns_nonzero_for_cache_miss(monkeypatch, capsys):
