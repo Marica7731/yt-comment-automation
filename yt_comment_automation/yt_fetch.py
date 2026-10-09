@@ -148,8 +148,6 @@ def _extract_json_after(text: str, marker: str) -> Any:
     pattern = re.compile(re.escape(marker) + r"\s*[=:]\s*({)")
     for m in pattern.finditer(text):
         start = m.start(1)
-        # 记录尝试起点，用于失败时输出诊断片段
-        attempt_start = start
         depth = 0
         in_string = False
         escape = False
@@ -771,17 +769,20 @@ def fetch_youtube_raw(
             video_id, resolved_cache_dir, force, max_age_seconds, early_stop
         )
     except Exception as err:
-        if not is_rate_limited_error(err):
+        rate_limited = is_rate_limited_error(err)
+        page_structure_error = "ytInitialData not found" in str(err)
+        if not (rate_limited or page_structure_error):
             raise
         if not config.get("YOUTUBE_API_KEY"):
             raise
+        reason = "YouTube 429" if rate_limited else "Innertube 页面结构异常"
         try:
             return _fetch_youtube_official_raw(
                 video_id, resolved_cache_dir, force, max_age_seconds, early_stop
             )
         except Exception as fallback_err:
             raise YtFetchError(
-                "YouTube 429; 已验证 official 恢复路径失败: "
+                f"{reason}; 已验证 official 恢复路径失败: "
                 f"{type(fallback_err).__name__}: {fallback_err}"
             ) from err
 
