@@ -144,6 +144,14 @@ def list_comments(data_dir: Path | None = None, status: str | None = None) -> li
     return out
 
 
+def deleted_bvids(data_dir: Path | None = None) -> set[str]:
+    return {
+        str(item.get("bvid") or "")
+        for item in list_comments(data_dir=data_dir, status="deleted")
+        if str(item.get("bvid") or "")
+    }
+
+
 def approve_comment(
     bvid: str,
     messages: list[str],

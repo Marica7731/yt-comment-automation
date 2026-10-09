@@ -20,7 +20,7 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
         fetch_times = json.loads((data_dir / "yt_raw" / "fetch_times.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         fetch_times = {}
-    posted = pipeline.load_processed(data_dir)
+    posted = pipeline.load_processed(data_dir) - review.deleted_bvids(data_dir)
     pending_bvids = {
         str(item.get("bvid") or "")
         for item in review.list_comments(data_dir=data_dir, status="pending")
