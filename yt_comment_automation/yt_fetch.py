@@ -27,6 +27,13 @@ WATCH_URL = "https://www.youtube.com/watch?v={video_id}&hl=ja&persist_hl=1"
 YOUTUBEI_NEXT = "https://www.youtube.com/youtubei/v1/next?prettyPrint=false&key={api_key}"
 TIMESTAMP_RE = re.compile(r"(^|[^\d])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
 
+# 用户确认该频道发布的歌单不可信；channel ID 稳定，不受改名影响。
+BLOCKED_COMMENT_AUTHOR_CHANNEL_IDS = frozenset({"UC5efbPKzrDaVfMaH5ghB8Bg"})
+
+
+def _is_blocked_comment_author(author_id: str) -> bool:
+    return str(author_id or "").strip() in BLOCKED_COMMENT_AUTHOR_CHANNEL_IDS
+
 
 class YtFetchError(RuntimeError):
     pass
@@ -273,6 +280,9 @@ def _extract_comment_entries(data: dict[str, Any]) -> list[dict[str, str]]:
             continue
         content = payload.get("properties", {}).get("content", {}).get("content")
         if not isinstance(content, str) or not content:
+            continue
+        author = payload.get("author") or {}
+        if _is_blocked_comment_author(author.get("channelId")):
             continue
         cid = payload.get("properties", {}).get("commentId") or payload.get("key") or ""
         if not cid:
@@ -634,6 +644,9 @@ def _official_comment_entries(items: Any) -> list[dict[str, str]]:
             if not isinstance(comment, dict):
                 continue
             snippet = comment.get("snippet") or {}
+            author = snippet.get("authorChannelId") or {}
+            if _is_blocked_comment_author(author.get("value")):
+                continue
             text = snippet.get("textOriginal") or snippet.get("textDisplay") or ""
             cid = str(comment.get("id") or "")
             if text and cid:
