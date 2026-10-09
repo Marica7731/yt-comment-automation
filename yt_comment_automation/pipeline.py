@@ -798,7 +798,7 @@ def run_pipeline(
     _remove_content_caches([], cache_dir, dry_run)
 
     bili_comment.load_cookie_map()  # 启动时先验证发布凭据，process_video 再按视频加载
-    posted = load_processed(data_dir)
+    posted = load_processed(data_dir) - review.deleted_bvids(data_dir)
 
     # 每次运行重置限流通知去重（跨 cron 周期每个视频可再提醒）
     _yt_rate_limited_notified.clear()

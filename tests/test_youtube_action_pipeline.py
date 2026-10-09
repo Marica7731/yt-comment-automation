@@ -9,6 +9,7 @@ from yt_comment_automation import (
     pipeline,
     youtube_action,
     youtube_cache_sync,
+    youtube_targets,
     yt_fetch,
 )
 
@@ -115,3 +116,118 @@ def test_already_sufficient_comment_consumes_action_pending(tmp_path, monkeypatc
     assert result.status == "already_posted"
     assert not youtube_cache_sync.is_pending_action(data_dir, video_id)
     assert not (data_dir / "yt_raw" / "action_pending_ids.json").exists()
+
+
+def test_deleted_video_returns_to_due_targets(tmp_path, monkeypatch):
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1Deleted",
+        title="deleted",
+        part_date="2020-01-01",
+        yt_id="abcdefghijk",
+    )
+    snapshot = collections.CollectionSnapshot(videos=[video])
+
+    monkeypatch.setattr(
+        youtube_targets.collections,
+        "load_snapshot",
+        lambda path=None: snapshot,
+    )
+    monkeypatch.setattr(
+        youtube_targets.pipeline,
+        "load_processed",
+        lambda data_dir: {"BV1Deleted", "BV1Applied"},
+    )
+    monkeypatch.setattr(
+        youtube_targets.review,
+        "deleted_bvids",
+        lambda data_dir=None: {"BV1Deleted"},
+    )
+    monkeypatch.setattr(
+        youtube_targets.review,
+        "list_comments",
+        lambda data_dir=None, status=None: [],
+    )
+    monkeypatch.setattr(
+        youtube_targets.pipeline,
+        "load_upgrade_targets",
+        lambda data_dir: {},
+    )
+    monkeypatch.setattr(
+        youtube_targets.config,
+        "in_codex_scope",
+        lambda *args, **kwargs: True,
+    )
+
+    assert youtube_targets.due_targets(tmp_path) == ["abcdefghijk"]
+
+
+def test_deleted_video_is_reprocessed_without_auto_repost(tmp_path, monkeypatch):
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1Deleted",
+        title="deleted",
+        part_date="2026-10-09",
+        yt_id="abcdefghijk",
+    )
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    processed = []
+
+    monkeypatch.setattr(pipeline.config, "data_dir", lambda: data_dir)
+    monkeypatch.setattr(pipeline, "_remove_content_caches", lambda *args, **kwargs: None)
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(
+        pipeline.collections,
+        "fetch_all_collections",
+        lambda: [video],
+    )
+    monkeypatch.setattr(
+        pipeline.collections,
+        "load_snapshot",
+        lambda path=None: collections.CollectionSnapshot(videos=[video]),
+    )
+    monkeypatch.setattr(
+        pipeline.collections,
+        "detect_new_videos",
+        lambda current, previous: [],
+    )
+    monkeypatch.setattr(pipeline, "load_processed", lambda data_dir: {"BV1Deleted"})
+    monkeypatch.setattr(
+        pipeline.review,
+        "deleted_bvids",
+        lambda data_dir=None: {"BV1Deleted"},
+    )
+    monkeypatch.setattr(
+        pipeline.review,
+        "list_comments",
+        lambda data_dir=None, status=None: (
+            [{"bvid": "BV1Deleted"}] if status == "deleted" else []
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline.config,
+        "in_codex_scope",
+        lambda *args, **kwargs: True,
+    )
+
+    def fake_process(candidate, cache_dir, dry_run):
+        processed.append((candidate.bvid, dry_run))
+        return pipeline.VideoResult(
+            bvid=candidate.bvid,
+            yt_id=candidate.yt_id,
+            title=candidate.title,
+            part_date=candidate.part_date,
+            collection=candidate.collection,
+            status="needs_codex_review",
+        )
+
+    monkeypatch.setattr(pipeline, "process_video", fake_process)
+    monkeypatch.setattr(pipeline.time, "sleep", lambda seconds: None)
+
+    record = pipeline.run_pipeline(mode="incremental", dry_run=True)
+
+    assert record.total == 1
+    assert processed == [("BV1Deleted", True)]
