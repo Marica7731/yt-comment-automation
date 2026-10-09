@@ -1,8 +1,12 @@
 
+from datetime import date, timedelta
+
 import pytest
 
 from yt_comment_automation.pipeline import raw_has_timestamp_songlist  # noqa: E402
 from yt_comment_automation import pipeline  # noqa: E402
+
+OLD_PART_DATE = (date.today() - timedelta(days=100)).isoformat()
 
 
 def test_refetch_gate_new_video_every_round_old_video_twelve_hours(tmp_path):
@@ -16,7 +20,7 @@ def test_refetch_gate_new_video_every_round_old_video_twelve_hours(tmp_path):
     assert (new_interval, new_age) == (0.0, 0.0)
 
     old_interval, old_age = pipeline._refetch_gate(
-        tmp_path, "old-video", "2020-01-01"
+        tmp_path, "old-video", OLD_PART_DATE
     )
     assert old_interval == 12 * 3600.0
     assert old_age == float("inf")
@@ -269,7 +273,7 @@ def test_pending_video_always_refetches_without_cache_gate(tmp_path, monkeypatch
         section="歌枠",
         bvid="BV1PendingGate",
         title="pending gate",
-        part_date="2020-01-01",
+        part_date=OLD_PART_DATE,
         yt_id="abcdefghijk",
     )
     monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
@@ -306,7 +310,7 @@ def test_fetch_failure_is_error_not_normal_skip(tmp_path, monkeypatch):
         section="歌枠",
         bvid="BV1FetchError",
         title="fetch error",
-        part_date="2020-01-01",
+        part_date=OLD_PART_DATE,
         yt_id="fetcherror",
     )
     monkeypatch.setenv("YOUTUBE_FETCH_MODE", "auto")
@@ -460,11 +464,11 @@ def test_upgrade_target_acted_and_pruned(tmp_path, monkeypatch):
 
     video = type("V", (), {
         "bvid": "BV1Upgrade", "yt_id": "upgradetvid",
-        "part_date": "2020-01-01",
+        "part_date": OLD_PART_DATE,
     })()
     posted_video = type("V", (), {
         "bvid": "BV1Posted", "yt_id": "postedvid",
-        "part_date": "2020-01-01",
+        "part_date": OLD_PART_DATE,
     })()
 
     monkeypatch.setattr(
