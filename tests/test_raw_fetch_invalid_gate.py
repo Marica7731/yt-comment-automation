@@ -23,7 +23,7 @@ def test_mark_raw_fetch_invalid_updates_only_unpublished_queue(tmp_path: Path):
         finished_at="2026-10-09T11:47:13+00:00",
     )
 
-    assert item["status"] == "failed"
+    assert item["status"] == "pending"
     assert item["result"] == "raw_fetch_invalid"
     assert item["raw_fetch"] == {
         "started_at": "2026-10-09T11:47:08+00:00",
@@ -31,7 +31,8 @@ def test_mark_raw_fetch_invalid_updates_only_unpublished_queue(tmp_path: Path):
         "cache_used": False,
         "force": True,
     }
-    assert review.load_comment(payload["bvid"], tmp_path)["status"] == "failed"
+    loaded = review.load_comment(payload["bvid"], tmp_path)
+    assert loaded["status"] == "pending"
 
     review.approve_comment(payload["bvid"], ["0:01:00 01. Song - Artist"], tmp_path)
     with pytest.raises(RuntimeError, match="不允许标记"):
@@ -50,7 +51,7 @@ def test_review_cli_marks_raw_fetch_invalid(monkeypatch, capsys):
         )
         return {
             "bvid": bvid,
-            "status": "failed",
+            "status": "pending",
             "result": "raw_fetch_invalid",
             "error": reason,
         }
@@ -80,7 +81,7 @@ def test_review_cli_marks_raw_fetch_invalid(monkeypatch, capsys):
     assert '"result": "raw_fetch_invalid"' in capsys.readouterr().out
 
 
-def test_pipeline_marks_existing_queue_failed_on_empty_raw(tmp_path: Path, monkeypatch):
+def test_pipeline_keeps_queue_pending_on_empty_raw(tmp_path: Path, monkeypatch):
     video = collections.CollectionVideo(
         collection="直播",
         section="歌枠",
@@ -119,6 +120,6 @@ def test_pipeline_marks_existing_queue_failed_on_empty_raw(tmp_path: Path, monke
 
     assert result.status == "raw_fetch_invalid"
     item = review.load_comment(video.bvid, tmp_path)
-    assert item["status"] == "failed"
+    assert item["status"] == "pending"
     assert item["result"] == "raw_fetch_invalid"
     assert item["raw_fetch"]["cache_used"] is False
