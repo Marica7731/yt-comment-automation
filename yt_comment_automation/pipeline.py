@@ -50,7 +50,7 @@ class VideoResult:
     title: str
     part_date: str
     collection: str
-    status: str = ""  # posted / skipped_throttled / skipped_no_songs / error_cache_miss / error / needs_codex_review
+    status: str = ""  # posted / skipped_throttled / skipped_no_songs / raw_fetch_invalid / error_cache_miss / error / needs_codex_review
     song_count: int = 0
     source: str = ""  # local / codex_review
     message: str = ""
@@ -593,6 +593,15 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
 
     # 不合并 history：历史内容没有可信有效期，只使用本次网络返回值。
     comments = list(dict.fromkeys(comments))
+
+    # 同轮强制抓取的直接返回值为空时，禁止用 B 站简介或旧队列内容兜底。
+    # 这类结果按数据门禁保持既有 pending，并在 run 记录中显式标记。
+    if not any(str(comment).strip() for comment in comments) and not str(description or "").strip():
+        result.status = "raw_fetch_invalid"
+        result.error = "raw_fetch_invalid: forced raw returned empty description/comments"
+        result.detail = "raw_fetch_invalid；保持 pending，禁止 approve/apply"
+        logger.error("[%s] %s", video.bvid, result.detail)
+        return result
 
     # 3b. 只保留「结构化歌单评论」，零散感想评论（夹 1 个时间戳的聊天）不进入候选，
     #    避免把「1:30:53 つかさくんの『悪ノ召使』めっちゃ良い」这类感想当歌单、
