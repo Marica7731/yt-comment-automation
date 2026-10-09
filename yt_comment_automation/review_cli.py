@@ -94,6 +94,16 @@ def main(argv: list[str] | None = None) -> int:
         help="按完整归属门禁删除已发布评论，不重发",
     )
 
+    p_mark_invalid = sub.add_parser(
+        "mark-raw-fetch-invalid", help="将未发布候选标记为本轮强制抓取无效"
+    )
+    p_mark_invalid.add_argument("--bvid", required=True)
+    p_mark_invalid.add_argument(
+        "--reason", default="raw_fetch_invalid: forced raw returned empty description/comments"
+    )
+    p_mark_invalid.add_argument("--started-at", default="")
+    p_mark_invalid.add_argument("--finished-at", default="")
+
     args = parser.parse_args(argv)
     if args.command == "list":
         items = review.list_comments(status=None if args.status == "all" else args.status)
@@ -173,6 +183,25 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0 if item.get("status") == "applied" else 1
+    if args.command == "mark-raw-fetch-invalid":
+        item = review.mark_raw_fetch_invalid(
+            args.bvid,
+            args.reason,
+            started_at=args.started_at,
+            finished_at=args.finished_at,
+        )
+        print(
+            json.dumps(
+                {
+                    "bvid": item["bvid"],
+                    "status": item.get("status"),
+                    "result": item.get("result"),
+                    "error": item.get("error"),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
     return 2
 
 
