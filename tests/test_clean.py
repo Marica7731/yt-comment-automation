@@ -332,3 +332,155 @@ def test_bilibili_op_placeholder_is_not_a_song():
         "00:00:00  OP\n直播开始时间：2026-10-10 17:00:20"
     )
     assert items == []
+
+
+def test_relay_performer_schedule_never_beats_real_songlist():
+    """BV152pu6GEzJ（6LDC7E-sLz0）：简介的出演者时段表每行带 / @handle，
+    被解析成「歌名/歌手」后 7 行盖过评论里 6 行真歌单。真实来源必须胜出。"""
+    description = (
+        "＝タイムスケジュール（※敬称略）＝\n"
+        "18:30 -   開会式 (シャノンch)　   / @shinozakishanon   \n"
+        "19:00 -   萌実　   / @moemi_chan   \n"
+        "19:30 -  天羅洲テラス　   / @amarasuterasu   \n"
+        "20:00 -  エトラ　   / @etrachannel   \n"
+        "20:30 -  宮霧りりい　   / @miyakirilily   \n"
+        "21:00 -   石狩あかり　   / @akari0415   \n"
+        "21:30 -   篠崎シャノン (閉会式含む)　   / @shinozakishanon   \n"
+    )
+    songlist_comment = (
+        "1:57 Start\n"
+        "2:00 〔1〕迷宮バタフライ / ほしな歌唄(水樹奈々)\n"
+        "7:03 〔2〕I beg you / Aimer\n"
+        "11:36 〔3〕名前のない怪物 / EGOIST\n"
+        "16:56 〔4〕モザイクロール / DECO*27\n"
+        "20:02 〔5〕Rolling star / YUI\n"
+        "23:15 〔6〕GO！ALEX！～希望誕生～ / JAM Project\n"
+        "27:40 締め\n"
+    )
+    ranked = clean.build_comment_songlist_ranked([songlist_comment], "")
+    top = ranked[0]
+    assert [s.song for s in top] == [
+        "迷宮バタフライ",
+        "I beg you",
+        "名前のない怪物",
+        "モザイクロール",
+        "Rolling star",
+        "GO！ALEX！～希望誕生～",
+        "締め",
+    ]
+    # 出演者时段表单独喂进去确实能解析出条目（所以旧代码才会让它参赛）
+    schedule_only = clean.build_comment_songlist_ranked([], description)
+    assert schedule_only and len(schedule_only[0]) >= 6
+    # 但只要评论里有真歌单，pipeline 就不该把简介传进来；这里用「空简介」
+    # 复现 pipeline 的 desc_rank_source 语义：有歌单评论时简介一律不参与。
+    assert clean.build_comment_songlist_ranked([songlist_comment], "") == ranked
+    # 社交账号名不是歌手，不能计入排序的「带歌手数」
+    assert clean._is_social_handle_artist("@shinozakishanon") is True
+    assert clean._is_social_handle_artist("Mrs. GREEN APPLE") is False
+
+
+def test_relay_collab_entrance_talk_lines_are_not_songs():
+    """BV1Dvpg6BE8Y（xa8nwPEI7h4）：3D collab 的时段评论把登场/谈话/感想
+    与歌曲混在一起，环节行不得进入歌单。"""
+    source = (
+        "00:01:36 開始\n"
+        "00:02:06 夜羽咲クロネ登場\n"
+        "00:03:47 Figaroさん、魔光リサさん登場\n"
+        "00:07:14 1曲目「星座になれたら/夜羽咲クロネ・Figaro・魔光リサ」\n"
+        "00:11:29 トーク\n"
+        "00:20:05 ANIMA/Figaro・魔光リサ\n"
+        "00:30:08 座って休憩＆トーク\n"
+        "00:31:15 改めて「CROSS REALITY LIVE Vol.3」の感想\n"
+        "00:46:49 潮騒/Figaro\n"
+    )
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    songs = [i.song for i in items]
+    assert "夜羽咲クロネ登場" not in songs
+    assert "座って休憩＆トーク" not in songs
+    assert not any("感想" in s for s in songs)
+    # 剩下的必须是真的歌，且「歌名/歌手」成对引号要拆开
+    assert [(i.song, i.artist) for i in items] == [
+        ("星座になれたら", "夜羽咲クロネ・Figaro・魔光リサ"),
+        ("ANIMA", "Figaro・魔光リサ"),
+        ("潮騒", "Figaro"),
+    ]
+    assert clean.is_obviously_non_song_text("夜羽咲クロネ登場") is True
+    assert clean.is_obviously_non_song_text("あっちゅー魔！") is False
+
+
+def test_artistless_duplicate_is_deduped():
+    """xa8nwPEI7h4：同一条评论首尾重复 01:20:48 告白日和，
+    无歌手条目此前被整体豁免去重，两份都会残留。"""
+    items = [
+        clean.ParsedSong(timestamp_label="1:20:48", timestamp_seconds=4848, song="告白日和、です！", artist=""),
+        clean.ParsedSong(timestamp_label="1:20:48", timestamp_seconds=4848, song="告白日和、です！", artist=""),
+    ]
+    assert len(clean.dedupe_song_items_by_timestamp_and_identity(items)) == 1
+
+
+def test_artist_annotations_do_not_leak_into_ranking():
+    """セットリスト/セトリ外 的宣伝、じゃんけん行不得计入歌手数。"""
+    source = (
+        "0:06:27 約束のしおり / ACE COLLECTION\n"
+        "0:17:59 紋白蝶 feat. 石原慎也 (Saucy Dog) / 東京スカパラダイスオーケストラ\n"
+        "1:45:57 366日 / HY\n"
+    )
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    assert [i.song for i in items] == ["約束のしおり", "紋白蝶 feat. 石原慎也", "366日"]
+
+
+def test_cjk_quoted_song_artist_pair_is_split():
+    """BV1Dvpg6BE8Y（xa8nwPEI7h4）评论区用「歌名/歌手」成对引号包裹整行，
+    分隔符落在外层引号内部被括号掩蔽逻辑跳过，此前整串变成歌名、歌手为空。"""
+    source = (
+        "00:20:05 「ANIMA/Figaro・魔光リサ」\n"
+        "00:27:00 「ラヴィ/夜羽咲クロネ・魔光リサ」\n"
+        "00:46:49 「潮騒/Figaro」\n"
+        "☆01:20:48 「告白日和、です！/夜羽咲クロネ・魔光リサ」\n"
+    )
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    assert [(i.song, i.artist) for i in items] == [
+        ("ANIMA", "Figaro・魔光リサ"),
+        ("ラヴィ", "夜羽咲クロネ・魔光リサ"),
+        ("潮騒", "Figaro"),
+        ("告白日和、です！", "夜羽咲クロネ・魔光リサ"),
+    ]
+
+
+def test_numbered_quoted_song_artist_pair_is_split():
+    """`1曲目「星座になれたら/夜羽咲クロネ・Figaro・魔光リサ」`：曲目编号不是歌名，
+    剥掉编号后成对引号内的 / 才拆得出歌手。"""
+    source = (
+        "00:07:14 1曲目「星座になれたら/夜羽咲クロネ・Figaro・魔光リサ」\n"
+        "00:13:09 ２曲目「恋するフォーチュンクッキー/夜羽咲クロネ・Figaro」\n"
+    )
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    assert [(i.song, i.artist) for i in items] == [
+        ("星座になれたら", "夜羽咲クロネ・Figaro・魔光リサ"),
+        ("恋するフォーチュンクッキー", "夜羽咲クロネ・Figaro"),
+    ]
+
+
+def test_unclosed_quote_song_is_still_parsed():
+    """`00:53:09 「あっちゅー魔！` 缺收尾引号，但它是真歌；
+    未闭合开引号不能当成「环节行」判据把歌丢掉。"""
+    source = "00:53:09 「あっちゅー魔！\n"
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    assert [i.song for i in items] == ["あっちゅー魔！"]
+    assert clean.is_obviously_non_song_text("あっちゅー魔！") is False
+
+
+def test_stage_cue_lines_are_not_songs():
+    """BV152pu6GEzJ（6LDC7E-sLz0）：`23:07 次でラスト`、`00:17:52 トーク②` 是串场词。
+    环节词尾跟圈号时只匹配词尾会漏掉；締め/ラスト 按 R08 之外另行排除。"""
+    assert clean.is_obviously_non_song_text("次でラスト") is True
+    assert clean.is_obviously_non_song_text("ラスト") is True
+    assert clean.is_obviously_non_song_text("ラスト1曲") is True
+    assert clean.is_obviously_non_song_text("トーク②") is True
+    assert clean.is_obviously_non_song_text("トーク③") is True
+    assert clean.is_obviously_non_song_text("休憩②") is True
+    # 真歌不能误伤
+    assert clean.is_obviously_non_song_text("GO！ALEX！～希望誕生～") is False
+    source = "23:07 次でラスト\n23:15 GO！ALEX！～希望誕生～ / JAM Project\n"
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    assert [i.song for i in items] == ["GO！ALEX！～希望誕生～"]

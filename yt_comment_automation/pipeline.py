@@ -677,7 +677,12 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
                 logger.info("[%s] %s", video.bvid, result.detail)
                 return result
         # 逐个候选来源尝试本地规则；即使全部失败，原始来源仍由上方 Codex 队列接管。
-        for cand in clean.build_comment_songlist_ranked(songlist_comments, local_source_text):
+        # 简介只在「评论区无歌单」时才是候选来源。接力/collab 的出演者时段表
+        # (18:30 - 開会式 (シャノンch) / @shinozakishanon) 每行都带 / @handle，会被解析成
+        # 歌名/歌手对，条数盖过真歌单评论（BV152pu6GEzJ：7 行出演表压过 6 行真歌单），
+        # 所以存在结构化歌单评论时简介一律不参与竞争。
+        desc_rank_source = "" if songlist_comments else local_source_text
+        for cand in clean.build_comment_songlist_ranked(songlist_comments, desc_rank_source):
             cand = [it for it in cand if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
             if not cand:
                 continue

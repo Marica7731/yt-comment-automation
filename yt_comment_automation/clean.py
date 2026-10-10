@@ -15,7 +15,33 @@ from .rules import has_protected_title as rules_has_protected_title  # noqa: F40
 
 # ---------- 基础文本规整 ----------
 
+_CJK_EDGE_QUOTE_PAIRS = {"「": "」", "『": "』", "【": "】", "《": "》", "〈": "〉", "｢": "｣"}
 
+
+
+def _unwrap_matched_cjk_edge_brackets(text: str) -> str:
+    """整行被成对 CJK 引号/括号包裹时剥掉外层。
+
+    日文评论区歌单惯用「时间戳 \"歌名/歌手\"」的写法，分隔符落在外层引号内部，
+    被 _FULLWIDTH_BRACKETS_OPEN 的括号掩蔽逻辑跳过，歌名与歌手拆不开，
+    结果整串变成歌名、歌手为空（xa8nwPEI7h4 真实样例）。
+    只剥真正成对的最外层（最多 3 层），内部内容不动；不成对时不剥。
+    """
+    t = (text or "").strip()
+    # `1曲目「星座になれたら/…」`：曲目编号不是歌名，剥掉后才看得到成对引号
+    without_index = re.sub(r"^第?\s*\d{1,3}\s*曲目?\s*", "", t).strip()
+    if without_index and _CJK_EDGE_QUOTE_PAIRS.get(without_index[0]):
+        t = without_index
+    for _ in range(3):
+        if len(t) < 3:
+            break
+        if _CJK_EDGE_QUOTE_PAIRS.get(t[0]) != t[-1]:
+            break
+        inner = t[1:-1].strip()
+        if not inner:
+            break
+        t = inner
+    return t
 def normalize_text(text: str) -> str:
     value = (text or "").replace("\r\n", "\n").replace("\r", "\n")
     value = value.replace("\u00a0", " ").replace("\u200b", "")
@@ -624,6 +650,11 @@ def extract_song_artist_core(text: str) -> Optional[dict]:
     raw = (text or "").strip()
     if not raw:
         return None
+    # 「歌名/歌手」整行成对包裹时，分隔符被外层引号掩蔽，先剥外层再拆分
+    # （xa8nwPEI7h4：00:07:14「星座になれたら/夜羽咲クロネ・Figaro・魔光リサ」）。
+    raw = _unwrap_matched_cjk_edge_brackets(raw)
+    if not raw:
+        return None
 
     # 双斜杠分隔：A // B
     double_slash_idx = _find_spaced_double_slash_outside_brackets(raw)
@@ -708,8 +739,22 @@ def is_obviously_non_song_text(text: str) -> bool:
     # 直播环节行：バンドメンバー紹介/誕生日グッズ紹介/アンコール待ち 这类结尾
     if re.search(r"(?:紹介|説明|コーナー|待ち|コール)\s*$", t):
         return True
+    # 登场/退场/出演 行（xa8nwPEI7h4：00:02:06 夜羽咲クロネ登場）不是歌曲
+    if re.search(r"(?:登場|退場|出演|開場|オープニング)\s*$", t):
+        return True
+    # 谈话/休息/感想 行（00:30:08 座って休憩＆トーク、00:17:52 トーク②）不是歌曲；
+    # 环节词后常跟 ②③ 之类的圈号，只匹配词尾会漏掉。
+    if re.search(r"(?:トーク|休憩|雑談|感想|タイムキープ)[①-⑳0-9０-９]*\s*$", t):
+        return True
+    if re.search(r"の(?:感想|時間)|^改めて", t):
+        return True
+    # 串场提示词（23:07 次でラスト：下一首就是最后一首）不是歌名
+    if re.fullmatch(r"(?:次で|いよいよ|これで)?\s*ラスト(?:\s*[0-9０-９]+\s*曲)?", t):
+        return True
+    # 只含一个开引号且没有任何内容的残片不是歌名
+    if re.fullmatch(r"[「『｢《〈【]", t):
+        return True
     return False
-
 
 def is_timestamp_only_line(text: str) -> bool:
     t = normalize_timeline_marker_chars(strip_timeline_tree_prefix(strip_weird_leading_chars(text or "")))
@@ -1284,10 +1329,17 @@ def dedupe_song_items_by_timestamp_and_identity(items: list[ParsedSong]) -> list
     for item in items:
         song_key = _normalize_loose_comparable_text(item.song)
         artist_key = _normalize_loose_comparable_text(item.artist)
-        if not song_key or not artist_key or item.timestamp_seconds is None:
+        # 无歌手条目此前被整体豁免去重，同一条歌单评论首尾重复的同一首歌
+        # （xa8nwPEI7h4 评论头尾各出现一次 01:20:48 告白日和）会残留两份。
+        # 同一时间戳 + 同一歌名已足以判定重复，缺失歌手不构成豁免理由。
+        if not song_key or item.timestamp_seconds is None:
             result.append(item)
             continue
-        key = f"{item.timestamp_seconds}|{song_key}|{artist_key}"
+        key = (
+            f"{item.timestamp_seconds}|{song_key}|{artist_key}"
+            if artist_key
+            else f"{item.timestamp_seconds}|{song_key}"
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -1356,6 +1408,14 @@ def format_song_items(items: list[ParsedSong], include_timestamps: bool = False)
     return "\n".join(lines)
 
 
+_SOCIAL_HANDLE_ARTIST_RE = re.compile(r"^[@＠]\s*[A-Za-z0-9_.]{2,}$")
+
+
+def _is_social_handle_artist(artist: Optional[str]) -> bool:
+    """演出者时段表行尾的社交链接 (/ @handle) 不是歌手，不能计入歌手数。"""
+    return bool(_SOCIAL_HANDLE_ARTIST_RE.match((artist or "").strip()))
+
+
 def build_comment_songlist_ranked(comment_texts: list[str], description: str = "") -> list[list[ParsedSong]]:
     """多来源提取，按歌曲信号强度降序返回全部候选来源。
 
@@ -1371,7 +1431,7 @@ def build_comment_songlist_ranked(comment_texts: list[str], description: str = "
             sources.append(songs)
     sources.sort(
         key=lambda songs: (
-            sum(1 for s in songs if s.artist),
+            sum(1 for s in songs if s.artist and not _is_social_handle_artist(s.artist)),
             sum(1 for s in songs if (s.timestamp_label or "").count(":") >= 2),
             len(songs),
         ),
