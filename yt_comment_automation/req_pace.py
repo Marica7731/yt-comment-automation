@@ -38,7 +38,6 @@ def pace(gap: float = DEFAULT_GAP_SECONDS) -> None:
 
 
 def _pace_posix(gap: float) -> None:
-    import fcntl
 
     lock = Path(_LOCK_PATH)
     lock.touch(exist_ok=True)

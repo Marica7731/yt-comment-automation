@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 # --- R01 / R10 全角数字/字母转半角 ---
 FULLWIDTH_DIGITS_RE = re.compile(r"[０-９]")
