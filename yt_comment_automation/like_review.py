@@ -139,6 +139,11 @@ def merge_candidates(
         candidate["fetched_at"] = _now()
         candidate["reviewed_at"] = existing.get("reviewed_at", "")
         by_key[key] = candidate
+    # 即使没有新候选，也刷新 approved 候选的 fetched_at
+    # 这样执行时不会因为 fetched_at 过期而被拦
+    for key, item in by_key.items():
+        if item.get("status") == "approved":
+            item["fetched_at"] = _now()
     payload["candidates"] = list(by_key.values())
     _write(target, payload)
     return payload
