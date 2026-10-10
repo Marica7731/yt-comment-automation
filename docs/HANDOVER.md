@@ -96,7 +96,7 @@
 - `collections_snapshot.json` 当前实际格式是顶层 list，不是 `{"videos": [...]}`；加载器必须同时兼容两种结构，否则 OWN_BVIDS 为空并漏掉全部折叠评论补扫。
 - 每个点赞批次必须亲自读取原始 msgfeed 与评论区 JSON，逐项对比原始条目、队列、`liked_rpids.json` 和真实 `action/result`；禁止只信 `like_fans.py` 的候选数或通知汇总。
 - 点赞 8 秒频控只在真实点赞后消耗；点赞成功即写 liked_rpids.json。
-- 点赞列表新鲜度硬门禁：执行时距 `fetched_at/queued_at` 不得超过 180 秒；过期候选只记 `failed/result=stale_list`，不访问 action 接口。批准操作会把批次上限同步为当前 approved 数，避免旧 `max_count` 阻断本批执行。
+- 点赞列表新鲜度硬门禁：执行时距 `fetched_at/queued_at` 不得超过 180 秒；过期候选禁止 action，但必须立即重新运行 `flock -n /tmp/like-fans.lock python3 like_fans.py >> logs/like_fans.log 2>&1` 刷新列表，重新审核并在新的 180 秒窗口内继续执行，禁止以 failed/stale_list 作为终点；只有连续多次重试仍无法获得新鲜列表或执行失败才可标记 failed，且必须在下一轮继续重试直到成功或确认不可恢复。批准操作会把批次上限同步为当前 approved 数，避免旧 `max_count` 阻断本批执行。
 - 飞书通知只有标题一个 👍，明细纯文本不折叠，仅有点赞动作才发；跳过明细只进 stdout 日志。
 
 ### 通知（notify.py）
