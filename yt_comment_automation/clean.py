@@ -804,6 +804,9 @@ def _looks_like_bare_song_title(text: str, source_line: str = "") -> bool:
         return False
     if source_line and _BARE_TITLE_EXCLUDE.search(source_line):
         return False
+    # 直播环节/章节标记（OP、配信スタート、出発進行、Cパート 等）不是歌名
+    if is_non_song_section_marker(t):
+        return False
     # 1-3 字符纯平假名是助词/残片（まで、から），不是歌名
     if re.fullmatch(r"[ぁ-ん]{1,3}", t):
         return False
@@ -889,12 +892,12 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
 
 
 _NON_SONG_SECTION_MARKER_RE = re.compile(
-    r"^(opening|open|op|start|starting|intro|introduction|幕開け|開幕|開始|スタート|オープニング|closing|close|end|ending|ed|outro|閉幕|終幕|終了|エンディング)$"
+    r"^(opening|open|op|start|starting|intro|introduction|幕開け|開幕|開始|スタート|オープニング|closing|close|end|ending|ed|outro|閉幕|終幕|終了|エンディング|配信スタート|配信開始|配信終了|出発進行|タイムスタンプ|セットリスト|setlist|曲リスト|(?:[a-z]+)?パート)$"
 )
 
 
 def normalize_section_marker_text(text: str) -> str:
-    value = (text or "").normalize("NFKC") if hasattr(text, "normalize") else (text or "")
+    value = unicodedata.normalize("NFKC", text or "")
     value = re.sub(r"[\s　_\-—–−/／|｜￤∣丨:：;；,，.。!！?？~～・･]+", "", value)
     return value.strip().lower()
 
@@ -1399,3 +1402,4 @@ def build_comment_songlist(comment_texts: list[str], description: str = "") -> l
     """
     ranked = build_comment_songlist_ranked(comment_texts, description)
     return ranked[0] if ranked else []
+import unicodedata

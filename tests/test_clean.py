@@ -292,3 +292,43 @@ def test_katakana_start_marker_is_not_a_song():
     assert [item.song for item in items] == ["怪獣"]
     assert clean.is_obviously_non_song_text("スタート") is True
     assert clean.is_non_song_section_marker("スタート") is True
+
+
+def test_stream_timeline_markers_are_not_songs():
+    """BV1uCpv6gEn8：评论里「タイムスタンプ」段的 OP/配信スタート/出発進行
+    与「セットリスト」段混在一起，环节行不得进入歌单。"""
+    source = (
+        "🐤💛💌💕タイムスタンプ🐧🩵💌💕\n"
+        "00:00 OP\n"
+        "01:25  配信スタート\n"
+        "01:39 出発進行～！\n"
+        "24:14 次枠出演者さん紹介\n"
+        "🐤💛💌💕セットリスト🐧🩵💌💕\n"
+        "02:21 🎵愛包ダンスホール ／ HIMEHINA\n"
+        "07:06 🎵友情ノーチェンジ／ μ's\n"
+        "11:59 🎵コイスルオトメ ／ いきものがかり\n"
+        "17:37 🎵けーたいみしてよ ／ MAISONdes\n"
+        "20:32 🎵浮気したらあかんで ／  コレサワ\n"
+        "25:57 🎵Family Song ／ 星野源\n"
+    )
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    assert [i.song for i in items] == [
+        "愛包ダンスホール",
+        "友情ノーチェンジ",
+        "コイスルオトメ",
+        "けーたいみしてよ",
+        "浮気したらあかんで",
+        "Family Song",
+    ]
+    assert clean.is_non_song_section_marker("OP") is True
+    assert clean.is_non_song_section_marker("配信スタート") is True
+    assert clean.is_non_song_section_marker("出発進行～！") is True
+    assert clean.is_non_song_section_marker("Ｃパート") is True
+
+
+def test_bilibili_op_placeholder_is_not_a_song():
+    """BV1Eppv69E7A：B站简介模板里的「00:00:00  OP」不是歌曲。"""
+    items = clean.extract_plain_songs_from_source_timeline(
+        "00:00:00  OP\n直播开始时间：2026-10-10 17:00:20"
+    )
+    assert items == []
