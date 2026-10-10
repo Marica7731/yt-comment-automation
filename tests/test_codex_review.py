@@ -860,3 +860,93 @@ def test_cleanup_rejected_duplicate_deletes_only_old_comment(tmp_path: Path, mon
     assert result["status"] == "applied"
     assert result["rpids"] == ["new-rpid"]
     assert result["approved_messages"] == [corrected]
+
+
+def test_republish_corrected_deletes_old_then_reposts(tmp_path: Path, monkeypatch):
+    message = "0:01:00 01. バラライカ - 月島きらり"
+    corrected = "0:01:00-0:04:30 01. バラライカ - 月島きらり"
+    payload = {
+        "bvid": "BV1Republish",
+        "yt_id": "yt-republish",
+        "title": "republish corrected",
+        "draft_messages": [message],
+        "draft_song_count": 1,
+        "source_text": message,
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1Republish", [message], tmp_path)
+    item = review.load_comment("BV1Republish", tmp_path)
+    item.update({"status": "applied", "rpids": ["123456"], "verification": {"ok": True}})
+    review._write_json(review.review_dir(tmp_path) / "BV1Republish.json", item)
+
+    deleted = []
+    monkeypatch.setattr(review.config, "owner_mid", lambda: "owner")
+    monkeypatch.setattr(
+        review.bili_comment,
+        "load_cookie_map",
+        lambda: {"bili_jct": "csrf", "DedeUserID": "owner"},
+    )
+    monkeypatch.setattr(review.bili_comment, "get_aid", lambda bvid, cookies: 42)
+
+    class Comment:
+        rpid = "123456"
+        mid = "owner"
+
+    monkeypatch.setattr(
+        review.bili_comment,
+        "list_comments",
+        lambda bvid, cookies, max_pages=5: [Comment()],
+    )
+    monkeypatch.setattr(
+        review.bili_comment,
+        "find_comment_by_rpid",
+        lambda bvid, rpid, cookies: (
+            {"exists": False, "code": 12006}
+            if deleted
+            else {"exists": True, "mid": "owner", "message": message}
+        ),
+    )
+    monkeypatch.setattr(
+        review.bili_comment,
+        "delete_comment",
+        lambda bvid, rpid, cookies: (deleted.append(rpid) or {"code": 0, "message": ""}),
+    )
+    published = []
+    monkeypatch.setattr(
+        review,
+        "apply_comment",
+        lambda bvid, data_dir=None: published.append(review.load_comment(bvid, data_dir))
+        or {"bvid": bvid, "status": "applied"},
+    )
+
+    result = review.republish_corrected("BV1Republish", [corrected], tmp_path)
+
+    assert deleted == ["123456"]
+    assert result["status"] == "applied"
+    republished = review.load_comment("BV1Republish", tmp_path)
+    assert republished["approved_messages"] == [corrected]
+    assert republished["previous_rpids"] == ["123456"]
+    assert republished["corrected_republish"] is True
+    assert published[0]["approved_messages"] == [corrected]
+
+
+def test_republish_corrected_refuses_identical_message(tmp_path: Path):
+    message = "0:01:00 01. バラライカ - 月島きらり"
+    payload = {
+        "bvid": "BV1RepublishSame",
+        "yt_id": "yt-republish-same",
+        "title": "republish same",
+        "draft_messages": [message],
+        "draft_song_count": 1,
+        "source_text": message,
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment("BV1RepublishSame", [message], tmp_path)
+    item = review.load_comment("BV1RepublishSame", tmp_path)
+    item.update({"status": "applied", "rpids": ["123456"], "verification": {"ok": True}})
+    review._write_json(review.review_dir(tmp_path) / "BV1RepublishSame.json", item)
+
+    with pytest.raises(RuntimeError, match="与原发布内容相同"):
+        review.republish_corrected("BV1RepublishSame", [message], tmp_path)

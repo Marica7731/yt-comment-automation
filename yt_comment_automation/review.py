@@ -679,6 +679,58 @@ def cleanup_duplicates_and_retry_without_artist(
     return apply_comment(bvid, data_dir=data_dir)
 
 
+def republish_corrected(
+    bvid: str,
+    messages: list[str],
+    data_dir: Path | None = None,
+    reviewer: str = "codex",
+    note: str = "",
+) -> dict[str, Any]:
+    """修正已发布文案：先按完整归属门禁删除旧评论，再用修正文案重发一条。
+
+    与 cleanup-retry-without-artist 的区别：那条路径只接受「去歌手」这一种修正，
+    且要求 applied_unverified；本路径用于内容本身写错（如时间戳格式选错）时，
+    用重新拟定的文案替换已发布评论。删除仍复用 _delete_applied_comment_only
+    的全部门禁（bvid/rpid/bili_jct/DedeUserID==OWNER_MID/aid/归属/内容一致），
+    删除失败则不重发。
+    """
+    item = load_comment(bvid, data_dir)
+    if item.get("status") not in {"applied", "applied_unverified"}:
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许修正重发")
+    if item.get("corrected_republish"):
+        raise RuntimeError(f"{bvid} 已执行过修正重发，不重复执行")
+    old_messages = [str(m) for m in item.get("approved_messages") or [] if str(m).strip()]
+    corrected = [str(m).strip() for m in messages if str(m).strip()]
+    if not corrected:
+        raise RuntimeError(f"{bvid} 缺少修正文案")
+    if corrected == old_messages:
+        raise RuntimeError(f"{bvid} 修正文案与原发布内容相同，拒绝重发")
+
+    deleted_item = _delete_applied_comment_only(bvid, data_dir=data_dir)
+    deleted = [str(x) for x in deleted_item.get("deleted_rpids") or [] if str(x).strip()]
+    item = load_comment(bvid, data_dir)
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    item.pop("verification", None)
+    item.update(
+        {
+            "status": "approved",
+            "approved_messages": corrected,
+            "song_count": _count_song_lines(corrected),
+            "reviewer": reviewer,
+            "note": note or "修正已发布文案后重发（先按门禁删除旧评论）",
+            "reviewed_at": now,
+            "updated_at": now,
+            "rpids": [],
+            "previous_rpids": deleted,
+            "deleted_rpids": deleted,
+            "corrected_republish": True,
+            "correction_reason": "published_content_corrected",
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return apply_comment(bvid, data_dir=data_dir)
+
+
 def apply_comment(
     bvid: str,
     data_dir: Path | None = None,

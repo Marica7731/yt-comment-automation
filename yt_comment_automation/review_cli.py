@@ -94,6 +94,15 @@ def main(argv: list[str] | None = None) -> int:
         help="按完整归属门禁删除已发布评论，不重发",
     )
 
+    p_republish = sub.add_parser(
+        "republish-corrected",
+        help="按门禁删除已发布评论后，用修正文案重发一条",
+    )
+    p_republish.add_argument("--bvid", required=True)
+    p_republish.add_argument("--messages-file", required=True)
+    p_republish.add_argument("--reviewer", default="codex")
+    p_republish.add_argument("--note", default="")
+
     p_mark_invalid = sub.add_parser(
         "mark-raw-fetch-invalid", help="将未发布候选标记为本轮强制抓取无效"
     )
@@ -163,6 +172,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification"), "deleted_rpids": item.get("deleted_rpids")}, ensure_ascii=False))
         return 0 if item.get("status") in {"applied", "deleted"} else 1
+    if args.command == "republish-corrected":
+        item = review.republish_corrected(
+            args.bvid,
+            _messages_from_file(args.messages_file),
+            reviewer=args.reviewer,
+            note=args.note,
+        )
+        print(
+            json.dumps(
+                {
+                    "bvid": item["bvid"],
+                    "status": item.get("status"),
+                    "verification": item.get("verification"),
+                    "deleted_rpids": item.get("deleted_rpids"),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0 if item.get("status") == "applied" else 1
     if args.command == "reapprove-rejected":
         item = review.reapprove_rejected(
             args.bvid,
