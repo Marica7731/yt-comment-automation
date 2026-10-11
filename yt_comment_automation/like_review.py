@@ -268,7 +268,7 @@ def apply_approved(
     max_count = payload.get("max_count")
     if max_count is not None and len(approved) > int(max_count):
         raise ValueError(f"审核通过 {len(approved)} 条，超过 max_count={max_count}")
-    for item in approved:
+    for index, item in enumerate(approved):
         oid, rpid = item.get("oid"), item.get("rpid")
         key = str(rpid)
         freshness_error = _list_freshness_error(item, now=clock())
@@ -319,7 +319,8 @@ def apply_approved(
             item.update({"status": "failed", "result": "exception", "error": str(err)[:240]})
             failed_count += 1
             _write(target, payload)
-            sleep(8)
+            if index < len(approved) - 1:
+                sleep(8)
             continue
         if isinstance(response, dict) and response.get("code") == 0:
             liked.add(key)
@@ -334,7 +335,8 @@ def apply_approved(
             item.update({"status": "failed", "result": "api_error", "error": f"code={code} {message}"})
             failed_count += 1
         _write(target, payload)
-        sleep(8)
+        if index < len(approved) - 1:
+            sleep(8)
 
     payload["last_applied_at"] = _now()
     _write(target, payload)

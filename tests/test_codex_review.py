@@ -950,3 +950,57 @@ def test_republish_corrected_refuses_identical_message(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="与原发布内容相同"):
         review.republish_corrected("BV1RepublishSame", [message], tmp_path)
+
+
+def test_like_apply_sleeps_only_after_real_action(tmp_path: Path):
+    """8 秒频控只在真实点赞后消耗，最后一条之后不再空等。"""
+    path = tmp_path / "like_review.json"
+    fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+    like_review.merge_candidates(
+        [
+            {"oid": 1, "rpid": 101, "content": "a", "queued_at": fetched_at},
+            {"oid": 2, "rpid": 102, "content": "b", "queued_at": fetched_at},
+            {"oid": 3, "rpid": 103, "content": "c", "queued_at": fetched_at},
+        ],
+        path,
+    )
+    like_review.approve(["101", "102", "103"], path)
+    sleeps: list[float] = []
+
+    result = like_review.apply_approved(
+        lambda oid, rpid: False,
+        lambda oid, rpid: {"code": 0},
+        path,
+        sleep=sleeps.append,
+    )
+
+    assert result["liked"] == 3
+    assert result["failed"] == 0
+    assert sleeps == [8, 8]
+
+
+def test_like_apply_does_not_sleep_when_already_liked(tmp_path: Path):
+    """已赞跳过不消耗 8 秒频控，避免挤占 180 秒新鲜度窗口。"""
+    path = tmp_path / "like_review.json"
+    fetched_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z")
+    like_review.merge_candidates(
+        [
+            {"oid": 1, "rpid": 201, "content": "a", "queued_at": fetched_at},
+            {"oid": 2, "rpid": 202, "content": "b", "queued_at": fetched_at},
+        ],
+        path,
+    )
+    like_review.approve(["201", "202"], path)
+    sleeps: list[float] = []
+
+    result = like_review.apply_approved(
+        lambda oid, rpid: False,
+        lambda oid, rpid: {"code": 0},
+        path,
+        sleep=sleeps.append,
+        liked_set={"201"},
+    )
+
+    assert result["skipped"] == 1
+    assert result["liked"] == 1
+    assert sleeps == []
