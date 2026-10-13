@@ -220,6 +220,15 @@ def test_is_junk_song_title_filters_onomatopoeia():
     assert is_junk_song_title("START") is True
 
 
+def test_is_junk_song_title_filters_real_stream_segment_samples():
+    """DUAWNJqI9bI 的两个无歌手直播片段不得进入候选。"""
+    from yt_comment_automation.pipeline import is_junk_song_title
+
+    assert is_junk_song_title("あくび") is True
+    assert is_junk_song_title("焼肉屋の話") is True
+    assert is_junk_song_title("すずめ") is False
+
+
 def test_description_setlist_detected_as_songlist():
     """BV15wYE68EBb：B站简介自带 SETLIST（无歌手歌名）应判为歌单并进入审核候选。"""
     from yt_comment_automation.pipeline import _is_songlist_comment

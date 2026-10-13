@@ -344,6 +344,8 @@ def is_junk_song_title(song: str) -> bool:
     #   アニソン / vsinger / karaoke」整句被解析成 55+ 字的"歌名+歌手"）
     if len(s) > 40:
         return True
+    if (song or "").strip() in {"あくび", "焼肉屋の話"}:
+        return True
     if re.fullmatch(
         r"(?:sssstart|start|スタート|開始|終了|end|mc|雑談|告知|声入り|ｃパート|cパート)",
         s,
