@@ -1004,3 +1004,49 @@ def test_like_apply_does_not_sleep_when_already_liked(tmp_path: Path):
     assert result["skipped"] == 1
     assert result["liked"] == 1
     assert sleeps == []
+
+
+def test_republish_corrected_allows_consecutive_explicit_corrections(tmp_path: Path, monkeypatch):
+    """每次显式修正都重新走门禁；历史 rpid 与次数必须累计。"""
+    bvid = "BV1RepublishTwice"
+    first = "0:01:00 01. バラライカ - 月島きらり"
+    second = "0:01:00 01. バラライカ - 月島きらり" + "\n0:04:00 02. あくび"
+    third = second + "\n0:07:00 03. 焼肉屋の話"
+    payload = {"bvid": bvid, "yt_id": "yt-twice", "title": "twice", "source_text": first}
+    review.queue_comment(payload, tmp_path)
+    review.approve_comment(bvid, [second], tmp_path)
+    item = review.load_comment(bvid, tmp_path)
+    item.update({
+        "status": "applied",
+        "rpids": ["current-rpid"],
+        "verification": {"ok": True},
+        "corrected_republish": True,
+        "correction_count": 1,
+        "previous_rpids": ["older-rpid"],
+        "deleted_rpids": ["older-rpid"],
+    })
+    review._write_json(review.review_dir(tmp_path) / f"{bvid}.json", item)
+
+    delete_calls = []
+    monkeypatch.setattr(
+        review,
+        "_delete_applied_comment_only",
+        lambda called_bvid, data_dir=None: delete_calls.append(called_bvid)
+        or {"deleted_rpids": ["current-rpid"]},
+    )
+
+    def fake_apply(called_bvid, data_dir=None, dry_run=False):
+        current = review.load_comment(called_bvid, data_dir)
+        current.update({"status": "applied", "verification": {"ok": True}})
+        review._write_json(review.review_dir(data_dir) / f"{called_bvid}.json", current)
+        return current
+
+    monkeypatch.setattr(review, "apply_comment", fake_apply)
+
+    result = review.republish_corrected(bvid, [third], tmp_path)
+
+    assert delete_calls == [bvid]
+    assert result["status"] == "applied"
+    assert result["correction_count"] == 2
+    assert result["previous_rpids"] == ["older-rpid", "current-rpid"]
+    assert result["deleted_rpids"] == ["older-rpid", "current-rpid"]

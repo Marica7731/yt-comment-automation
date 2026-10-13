@@ -697,8 +697,6 @@ def republish_corrected(
     item = load_comment(bvid, data_dir)
     if item.get("status") not in {"applied", "applied_unverified"}:
         raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许修正重发")
-    if item.get("corrected_republish"):
-        raise RuntimeError(f"{bvid} 已执行过修正重发，不重复执行")
     old_messages = [str(m) for m in item.get("approved_messages") or [] if str(m).strip()]
     corrected = [str(m).strip() for m in messages if str(m).strip()]
     if not corrected:
@@ -711,6 +709,13 @@ def republish_corrected(
     item = load_comment(bvid, data_dir)
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     item.pop("verification", None)
+    correction_count = int(item.get("correction_count") or 0) + 1
+    previous_history = list(dict.fromkeys(
+        [str(x) for x in item.get("previous_rpids") or [] if str(x).strip()] + deleted
+    ))
+    deleted_history = list(dict.fromkeys(
+        [str(x) for x in item.get("deleted_rpids") or [] if str(x).strip()] + deleted
+    ))
     item.update(
         {
             "status": "approved",
@@ -721,9 +726,10 @@ def republish_corrected(
             "reviewed_at": now,
             "updated_at": now,
             "rpids": [],
-            "previous_rpids": deleted,
-            "deleted_rpids": deleted,
+            "previous_rpids": previous_history,
+            "deleted_rpids": deleted_history,
             "corrected_republish": True,
+            "correction_count": correction_count,
             "correction_reason": "published_content_corrected",
         }
     )
