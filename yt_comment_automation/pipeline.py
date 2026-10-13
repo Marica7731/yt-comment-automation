@@ -182,7 +182,7 @@ def _extract_yt_id_from_part(part: str) -> str:
 _NON_SONG_TS_MARKERS = re.compile(
     r"(?:開始|开始|start|スタート|終了|end|opening|open|closing|close|mc|雑談|talk|感想|告知|お知らせ|"
     r"チャプター|chapter|セトリ|setlist|タイムスタンプ|timestamp|スクショ|挨拶|自己紹介|コメント|"
-    r"おつ|お疲れ|ありがとう|宣伝|休憩|トイレ|お水|スパチャ読み|リクエスト募集|あくび|助かる|てぇてぇ|"
+    r"おつ|お疲れ|ありがとう|宣伝|休憩|トイレ|お水|スパチャ読み|リクエスト募集|助かる|てぇてぇ|"
     r"声入り|開始前|準備|待機|待機所|文房具|マウント|ご飯|お風呂|お風呂|おかえり|ただいま|"
     r"配信開始|配信終了|終了予定|挨拶タイム|ダジャレ|冗談|雑談タイム|本編開始|"
     r"うんぽこ|ぽこ|ぷんぷん|ぱふぱふ|ららら|るるる|うぅ|あぁ|いぇい|おー|えー|うー)",
@@ -343,8 +343,6 @@ def is_junk_song_title(song: str) -> bool:
     # （BV1ALha63EuK：YT 简介预告文「…24:00にリベンジします同接555耐久歌枠🔥…/
     #   アニソン / vsinger / karaoke」整句被解析成 55+ 字的"歌名+歌手"）
     if len(s) > 40:
-        return True
-    if (song or "").strip() in {"あくび", "焼肉屋の話"}:
         return True
     if re.fullmatch(
         r"(?:sssstart|start|スタート|開始|終了|end|mc|雑談|告知|声入り|ｃパート|cパート)",

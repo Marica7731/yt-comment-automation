@@ -43,7 +43,7 @@ def test_raw_pure_chat_no_songlist():
 
 def test_raw_markers_only_no_songlist():
     """只有開始/MC/雑談 标记 → 无歌单（应重抓）。"""
-    raw = {"comments": [{"text": "4:26 [開始]\n16:12 [雑談time☆]\n1:50:10 [あくび]"}]}
+    raw = {"comments": [{"text": "4:26 [開始]\n16:12 [雑談time☆]\n1:50:10 [休憩]"}]}
     assert raw_has_timestamp_songlist(raw) is False
 
 
@@ -220,13 +220,23 @@ def test_is_junk_song_title_filters_onomatopoeia():
     assert is_junk_song_title("START") is True
 
 
-def test_is_junk_song_title_filters_real_stream_segment_samples():
-    """DUAWNJqI9bI 的两个无歌手直播片段不得进入候选。"""
+def test_artistless_titles_are_not_global_junk():
+    """具体歌名不能被全局硬编码；是否谈话必须按视频上下文逐条审核。"""
     from yt_comment_automation.pipeline import is_junk_song_title
 
-    assert is_junk_song_title("あくび") is True
-    assert is_junk_song_title("焼肉屋の話") is True
+    assert is_junk_song_title("あくび") is False
+    assert is_junk_song_title("焼肉屋の話") is False
     assert is_junk_song_title("すずめ") is False
+
+    from yt_comment_automation import clean
+    from yt_comment_automation.pipeline import _is_songlist_comment
+
+    raw = "セトリ\n0:14:57 チノカテ/ヨルシカ\n0:20:29 あくび\n0:53:48 焼肉屋の話\n0:56:40 横顔/aiko"
+    assert _is_songlist_comment(raw) is True
+    rows = clean.build_comment_songlist_ranked([raw], "")[0]
+    songs = {(it.song, it.artist) for it in rows}
+    assert ("あくび", "") in songs
+    assert ("焼肉屋の話", "") in songs
 
 
 def test_description_setlist_detected_as_songlist():
@@ -263,7 +273,7 @@ def test_no_artist_opening_markers_filtered():
         and not is_junk_song_title(it.song)
         and (it.artist or (
             not clean.is_bare_title_excluded(it.song)
-            and not __import__("re").search("声入り|ハーモニカ|あくび", it.song)
+            and not __import__("re").search("声入り|ハーモニカ", it.song)
         ))
     ]
     songs = [(it.song, it.artist) for it in filtered]

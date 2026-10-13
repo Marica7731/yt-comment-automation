@@ -827,10 +827,9 @@ _BARE_TITLE_EXCLUDE = re.compile(
 
 
 def is_bare_title_excluded(song: str) -> bool:
-    """无歌手歌名的排除判定（口琴间奏 ハーモニカ、哈欠 あくび 等被当歌名）。
+    """无歌手歌名的结构排除判定（URL、账号、日期等确定性非歌内容）。
 
-    供候选输出过滤复用：无歌手条目命中排除词 → 非歌；带歌手的不受影响
-    （aiko 的「ハーモニカ」这类真歌会以 歌名 - 歌手 形式出现）。
+    模糊的短歌名与具体标题不在此处判断，必须保留给逐条语义审核。
     """
     return bool(_BARE_TITLE_EXCLUDE.search((song or "").strip()))
 
@@ -851,9 +850,6 @@ def _looks_like_bare_song_title(text: str, source_line: str = "") -> bool:
         return False
     # 直播环节/章节标记（OP、配信スタート、出発進行、Cパート 等）不是歌名
     if is_non_song_section_marker(t):
-        return False
-    # 1-3 字符纯平假名是助词/残片（まで、から），不是歌名
-    if re.fullmatch(r"[ぁ-ん]{1,3}", t):
         return False
     # 纯数字/符号/单字符假名不算（点分数字歌名「8.8」算）；
     # 单个汉字可以是真歌名（奏/虹/桜/星/花），不得因长度为 1 被洗掉
