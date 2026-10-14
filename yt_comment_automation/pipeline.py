@@ -328,20 +328,11 @@ def _pending_review_status(bvid: str, data_dir: Path) -> str:
         return ""
 
 
-def is_junk_song_title(song: str) -> bool:
-    """是否脏歌名：直播拟声/碎片（ｺｯ、ﾋﾟﾖ、ｳﾝ、単音 コ/ッ）被误当歌。
-
-    规则：
-    - 纯半角片假名（去掉ﾞﾟ浊音记号后视觉长度 ≤2）→ 拟声碎片（ｺｯ/ﾋﾟﾖ/ｳﾝ/ｶﾞ/ﾊﾟ）
-    - 纯单字符平/片假名 → コ/ッ/ン 这类不成词
-    真歌名（すずめ/楓/ハチミツ/うんぽころこ/ハーモニカ）不受影响。
-    """
+def is_junk_song_title(song: str, artist: str = "") -> bool:
+    """是否脏歌名：直播拟声、碎片和无歌手环节标记。"""
     s = (song or "").strip()
     if not s:
         return True
-    # 超长"歌名"是标题/预告文残片：真歌名几乎不可能超过 40 字符。
-    # （BV1ALha63EuK：YT 简介预告文「…24:00にリベンジします同接555耐久歌枠🔥…/
-    #   アニソン / vsinger / karaoke」整句被解析成 55+ 字的"歌名+歌手"）
     if len(s) > 40:
         return True
     if re.fullmatch(
@@ -349,6 +340,8 @@ def is_junk_song_title(song: str) -> bool:
         s,
         re.IGNORECASE,
     ):
+        if artist and not clean.is_non_song_section_marker(artist):
+            return False
         return True
     base = re.sub(r"[ﾞﾟ]", "", s)
     if re.fullmatch(r"[ｦ-ﾟ]+", s) and len(base) <= 2:
@@ -356,6 +349,19 @@ def is_junk_song_title(song: str) -> bool:
     if re.fullmatch(r"[ぁ-んァ-ヶ]{1}", s):
         return True
     return False
+
+
+def filter_song_candidates(
+    items: list[clean.ParsedSong], require_artist: bool = False
+) -> list[clean.ParsedSong]:
+    """过滤缺时间戳、缺歌手和已确认的拟声/环节脏歌名。"""
+    return [
+        item
+        for item in items
+        if item.timestamp_seconds is not None
+        and (item.artist or not require_artist)
+        and not is_junk_song_title(item.song, item.artist)
+    ]
 
 
 def _is_songlist_comment(text: str) -> bool:
@@ -683,7 +689,7 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         # 所以存在结构化歌单评论时简介一律不参与竞争。
         desc_rank_source = "" if songlist_comments else local_source_text
         for cand in clean.build_comment_songlist_ranked(songlist_comments, desc_rank_source):
-            cand = [it for it in cand if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
+            cand = filter_song_candidates(cand)
             if not cand:
                 continue
             if cand:
@@ -695,9 +701,9 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     # 6. 过滤条目：必须有时间戳；歌手字段按配置（默认放宽=允许只有歌名）；
     #    剔除拟声/碎片脏歌名（ｺｯ/ﾋﾟﾖ 等直播怪声标记）
     if config.require_artist():
-        items = [it for it in items if it.artist and it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
+        items = filter_song_candidates(items, require_artist=True)
     else:
-        items = [it for it in items if it.timestamp_seconds is not None and not is_junk_song_title(it.song)]
+        items = filter_song_candidates(items)
     result.song_count = len(items)
     result.source = source
 

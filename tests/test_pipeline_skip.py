@@ -220,6 +220,29 @@ def test_is_junk_song_title_filters_onomatopoeia():
     assert is_junk_song_title("START") is True
 
 
+def test_artist_bearing_start_song_is_kept():
+    """结构化 SETLIST 中的真歌 StaRt 不能被无歌手 start 环节规则误删。"""
+    from yt_comment_automation import clean
+    from yt_comment_automation.pipeline import filter_song_candidates, is_junk_song_title
+
+    source = (
+        "『05:39』スタート\n"
+        "『10:41』StaRt / Mrs. GREEN APPLE\n"
+        "『14:46』前前前世 / RADWIMPS\n"
+        "『3:03:26』Ｃパート"
+    )
+    items = clean.build_comment_songlist([source])
+    filtered = filter_song_candidates(items)
+
+    assert is_junk_song_title("StaRt") is True
+    assert is_junk_song_title("StaRt", "Mrs. GREEN APPLE") is False
+    assert [(item.song, item.artist) for item in filtered] == [
+        ("StaRt", "Mrs. GREEN APPLE"),
+        ("前前前世", "RADWIMPS"),
+    ]
+    assert filter_song_candidates(items, require_artist=True) == filtered
+
+
 def test_artistless_titles_are_not_global_junk():
     """具体歌名不能被全局硬编码；是否谈话必须按视频上下文逐条审核。"""
     from yt_comment_automation.pipeline import is_junk_song_title
