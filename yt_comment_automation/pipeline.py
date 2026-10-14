@@ -333,6 +333,9 @@ def is_junk_song_title(song: str, artist: str = "") -> bool:
     s = (song or "").strip()
     if not s:
         return True
+    # 混合大小写 StaRt 是明确歌名写法，不按普通 start 环节词拦截。
+    if s.casefold() == "start" and any(ch.islower() for ch in s) and any(ch.isupper() for ch in s):
+        return False
     if len(s) > 40:
         return True
     if re.fullmatch(

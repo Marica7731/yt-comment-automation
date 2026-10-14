@@ -217,6 +217,8 @@ def test_is_junk_song_title_filters_onomatopoeia():
     assert is_junk_song_title("ハーモニカ") is False
     assert is_junk_song_title("ﾋﾟﾖﾋﾟﾖ") is False
     assert is_junk_song_title("sssSTART") is True
+    assert is_junk_song_title("StaRt") is False
+    assert is_junk_song_title("stARt") is False
     assert is_junk_song_title("START") is True
 
 
@@ -234,8 +236,11 @@ def test_artist_bearing_start_song_is_kept():
     items = clean.build_comment_songlist([source])
     filtered = filter_song_candidates(items)
 
-    assert is_junk_song_title("StaRt") is True
+    assert is_junk_song_title("StaRt") is False
     assert is_junk_song_title("StaRt", "Mrs. GREEN APPLE") is False
+    assert filter_song_candidates([clean.ParsedSong("StaRt", "", "10:41", 641)]) == [
+        clean.ParsedSong("StaRt", "", "10:41", 641)
+    ]
     assert [(item.song, item.artist) for item in filtered] == [
         ("StaRt", "Mrs. GREEN APPLE"),
         ("前前前世", "RADWIMPS"),
