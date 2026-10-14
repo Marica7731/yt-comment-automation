@@ -215,6 +215,14 @@ _TIMESTAMP_REACTION_MARKERS = re.compile(
     re.IGNORECASE,
 )
 
+# 活动/日程行里的时间是开演/售票时间，不是歌单时间轴：命中日期、场次
+# 星期或会场/票务标记的整行一律跳过，避免把演出日程当 SETLIST。
+_SCHEDULE_LINE_MARKERS = re.compile(
+    r"(?:\d{1,2}\s*月\s*\d{1,2}\s*日|[（(]\s*[月火水木金土日]\s*[)）]|"
+    r"[📅🗓📍🎫]|開催|公演|開場|開演|会場|チケット|販売中|発売中)",
+    re.IGNORECASE,
+)
+
 
 
 def _looks_like_song_line_rest(rest: str) -> bool:
@@ -378,6 +386,8 @@ def _is_songlist_comment(text: str) -> bool:
     strong_song_ts_lines = 0
     for idx, line in enumerate(lines):
         if not ts_re.search(line):
+            continue
+        if _SCHEDULE_LINE_MARKERS.search(line):
             continue
         rest = ts_re.sub("", line).strip()
         if not rest:

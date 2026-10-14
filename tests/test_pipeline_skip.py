@@ -175,6 +175,36 @@ def test_meme_markers_not_songlist():
     assert _is_songlist_comment(text) is False
 
 
+def test_event_schedule_times_not_songlist():
+    """BV1uPpU65EFj (mIWnyXUFZjQ): 简介里的演出日程时间不是歌单时间轴。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+
+    desc = """✧⁺ ⋯ ライブ出演情報 ⋯ ⁺✧
+
+　\\ ジャズバンド生演奏！！ /
+　『FLANICA FES』
+　📅10月11日（日）17:00～
+　📍東京都豊島区某所
+　🎫https://tiget.net/events/510414
+
+　\\ 新宿マルイでミニライブ！？ /
+　📅10月12日（月・祝）17:15～
+　📍新宿マルイ メン 8F イベントスペース
+
+　\\ トーク＆歌のお祭りイベント！ /
+　📅11月29日（日）14:30～
+
+開催期間：10月10日(土)～10/18(日) 11:00～19:00
+
+　\\ 初の九州・福岡での現地ライブ！ /
+　📅12月19日（土）11:00～"""
+    assert _is_songlist_comment(desc) is False
+
+    # 真歌单即使歌名带日期感仍要识别
+    real = "0:05:39 9月の風 / あいみょん\n0:12:02 マリーゴールド / あいみょん"
+    assert _is_songlist_comment(real) is True
+
+
 def test_split_items_by_pages_recalcs_timestamps():
     """多P视频按各P时长切分；P2+ 时间戳重算为 P 内相对时间。"""
     from yt_comment_automation.pipeline import split_items_by_pages
