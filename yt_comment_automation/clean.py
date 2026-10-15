@@ -247,13 +247,22 @@ def strip_transliteration_parens_from_line(line: str) -> str:
         return line
 
     def repl(match: re.Match) -> str:
-        inner = match.group(3)
+        inner = match.group("content")
         content = (inner or "").strip()
         if looks_like_romanization_or_translation(content):
             return ""
         return match.group(0)  # 保留音乐信息括号与正式名称括号
 
-    return re.sub(r"([ \t\u3000]+)([\(（])([^()（）]{1,80})([\)）])", repl, line)
+    line = re.sub(
+        r"\s*[\(（](?P<content>[^()（）]{1,80})[\)）]",
+        repl,
+        line,
+    )
+    return re.sub(
+        r"\s*[〈《](?P<content>[^〈《》〉]{1,80})[》〉]",
+        repl,
+        line,
+    )
 
 
 def find_trailing_bracket_suffix(text: str) -> Optional[dict]:

@@ -536,3 +536,18 @@ def test_figaro_greeting_marker_not_counted_as_song():
     assert clean.is_non_song_section_marker("ご挨拶タイム") is True
     assert clean.is_non_song_section_marker("自己紹介") is True
     assert clean.is_non_song_section_marker("雑談タイム") is True
+
+
+def test_angle_bracket_transliteration_is_removed_from_song_titles():
+    """BV1qupS6fET7：`歌名〈罗马字〉/ 歌手` 的罗马字括号必须整体移除。"""
+    source = (
+        ":_サイリウム1:セットリスト／Set List:_サイリウム3:\n"
+        "0:22:18 #01. やさしさに包まれたなら〈Yasashisa ni Tsutsumaretanara〉/ 松任谷由実\n"
+        "0:37:37 #02. ルージュの伝言〈Rouge no Dengon〉/ 松任谷由実"
+    )
+    items = clean.build_comment_songlist([source])
+    assert [(item.timestamp_seconds, item.song, item.artist) for item in items] == [
+        (1338, "やさしさに包まれたなら", "松任谷由実"),
+        (2257, "ルージュの伝言", "松任谷由実"),
+    ]
+    assert all("〈" not in item.song and "〉" not in item.song for item in items)
