@@ -484,3 +484,55 @@ def test_stage_cue_lines_are_not_songs():
     source = "23:07 次でラスト\n23:15 GO！ALEX！～希望誕生～ / JAM Project\n"
     items = clean.extract_plain_songs_from_source_timeline(source)
     assert [i.song for i in items] == ["GO！ALEX！～希望誕生～"]
+
+
+def test_figaro_greeting_marker_not_counted_as_song():
+    """BV1NKJ26sE8F：真实结构化歌单里的「ご挨拶」是环节，不是第 01 首。"""
+    source = (
+        "00:00      OP\n"
+        "01:23      ご挨拶\n"
+        "05:42      01.  ありあまる富 (The Invaluable) // 椎名林檎 (Ringo Sheena)\n"
+        "13:18      02.  ノーチラス (Nautilus) // ヨルシカ (Yorushika)\n"
+        "22:16      03.  シュノーケル (schnorchel) // 文藝天国 (Blooming Bungei)\n"
+        "28:31      04.  憂、燦々 (Yu, Sansan) // クリープハイプ (CreepHyp)\n"
+        "35:56      05.  I LOVE YOU // 尾崎 豊 (Yutaka Ozaki)\n"
+        "41:34      06.  きみのかみ (Your Hair) // 澤田 空海理 (Sori Sawada)\n"
+        "46:49      07.  裸の心 (Naked Heart) // あいみょん (Aimyon)\n"
+        "54:33      08.  最愛 (Saiai) // KOH+\n"
+        "1:01:42   09.  ドライフラワー (Dried Flower) // 優里 (Yuuri)\n"
+        "1:07:24   10.  丸の内サディスティック (Marunouchi Sadistic) // 椎名林檎 (Ringo Sheena)\n"
+        "1:13:56   11.  カブトムシ (Kabutomushi) // aiko\n"
+        "1:21:26   12.  チノカテ (Chinokate) // ヨルシカ (Yorushika)\n"
+        "1:28:26   13.  おだやかな暮らし (Odayakanakurashi) // おおはた雄一 (Yuichi Ohata)\n"
+        "1:33:08   14.  家族の風景 (Kazokuno Fukei) // ハナレグミ (Hanaregumi)\n"
+        "1:39:25   15.  さくら（独唱） (Sakura) // 森山直太朗 (Naotaro Moriyama)\n"
+        "1:45:03   16.  Alice // 古川本舗 (Fullkawa Honpo)\n"
+        "1:50:08   17.  パレード (Parade) // ヨルシカ (Yorushika)\n"
+        "1:58:47   ED"
+    )
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    assert len(items) == 17
+    assert [item.song for item in items] == [
+        "ありあまる富",
+        "ノーチラス",
+        "シュノーケル",
+        "憂、燦々",
+        "I LOVE YOU",
+        "きみのかみ",
+        "裸の心",
+        "最愛",
+        "ドライフラワー",
+        "丸の内サディスティック",
+        "カブトムシ",
+        "チノカテ",
+        "おだやかな暮らし",
+        "家族の風景",
+        "さくら（独唱）",
+        "Alice",
+        "パレード",
+    ]
+    assert items[0].timestamp_seconds == 342
+    assert clean.is_non_song_section_marker("ご挨拶") is True
+    assert clean.is_non_song_section_marker("ご挨拶タイム") is True
+    assert clean.is_non_song_section_marker("自己紹介") is True
+    assert clean.is_non_song_section_marker("雑談タイム") is True
