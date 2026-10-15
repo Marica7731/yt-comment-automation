@@ -466,9 +466,23 @@ def strip_trailing_year_annotation(text: str) -> str:
 
 def strip_loose_edge_title_quotes(text: str) -> str:
     t = (text or "").strip()
+    closing_pairs = {close: opening for opening, close in _CJK_EDGE_QUOTE_PAIRS.items()}
     for _ in range(3):
-        next_t = re.sub(r"^[「『｢《〈【]+", "", t)
-        next_t = re.sub(r"[」』｣》〉】]+$", "", next_t).strip()
+        if not t:
+            break
+        next_t = t
+        opening = t[0]
+        closing = _CJK_EDGE_QUOTE_PAIRS.get(opening)
+        if closing:
+            if t.endswith(closing):
+                next_t = t[1:-1].strip()
+            elif closing in t[1:]:
+                # 成对引号位于歌名内部时（如 ｢歌名｣って），保留引号本体。
+                break
+            else:
+                next_t = t[1:].strip()
+        elif t[-1] in closing_pairs:
+            next_t = t[:-1].strip()
         if next_t == t:
             break
         t = next_t
@@ -628,10 +642,18 @@ def _clean_artist_part(text: str) -> str:
     return strip_trailing_visual_decorations(raw)
 
 
+_ARTIST_WORK_METADATA_RE = re.compile(
+    r"\s*[/／]\s+(?=(?:アニメ(?:映画)?|TVアニメ|ゲーム|映画|ドラマ|カゲロウプロジェクト|初星学園)(?:\s|$|[「『【]))"
+)
+
+
 def _clean_artist_with_optional_metadata(text: str) -> str:
     raw = (text or "").strip()
     if not raw:
         return ""
+    # setlist 常在歌手后用 `/ アニメ …`、`/ 初星学園` 标注出处；
+    # 这些是作品/系列元数据，不是歌手名。
+    raw = _ARTIST_WORK_METADATA_RE.split(raw, maxsplit=1)[0].strip()
     pipe_matches = _find_spaced_delimiters_outside_brackets(raw, "|｜￤∣丨")
     if not pipe_matches:
         return _clean_artist_part(raw)

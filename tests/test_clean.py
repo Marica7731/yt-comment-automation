@@ -92,6 +92,30 @@ def test_extract_song_artist_core_hyphen():
     assert parsed["artist"] == "涼宮ハルヒ(平野綾)"
 
 
+def test_cjk_quoted_phrase_inside_song_title_is_preserved():
+    parsed = clean.parse_song_line_after_timestamp(
+        "1:30:43 ｢ひとりで生きられそう｣って それってねえ、褒めているの？ / Juice＝Juice"
+    )
+    assert parsed is not None
+    assert parsed.song == "｢ひとりで生きられそう｣って それってねえ、褒めているの？"
+    assert parsed.artist == "Juice＝Juice"
+
+
+def test_artist_work_metadata_suffix_is_removed():
+    cases = {
+        "0:30:27 more than words / 羊文学 / アニメ 呪術廻戦「渋谷事変」": "羊文学",
+        "0:41:39 光景 / 篠澤広（川村玲奈）/ 初星学園": "篠澤広（川村玲奈）",
+        "1:17:35 God knows… / 涼宮ハルヒ(平野綾) / アニメ 涼宮ハルヒの憂鬱 劇中歌": "涼宮ハルヒ(平野綾)",
+        "1:23:17 めざせポケモンマスター / 松本梨香 / アニメ ポケットモンスター ※うろ覚え": "松本梨香",
+        "1:36:48 オツキミリサイタル / じん feat.IA / カゲロウプロジェクト": "じん feat.IA",
+        "2:57:49 スパークル / RADWIMPS / アニメ映画 君の名は。挿入歌": "RADWIMPS",
+    }
+    for line, expected_artist in cases.items():
+        parsed = clean.parse_song_line_after_timestamp(line)
+        assert parsed is not None
+        assert parsed.artist == expected_artist, line
+
+
 def test_romanization_paren_cleanup():
     line = "1. 16:08 「火々」 - ヒグチアイ (\"Hibi\" - Higuchi Ai)"
     parsed = clean.parse_song_line_after_timestamp(line)
