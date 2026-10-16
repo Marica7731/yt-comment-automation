@@ -414,7 +414,7 @@ def strip_leading_timeline_icon_marks(text: str) -> str:
 
 def strip_timeline_tree_prefix(text: str) -> str:
     return re.sub(
-        r"^[\s\uFE0F\u200E\u200F\u2060\u00A0\u3000]*(?:[├└┣┗┝┖│┃┆┇┊┋]+|[>＞]+|[-－—–−]+|[・･●○◆◇■□]+)\s*",
+        r"^[\s\uFE0F\u200E\u200F\u2060\u00A0\u3000]*(?:(?:[├└┣┗┝┖│┃┆┇┊┋]+|[>＞]+|[-－—–−]+|[・･●○◆◇■□]+)(?![A-Za-z0-9ぁ-んァ-ヶ一-龯々〆〤]))\s*",
         "",
         text or "",
     ).strip()
@@ -427,7 +427,7 @@ def strip_weird_leading_chars(text: str) -> str:
 def strip_leading_timestamp(text: str) -> str:
     t = normalize_timeline_marker_chars(strip_timeline_tree_prefix(text or "")).strip()
     timestamp_pattern = re.compile(
-        r"^(?:[\[【(（『]\s*)?\d{1,2}:\d{2}(?::\d{2})?\s*(?:[\]】)）』])?(?:[\s\u3000]*[;；,，、~～\-—–−]+\s*)?"
+        r"^(?:[\[【(（『]\s*)?\d{1,2}:\d{2}(?::\d{2})?\s*(?:[\]】)）』])?(?:[\s\u3000]*[;；,，、~～\-—–−]+\s*(?![A-Za-zぁ-んァ-ヶ一-龯々〆〤]))?"
     )
     for _ in range(8):
         next_t = strip_timeline_tree_prefix(timestamp_pattern.sub("", t)).strip()
@@ -524,7 +524,12 @@ def clean_song_or_artist_part(text: str) -> str:
     # 只清理真正像分隔符的边缘字符，不再清理 . " [] 等可能属于正式名称的字符
     t = re.sub(r"^[\[［]+", "", t)
     t = re.sub(r"[\]］]+$", "", t)
-    t = re.sub(r"^[\-—–−/／|｜￤∣丨:：;；]+", "", t)
+    # -ERROR 这类紧贴正文的连字符是歌名本体；后接空白/结尾时才当装饰剥离。
+    t = re.sub(
+        r"^[\-—–−/／|｜￤∣丨:：;；]+(?![A-Za-z0-9ぁ-んァ-ヶ一-龯々〆〤])",
+        "",
+        t,
+    )
     t = re.sub(r"[\-—–−/／|｜￤∣丨:：;；]+$", "", t)
     t = t.strip()
     t = strip_trailing_year_annotation(t)
@@ -752,7 +757,10 @@ def is_obviously_non_song_text(text: str) -> bool:
     if re.match(r"^(talk|mc|雑談|聊天|感想|告知|返场|休息)$", t, re.IGNORECASE):
         return True
     # 无歌手裸标题中的直播环节标记，避免被 R17 的宽松路径当成歌名。
-    if re.fullmatch(r"スパチャ読み|じゃんけん|:_?おつりんね::_?りんね:", t, re.IGNORECASE):
+    if re.fullmatch(r"スパチャ読み|じゃんけん", t, re.IGNORECASE):
+        return True
+    # B站/直播常用的 `:_emote::_emote:` 结尾戳记不是歌名。
+    if re.fullmatch(r"(?::_[^:\s]+)(?:::+_[^:\s]+)*:?", t):
         return True
     # 简介歌单常见非歌行（BV15wYE68EBb）
     if re.match(r"^(エンドカード|エンドロール|end\s*card|end\s*roll|cm|提供)$", t, re.IGNORECASE):
@@ -905,7 +913,7 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
     # 🎸01. 0:05:03 … / 🎸EN. 1:01:08 …：剥「emoji装饰+序号」组合前缀直到时间戳开头。
     # 剥完序号必须剩时间戳开头才生效（保护 8.8 等数字歌名与无时间戳行）
     for _ in range(3):
-        t2 = re.sub(r"^[^\dA-Za-zぁ-んァ-ヶ一-龯々〆〤]+", "", t).strip()
+        t2 = re.sub(r"^(?![-—–−][A-Za-z0-9])[^\dA-Za-zぁ-んァ-ヶ一-龯々〆〤]+", "", t).strip()
         if t2 == t:
             break
         t = t2
