@@ -37,7 +37,7 @@ TRANSLITERATION_PAREN_SUFFIX_RE = re.compile(
 
 # --- R07 末尾表演备注括号 ---
 PERFORMANCE_NOTE_PAREN_SUFFIX_RE = re.compile(
-    r"\s*[（(](?:少し|ちょっと|うろ覚え|練習|[0-9０-９]+番のみ|short\.?|ワンコーラス|途中まで)[）)]\s*(?=/|$)"
+    r"\s*[（(](?:少し|ちょっと|うろ覚え|練習|[0-9０-９]+番(?:のみ)?|short\.?|ワンコーラス|途中まで)[）)]\s*(?=/|$)"
 )
 
 # --- R08 非歌曲噪音行 ---
@@ -105,7 +105,7 @@ def has_protected_title(text: str) -> bool:
 
 
 def strip_performance_note_parens(text: str) -> str:
-    """R07：删除末尾表演备注括号（（少し）（ちょっと）（1番のみ）等）。"""
+    """R07：删除末尾表演备注括号（（少し）（ちょっと）（1番/1番のみ）等）。"""
     return PERFORMANCE_NOTE_PAREN_SUFFIX_RE.sub("", text or "")
 
 

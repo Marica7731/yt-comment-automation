@@ -44,6 +44,7 @@ def test_r06_transliteration_paren():
 def test_r07_performance_notes():
     assert rules.strip_performance_note_parens("ロビンソン（少し）") == "ロビンソン"
     assert rules.strip_performance_note_parens("瞬き（1番のみ）") == "瞬き"
+    assert rules.strip_performance_note_parens("ラストバージン（1番）") == "ラストバージン"
     assert rules.strip_performance_note_parens("ウィステリア（ちょっと）") == "ウィステリア"
     assert rules.strip_performance_note_parens("エイリアンズ（練習）") == "エイリアンズ"
     assert rules.strip_performance_note_parens("Lemon（うろ覚え）") == "Lemon"
@@ -86,6 +87,7 @@ def test_apply_song_cleanup_integration():
     assert rules.apply_song_cleanup("8.32 / *Luna") == "8.32 / *Luna"
     # 受保护标题不删
     assert rules.apply_song_cleanup("Don't say \"lazy\" - 桜高軽音部") == "Don't say \"lazy\" - 桜高軽音部"
+    assert rules.apply_song_cleanup("ラストバージン（1番）/RADWIMPS") == "ラストバージン / RADWIMPS"
     # 发行日期删除
     assert rules.apply_song_cleanup("Aimer (2019/05/05)") == "Aimer"
 

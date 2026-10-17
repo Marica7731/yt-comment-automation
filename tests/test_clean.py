@@ -116,6 +116,15 @@ def test_artist_work_metadata_suffix_is_removed():
         assert parsed.artist == expected_artist, line
 
 
+def test_music_version_paren_is_preserved_in_song_title():
+    parsed = clean.parse_song_line_after_timestamp(
+        "1:03:44 なんでもないや (movie ver.)/RADWIMPS"
+    )
+    assert parsed is not None
+    assert parsed.song == "なんでもないや (movie ver.)"
+    assert parsed.artist == "RADWIMPS"
+
+
 def test_romanization_paren_cleanup():
     line = "1. 16:08 「火々」 - ヒグチアイ (\"Hibi\" - Higuchi Ai)"
     parsed = clean.parse_song_line_after_timestamp(line)

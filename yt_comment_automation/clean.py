@@ -320,7 +320,7 @@ def strip_trailing_latin_annotation_suffix(text: str) -> str:
         trailing["before"]
     ) == normalize_duplicate_annotation_comparable(trailing["content"]):
         return trailing["before"]
-    if trailing and trailing["before"] and contains_japanese(_paren_owner_segment(trailing["before"])) and looks_like_latin_annotation(
+    if trailing and trailing["before"] and contains_japanese(_paren_owner_segment(trailing["before"])) and looks_like_romanization_or_translation(
         trailing["content"]
     ):
         return trailing["before"]
@@ -334,7 +334,7 @@ def strip_trailing_latin_annotation_suffix(text: str) -> str:
         if matched.get(close_b) == open_b and before:
             if normalize_duplicate_annotation_comparable(before) == normalize_duplicate_annotation_comparable(content):
                 return before
-            if contains_japanese(_paren_owner_segment(before)) and looks_like_latin_annotation(content):
+            if contains_japanese(_paren_owner_segment(before)) and looks_like_romanization_or_translation(content):
                 return before
 
     def repl(match: re.Match) -> str:
@@ -348,7 +348,7 @@ def strip_trailing_latin_annotation_suffix(text: str) -> str:
             content
         ):
             return ""
-        if before and contains_japanese(_paren_owner_segment(before)) and looks_like_latin_annotation(content):
+        if before and contains_japanese(_paren_owner_segment(before)) and looks_like_romanization_or_translation(content):
             return ""
         return match.group(0)
 
