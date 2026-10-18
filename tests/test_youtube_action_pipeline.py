@@ -13,6 +13,7 @@ from yt_comment_automation import (
     youtube_targets,
     yt_fetch,
 )
+from yt_comment_automation import incremental
 
 
 def test_cache_only_reads_action_cache_without_network(tmp_path, monkeypatch):
@@ -250,3 +251,90 @@ def test_recheck_video_is_processed_without_auto_repost(
 
     assert record.total == 1
     assert processed == [("BV1Deleted", True)]
+
+
+def _raw_with_comments(*comments):
+    return {
+        "description": "",
+        "comment_entries": [
+            {"id": f"c{index}", "text": text}
+            for index, text in enumerate(comments, start=1)
+        ],
+    }
+
+
+def test_new_video_requires_timestamped_comment_increment():
+    state = incremental.empty_state()
+    next_state, changes = incremental.update_state(
+        state,
+        {"abcdefghijk": _raw_with_comments("0:01:00 Song A - Artist A")},
+    )
+
+    change = changes["abcdefghijk"]
+    assert change["new_video"] is True
+    assert change["timestamp_increment"] is True
+    assert change["review_required"] is True
+    assert next_state["videos"]["abcdefghijk"]["comments"]["c1"]["has_timestamp"]
+
+
+def test_new_video_without_timestamp_is_not_reviewed():
+    _, changes = incremental.update_state(
+        incremental.empty_state(),
+        {"abcdefghijk": _raw_with_comments("thanks for the stream")},
+    )
+
+    assert changes["abcdefghijk"]["review_required"] is False
+
+
+def test_edited_timestamped_comment_triggers_review():
+    state, _ = incremental.update_state(
+        incremental.empty_state(),
+        {"abcdefghijk": _raw_with_comments("0:01:00 Song A - Artist A")},
+    )
+    _, changes = incremental.update_state(
+        state,
+        {"abcdefghijk": _raw_with_comments("0:01:00 Song A - Artist B")},
+    )
+
+    change = changes["abcdefghijk"]
+    assert "timestamped_comment_edited" in change["review_reasons"]
+    assert change["review_required"] is True
+
+
+def test_comment_becoming_timestamped_triggers_review():
+    state, _ = incremental.update_state(
+        incremental.empty_state(),
+        {"abcdefghijk": _raw_with_comments("Song A - Artist A")},
+    )
+    _, changes = incremental.update_state(
+        state,
+        {"abcdefghijk": _raw_with_comments("0:01:00 Song A - Artist A")},
+    )
+
+    change = changes["abcdefghijk"]
+    assert "comment_became_timestamped" in change["review_reasons"]
+    assert change["review_required"] is True
+
+
+def test_whole_comment_section_replacement_triggers_review():
+    state, _ = incremental.update_state(
+        incremental.empty_state(),
+        {
+            "abcdefghijk": _raw_with_comments(
+                "old one", "old two", "old three", "old four"
+            )
+        },
+    )
+    _, changes = incremental.update_state(
+        state,
+        {
+            "abcdefghijk": _raw_with_comments(
+                "new one", "new two", "new three", "new four"
+            )
+        },
+    )
+
+    change = changes["abcdefghijk"]
+    assert change["whole_section_changed"] is True
+    assert "comment_section_changed" in change["review_reasons"]
+    assert change["review_required"] is True

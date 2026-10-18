@@ -374,6 +374,7 @@ def _fetch_comment_pages(
     known_ids: set[str] | None = None,
     seen_ids: list[str] | None = None,
     early_stop: bool = False,
+    entries_out: list[dict[str, str]] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """翻评论区「下一页」（自适应）。
 
@@ -384,6 +385,7 @@ def _fetch_comment_pages(
     """
     known = known_ids or set()
     comments: list[str] = []
+    comment_entries: list[dict[str, str]] = []
     responses: list[dict[str, Any]] = []
     seen: set[str] = set()
     pending = _extract_comment_page_continuation_tokens(first_response)
@@ -398,6 +400,8 @@ def _fetch_comment_pages(
         new_count = 0
         for e in entries:
             comments.append(e["text"])
+            if entries_out is not None:
+                entries_out.append(e)
             if seen_ids is not None:
                 seen_ids.append(e["id"])
             if e["id"] not in known:
@@ -418,6 +422,7 @@ def _fetch_comment_reply_texts_with_responses(
     client_version: str,
     comments_response: dict[str, Any],
     max_continuations: int = 20,
+    entries_out: list[dict[str, str]] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     comments: list[str] = []
     responses: list[dict[str, Any]] = []
@@ -431,6 +436,8 @@ def _fetch_comment_reply_texts_with_responses(
         response = _fetch_youtube_continuation(api_key, client_version, token)
         responses.append(response)
         comments.extend(_extract_comment_texts(response))
+        if entries_out is not None:
+            entries_out.extend(_extract_comment_entries(response))
         for next_token in _extract_comment_reply_continuation_tokens(response):
             if next_token not in seen:
                 pending.append(next_token)
@@ -518,6 +525,7 @@ def _fetch_youtube_innertube_raw(
     # 找不到最新排序 token 时回退默认（热门）排序。
     continuation = _find_newest_comments_continuation(initial_data) or _find_comments_continuation(initial_data)
     comments: list[str] = []
+    comment_entries: list[dict[str, str]] = []
     comments_response: dict[str, Any] | None = None
     reply_responses: list[dict[str, Any]] = []
     # 自适应翻页：id 账本记录见过的评论，某页全旧即停（追平后每轮只花 1 个请求）
@@ -528,6 +536,7 @@ def _fetch_youtube_innertube_raw(
         first_entries = _extract_comment_entries(comments_response)
         for e in first_entries:
             comments.append(e["text"])
+            comment_entries.append(e)
             fetched_ids.append(e["id"])
         first_new = sum(1 for e in first_entries if e["id"] not in known_ids)
         if first_new > 0:
@@ -535,6 +544,7 @@ def _fetch_youtube_innertube_raw(
             more_comments, _page_responses = _fetch_comment_pages(
                 api_key, client_version, comments_response, known_ids=known_ids,
                 seen_ids=fetched_ids, early_stop=early_stop,
+                entries_out=comment_entries,
             )
             comments.extend(more_comments)
         # 楼中楼回复（每页的回复折叠区）
@@ -542,6 +552,7 @@ def _fetch_youtube_innertube_raw(
             api_key,
             client_version,
             comments_response,
+            entries_out=comment_entries,
         )
         comments.extend(reply_texts)
     _save_comment_ids(cache_dir, video_id, fetched_ids)
@@ -552,6 +563,7 @@ def _fetch_youtube_innertube_raw(
         "webpage_url": url,
         "description": "\n\n".join(descriptions),
         "comments": [{"text": text} for text in comments],
+        "comment_entries": comment_entries,
         "raw": {
             "initial_data": initial_data,
             "comments_response": comments_response,
@@ -686,6 +698,7 @@ def _fetch_youtube_official_raw(
     known_ids = _load_known_comment_ids(cache_dir, video_id)
     fetched_ids: list[str] = []
     comments: list[str] = []
+    comment_entries: list[dict[str, str]] = []
     responses: list[dict[str, Any]] = []
     page_token = ""
     while len(responses) < 5:
@@ -703,6 +716,7 @@ def _fetch_youtube_official_raw(
         page_new = 0
         for entry in page_entries:
             comments.append(entry["text"])
+            comment_entries.append(entry)
             fetched_ids.append(entry["id"])
             if entry["id"] not in known_ids:
                 page_new += 1
@@ -717,6 +731,7 @@ def _fetch_youtube_official_raw(
         "webpage_url": WATCH_URL.format(video_id=video_id),
         "description": description,
         "comments": [{"text": text} for text in comments],
+        "comment_entries": comment_entries,
         "raw": {
             "videos_response": video_response,
             "comments_responses": responses,

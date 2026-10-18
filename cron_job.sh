@@ -1,5 +1,5 @@
 #!/bin/bash
-# B站合集评论区时间戳歌轴：由 Codex heartbeat 直接触发，增量抓取并写入审核队列（flock 单实例锁防并发重复）
+# B站合集评论区时间戳歌轴：消费 GitHub Action 同轮原始结果并写入审核队列（flock 单实例锁防并发重复）
 LOCKFILE=/tmp/yt-comment-automation.lock
 exec 9>"$LOCKFILE"
 if ! flock -n 9; then
@@ -9,8 +9,8 @@ fi
 
 export DRY_RUN=0
 export DATA_DIR=/opt/yt-comment-automation/data
-# 内容证据必须由 WDC 当轮抓取；处理结束不留原始内容缓存。
-export YOUTUBE_FETCH_MODE=auto
+# Action payload 负责本轮内容证据；入口和出口仍清空主缓存与抓取账本。
+export YOUTUBE_FETCH_MODE=cache_only
 cd /opt/yt-comment-automation
 LOG_DIR=/opt/yt-comment-automation/logs
 mkdir -p "$LOG_DIR"

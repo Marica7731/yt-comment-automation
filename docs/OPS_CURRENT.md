@@ -2,36 +2,78 @@
 
 This file records the user-approved operational split as of 2026-10-19.
 
+## YouTube incremental fetch
+
+WDC runs `dev/wdc_incremental_cycle.sh` every 20 minutes. The cycle:
+
+1. Computes due YouTube IDs from the current Bilibili collection snapshot.
+2. Dispatches the `youtube-fetch` GitHub Action with `repository_dispatch`.
+3. Waits for the single-commit `youtube-action-cache` payload branch.
+4. Syncs the same-round raw description/comments, content hashes, and change
+   decisions into WDC.
+5. Runs the cache-only pipeline so deterministic cleaning creates review
+   candidates without making a second YouTube request.
+
+GitHub's own schedule is not used because its start times are not precise enough
+for a 20-minute loop. WDC is the scheduler and the sole dispatcher.
+
+The Action keeps:
+
+- `data/incremental_audit/latest.json`: latest raw payload.
+- `data/incremental_audit/previous.json`: immediately previous raw payload.
+- `data/incremental_state.json`: comment/description hashes and timestamps only.
+
+The payload cache branch is force-replaced on every run so raw API bodies do not
+accumulate as an unbounded Git history.
+
+## Comment review windows
+
+Codex checks the WDC result approximately every 10 minutes. It does not create a
+new review just because a cycle ran.
+
+A candidate is reviewed when a video increment is paired with a timestamped
+song-list increment. For an already known video, the explicit re-review triggers
+are:
+
+- a new comment containing timestamps;
+- a near-total replacement of the previous comment section;
+- an edit to a previously timestamped comment;
+- an existing comment becoming timestamped;
+- an equivalent timestamp change in the description.
+
+The reviewer must inspect the Action's actual `latest.json` and
+`previous.json`, not only hashes, counts, or pipeline summaries. Only a
+structured song list may be published. Missing-artist rows require authorized
+archive evidence or another reliable confirmation.
+
+Publication still uses `review_cli approve --messages-file` followed by
+`review_cli apply`; success requires `verification.ok=true` and a live Bilibili
+read-back.
+
 ## Fan-reply likes
 
-The WDC cron runs `like_auto.py` every 20 minutes. It is a direct, unattended
-wrapper around the existing collection and action paths:
+WDC runs `like_auto.py` every 20 minutes. It is a direct unattended wrapper:
 
-1. Run `like_fans.py` to scan fresh msgfeed entries and eligible own-video
-   comment replies.
-2. Approve at most 10 fresh pending candidates per run.
-3. Run `like_fans.py --apply data/like_review.json`.
+1. Rescan fresh msgfeed and eligible own-video comments.
+2. Approve at most 10 fresh candidates.
+3. Apply through the existing real-state, ledger, 180-second freshness, and
+   8-second pacing gates.
+4. Rescan the list and retry transient failures for up to 8 bounded rounds.
 
-The wrapper does not bypass toggle safety: every action still requires a real
-"not liked" read, the 180-second list freshness gate, the liked-rpid ledger,
-and the 8-second post-action pacing. `Codex` does not approve individual likes;
-its heartbeat only checks cron health, recent logs, queue state, and failure
-counts.
+Codex does not approve individual likes. Its heartbeat checks scheduling,
+freshness, queue state, success accounting, and unrecoverable failures.
 
-## Comment publishing
+## Daily audit
 
-Codex handles comment content review and publishing in fixed non-peak windows.
-The current Beijing-time windows are:
+At 22:00 and 04:00 Beijing time, Codex audits both sides:
 
-- 03:10
-- 09:10
-- 13:10
-- 19:10
-- 23:10
+- Read the actual before/after Action JSON and run `dev/incremental_audit.py`.
+- Inspect cleaning inputs/outputs, review queue, publish verification, and raw
+  or history residue.
+- Run `dev/like_success_audit.py`, inspect recent `like_auto` runs, and compare
+  queue results with `liked_rpids.json`.
+- Fix reproducible code or gate defects, add regression coverage, deploy, and
+  report material failures through the project Feishu bot.
 
-All weekday windows avoid the 14:00-18:00 GLM Coding Plan peak. The scheduling
-constraint belongs in Codex scheduling decisions, not in a task's execution
-prompt. Every content round still uses a same-round WDC forced YouTube fetch,
-direct reading of the returned raw description/comments, deterministic cleanup
-rules, explicit AI-authored final messages, verified posting, and Bilibili
-read-back.
+Quiet operation is the default: no action and no unexplained anomaly means no
+notification.

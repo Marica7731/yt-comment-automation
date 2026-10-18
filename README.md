@@ -2,20 +2,20 @@
 
 给 B 站合集视频的评论区自动发布「YouTube 时间戳歌轴」评论的工具。
 
-> 定时任务 `yt-comment-codex-queue` 是独立 cron，每轮从保存的 prompt 新建对话，不依赖旧聊天上下文。每轮先读取 [`docs/AUTOMATION_BACKGROUND.md`](docs/AUTOMATION_BACKGROUND.md) 和 [`docs/HANDOVER.md`](docs/HANDOVER.md)，其中记录了项目身份、WDC 网络边界、审核状态和通知规则。
+> WDC 每 20 分钟触发 GitHub Action 抓取视频与评论区原始 JSON；Codex 心跳约每 10 分钟检查增量。只有“视频增量 + 时间戳歌单增量/四类重审条件”同时成立时才进入内容审核。点赞由 WDC 独立脚本每 20 分钟自动执行。
 
 B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视频）。本项目自动：
 
 1. **检测合集更新**：读取 B 站 UGC 合集（ugc_season）全部视频，对比上次快照找出新增
 2. **抓取油管评论区**：无 cookie，纯 urllib 拉取评论 + 简介 + 章节
-3. **Codex 审核队列**：Codex 直接触发 WDC 抓取、清洗并写入 `data/codex_review/*.json`，不依赖外部模型
+3. **增量判定与审核队列**：GitHub Action 返回同轮原始 JSON，WDC 清洗并写入 `data/codex_review/*.json`
 4. **本地规则生成草稿**：结构化来源先由本地规则生成候选，无法确定的原始时间戳交给 Codex 复核
 5. **审核后发布 + 飞书通知**：Codex 批准后由 WDC 发布；超长评论自动切分主评论 + 楼中楼续写
    （B 站链接 / 油管链接 / 评论时间 / 歌曲数量）
 
-YouTube 内容证据必须由 WDC 当轮强制抓取：`yt_fetch.fetch_youtube_raw(..., cache_dir=None, force=True)`。
-`dev/run_youtube_action.py` 仍负责 Action 编排与同步，但 payload 缓存不能代替新抓结果。
-WDC 的 `cron_job.sh` 使用 `YOUTUBE_FETCH_MODE=auto` 直接抓取；每次内容处理结束后清空
+YouTube 内容证据来自 WDC 触发的 GitHub Action 同轮原始返回；`dev/wdc_incremental_cycle.sh`
+负责 dispatch、等待 payload、同步和 cache-only 清洗。`latest.json` / `previous.json` 保留前后两份
+原始审核材料；每次内容处理结束后仍清空
 `data/yt_raw/*.info.json`、`history/`、`fetch_times.json` 和 `yt_comment_ids.json`，下一轮没有旧内容可读。
 官方 YouTube Data API 是另一条已验证主路径：`YOUTUBE_FETCH_BACKEND=official`
 显式启用，key 只存 WDC `private.env`。2026-10-02 已在 WDC 实测
@@ -32,7 +32,12 @@ yt_comment_automation/
   notify.py        飞书文本消息
   pipeline.py      管道编排（增量/全量/指定）
   cli.py           命令行入口
+  incremental.py   原始评论/简介哈希与四类重审触发
   config.py        配置（环境变量 + private.env）
+dev/
+  wdc_incremental_cycle.sh  WDC 20 分钟 Action 周期
+  incremental_audit.py      原始前后 JSON 一致性审计
+  like_success_audit.py     点赞队列/成功率审计
 tests/
   test_clean.py    清洗规则单元测试
 ```
@@ -66,11 +71,9 @@ python -m yt_comment_automation.cli run --mode full
 
 # 6. Codex 审核命令（在 WDC 运行；批准后再执行 apply）
 python -m yt_comment_automation.review_cli list --status pending
-python -m yt_comment_automation.review_cli approve --bvid BV1xxx --use-draft
+python -m yt_comment_automation.review_cli approve --bvid BV1xxx --messages-file messages.json
 python -m yt_comment_automation.review_cli apply --bvid BV1xxx
-python -m yt_comment_automation.like_review_cli list --status pending
-python -m yt_comment_automation.like_review_cli approve --rpid 123 --max-count 5
-python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
+python3 like_auto.py --max-count 10 --rounds 8
 ```
 
 ## 配置项（private.env / 环境变量）
@@ -86,7 +89,7 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` / `MY_FEISHU_OPEN_ID` | 当前项目 `yt-comment-automation` 飞书机器人；不读取旧 bridge |
 | `YOUTUBE_API_KEY` | 已在 WDC 实测通过的 YouTube Data API v3 key；只存 WDC `private.env`，不写入 Git 或 GitHub Actions secret |
 | `YOUTUBE_FETCH_BACKEND` | `official`（显式启用已验证 API 主路径）、`auto`（Innertube，429 且有 key 时恢复） |
-| `YOUTUBE_FETCH_MODE` | 生产 cron 固定 `auto`；内容抓取必须 `cache_dir=None, force=True` |
+| `YOUTUBE_FETCH_MODE` | WDC 管线固定 `cache_only`；内容来自同轮 Action payload |
 | `YOUTUBE_REQUEST_MIN_GAP_SECONDS` | YouTube 相邻请求最小间隔；GitHub Action workflow 使用 3 秒 |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
 
@@ -106,6 +109,8 @@ python like_fans.py --apply /opt/yt-comment-automation/data/like_review.json
 ## 机密与安全
 
 - `private.env`、`runtime/`、`data/` 已在 `.gitignore` 中排除，**不会上传任何 cookie / API Key / IP**
+- WDC GitHub token 存在 `/root/.secrets/github-token`，不得写入仓库、日志或通知
+- 私人 GitHub 仓库读取和 Action dispatch 使用现有 token/SSH，不再要求用户重复提供凭据
 - 无第三方运行时依赖（标准库 urllib/re/json），测试用 pytest
 - 评论删除只允许通过本项目的 `review_cli cleanup-retry-without-artist` / `review.py` 调用 `bili_comment.delete_comment`；禁止手工 `curl`、直连 `reply/del` 或绕过门禁的脚本。
 - 需要只删除不重发时使用 `review_cli cleanup-retry-without-artist --delete-only`；仍执行 bvid/rpid/cookie/账号归属和目标内容回读门禁。

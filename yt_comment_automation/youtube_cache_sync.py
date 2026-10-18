@@ -8,6 +8,8 @@ from pathlib import Path
 
 from . import config
 
+from . import incremental
+
 
 PENDING_NAME = "action_pending_ids.json"
 
@@ -59,11 +61,20 @@ def sync(payload_path: Path, data_dir: Path) -> dict:
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     cache_dir = data_dir / "yt_raw"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir = data_dir / "incremental_audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    latest_audit = audit_dir / "latest.json"
+    if latest_audit.is_file():
+        latest_audit.replace(audit_dir / "previous.json")
+    latest_audit.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     for video_id, raw in (payload.get("results") or {}).items():
         (cache_dir / f"{video_id}.info.json").write_text(
             json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
+    state = payload.get("incremental_state")
+    if isinstance(state, dict):
+        incremental.save_state(state, data_dir / "incremental_state.json")
     for name in ("fetch_times.json", "yt_comment_ids.json"):
         incoming = payload.get(name)
         if not isinstance(incoming, dict):
@@ -91,6 +102,7 @@ def sync(payload_path: Path, data_dir: Path) -> dict:
         "synced_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "results": len(payload.get("results") or {}),
         "failures": payload.get("failures") or [],
+        "review_candidates": payload.get("review_candidates") or [],
     }
 
 
