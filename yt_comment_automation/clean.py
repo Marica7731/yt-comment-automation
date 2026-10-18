@@ -790,8 +790,13 @@ def is_obviously_non_song_text(text: str) -> bool:
     # 串场提示词（23:07 次でラスト：下一首就是最后一首）不是歌名
     if re.fullmatch(r"(?:次で|いよいよ|これで)?\s*ラスト(?:\s*[0-9０-９]+\s*曲)?", t):
         return True
+    # Relay next-segment introductions are not songs.
+    if re.match(r"^(?:NEXT|次枠).*?(?:紹介|案内)", t, re.IGNORECASE):
+        return True
     # 只含一个开引号且没有任何内容的残片不是歌名
     if re.fullmatch(r"[「『｢《〈【]", t):
+        return True
+    if re.fullmatch(r"s{0,3}START", t, re.IGNORECASE):
         return True
     return False
 
@@ -1305,6 +1310,20 @@ def extract_plain_songs_from_source_timeline(text: str) -> list[ParsedSong]:
                 i += 2
                 continue
             i += 1
+            continue
+
+        # Song title ends with a delimiter while the artist wraps to the next line.
+        continuation = strip_timeline_tree_prefix(strip_weird_leading_chars(raw_lines[i + 1] if i + 1 < len(raw_lines) else ""))
+        if (
+            extract_first_timestamp_info(line)["label"]
+            and re.search(r"[／/]\s*$", line)
+            and continuation
+            and not extract_first_timestamp_info(continuation)["label"]
+            and not is_timestamp_only_line(continuation)
+            and not is_obviously_non_song_text(continuation)
+        ):
+            merged_lines.append(f"{line} {continuation}")
+            i += 2
             continue
 
         # 歌名行 + 下一行时间：🎸 衛星 / 赤い公園 / ▶ 02:22
