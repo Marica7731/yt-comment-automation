@@ -101,7 +101,11 @@ def _remove_content_caches(results: list[VideoResult], cache_dir: Path, dry_run:
     if history_root.is_dir():
         shutil.rmtree(history_root, ignore_errors=True)
 
-    for ledger_name in ("fetch_times.json", "yt_comment_ids.json"):
+    for ledger_name in (
+        "fetch_times.json",
+        "yt_comment_ids.json",
+        "action_pending_ids.json",
+    ):
         ledger_path = cache_dir / ledger_name
         if ledger_path.is_file():
             try:
@@ -818,8 +822,10 @@ def run_pipeline(
     data_dir = config.data_dir()
     cache_dir = data_dir / "yt_raw"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    # 入口先清空历史内容，避免外部超时或中途异常留下可供下一轮采信的缓存。
-    _remove_content_caches([], cache_dir, dry_run)
+    # cache_only 模式下 raw 是本轮 Action 刚写入的证据，入口不能清；
+    # 其他模式仍在入口清掉旧内容，避免外部超时留下可采信缓存。
+    if config.get("YOUTUBE_FETCH_MODE", "auto").lower() != "cache_only":
+        _remove_content_caches([], cache_dir, dry_run)
 
     bili_comment.load_cookie_map()  # 启动时先验证发布凭据，process_video 再按视频加载
     review_pending_bvids = {

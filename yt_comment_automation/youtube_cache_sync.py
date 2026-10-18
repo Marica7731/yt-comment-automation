@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -57,10 +58,19 @@ def _save_pending(data_dir: Path, video_ids: set[str]) -> None:
     path.write_text(json.dumps(sorted(video_ids)), encoding="utf-8")
 
 
+def _clear_stale_content(cache_dir: Path) -> None:
+    for path in cache_dir.glob("*.info.json"):
+        path.unlink(missing_ok=True)
+    shutil.rmtree(cache_dir / "history", ignore_errors=True)
+    for name in ("fetch_times.json", "yt_comment_ids.json"):
+        (cache_dir / name).unlink(missing_ok=True)
+
+
 def sync(payload_path: Path, data_dir: Path) -> dict:
     payload = json.loads(payload_path.read_text(encoding="utf-8"))
     cache_dir = data_dir / "yt_raw"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    _clear_stale_content(cache_dir)
     audit_dir = data_dir / "incremental_audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
     latest_audit = audit_dir / "latest.json"

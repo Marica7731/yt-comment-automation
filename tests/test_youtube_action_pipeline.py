@@ -54,15 +54,69 @@ def test_action_payload_and_wdc_sync(tmp_path, monkeypatch):
     assert not payload["failures"]
 
     data_dir = tmp_path / "data"
+    (data_dir / "yt_raw").mkdir(parents=True)
+    stale = data_dir / "yt_raw" / "stale.info.json"
+    stale.write_text("{}", encoding="utf-8")
     summary = youtube_cache_sync.sync(action_dir / "payload.json", data_dir)
     assert summary["results"] == 1
+    stale = data_dir / "yt_raw" / "stale.info.json"
+    assert not stale.exists()
     saved = json.loads((data_dir / "yt_raw" / f"{video_id}.info.json").read_text())
     assert saved == raw
+
     assert json.loads((data_dir / "yt_raw" / "fetch_times.json").read_text())[video_id] == 123.0
     assert youtube_cache_sync.is_pending_action(data_dir, video_id)
     youtube_cache_sync.mark_processed(data_dir, video_id)
     assert not youtube_cache_sync.is_pending_action(data_dir, video_id)
 
+
+def test_cache_only_pipeline_preserves_incoming_action_cache(tmp_path, monkeypatch):
+
+
+
+    data_dir = tmp_path / "data"
+    cache_dir = data_dir / "yt_raw"
+    cache_dir.mkdir(parents=True)
+    video_id = "abcdefghijk"
+    raw_path = cache_dir / f"{video_id}.info.json"
+    raw_path.write_text(json.dumps({"id": video_id}), encoding="utf-8")
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1CacheOnly",
+        title="cache only",
+        part_date="2026-10-19",
+        yt_id=video_id,
+    )
+
+    monkeypatch.setenv("YOUTUBE_FETCH_MODE", "cache_only")
+    monkeypatch.setattr(pipeline.config, "data_dir", lambda: data_dir)
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.collections, "fetch_all_collections", lambda: [video])
+    monkeypatch.setattr(pipeline.collections, "load_snapshot", lambda: collections.CollectionSnapshot(videos=[video]))
+    monkeypatch.setattr(pipeline.collections, "detect_new_videos", lambda current, previous: [video])
+    monkeypatch.setattr(pipeline, "load_processed", lambda data_dir: set())
+    monkeypatch.setattr(pipeline.review, "deleted_bvids", lambda data_dir=None: set())
+    monkeypatch.setattr(pipeline.review, "list_comments", lambda data_dir=None, status=None: [])
+    monkeypatch.setattr(pipeline.config, "in_codex_scope", lambda *args, **kwargs: True)
+    monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(pipeline.time, "sleep", lambda seconds: None)
+
+    def fake_process(candidate, cache_dir, dry_run):
+        assert (cache_dir / f"{candidate.yt_id}.info.json").is_file()
+        return pipeline.VideoResult(
+            bvid=candidate.bvid,
+            yt_id=candidate.yt_id,
+            title=candidate.title,
+            part_date=candidate.part_date,
+            collection=candidate.collection,
+            status="dry_run",
+        )
+
+    monkeypatch.setattr(pipeline, "process_video", fake_process)
+    record = pipeline.run_pipeline(mode="incremental", dry_run=True)
+
+    assert record.total == 1
 
 def test_action_records_individual_failure(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
