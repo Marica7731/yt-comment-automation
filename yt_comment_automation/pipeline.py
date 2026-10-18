@@ -566,14 +566,22 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     try:
         action_pending = youtube_cache_sync.is_pending_action(cache_dir.parent, yt_id)
         if action_pending:
-            logger.info("[%s] Action payload 已同步，本轮仍重新抓取内容", video.bvid)
-        # 内容证据必须来自本轮网络返回；不读写 raw 缓存或 history。
-        raw = yt_fetch.fetch_youtube_raw(
-            yt_id,
-            cache_dir=None,
-            force=True,
-            early_stop=upgrade_mode,
-        )
+            logger.info("[%s] Action payload 已同步，使用本轮原始结果", video.bvid)
+        if config.get("YOUTUBE_FETCH_MODE", "auto").lower() == "cache_only":
+            raw = yt_fetch.fetch_youtube_raw(
+                yt_id,
+                cache_dir=cache_dir,
+                force=False,
+                early_stop=upgrade_mode,
+            )
+        else:
+            # 非 Action 模式保留旧行为：内容证据取当前网络返回，不读 raw。
+            raw = yt_fetch.fetch_youtube_raw(
+                yt_id,
+                cache_dir=None,
+                force=True,
+                early_stop=upgrade_mode,
+            )
     except Exception as err:  # noqa: BLE001
         if isinstance(err, yt_fetch.YtCacheMissError):
             result.status = "error_cache_miss"

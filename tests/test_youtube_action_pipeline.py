@@ -118,6 +118,45 @@ def test_cache_only_pipeline_preserves_incoming_action_cache(tmp_path, monkeypat
 
     assert record.total == 1
 
+def test_cache_only_process_video_uses_synced_raw(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    cache_dir = data_dir / "yt_raw"
+    cache_dir.mkdir(parents=True)
+    video_id = "abcdefghijk"
+    (cache_dir / f"{video_id}.info.json").write_text(
+        json.dumps({"id": video_id, "comments": [{"text": "hello"}]}),
+        encoding="utf-8",
+    )
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1CacheOnlyProcess",
+        title="cache only process",
+        part_date="2026-10-19",
+        yt_id=video_id,
+    )
+    seen = {}
+
+    def fake_fetch(target, **kwargs):
+        seen["target"] = target
+        seen["cache_dir"] = kwargs.get("cache_dir")
+        return json.loads((cache_dir / f"{target}.info.json").read_text())
+
+    monkeypatch.setenv("YOUTUBE_FETCH_MODE", "cache_only")
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
+    monkeypatch.setattr(
+        pipeline, "_fetch_bili_video_info", lambda bvid, cookies: (video_id, "", [])
+    )
+    monkeypatch.setattr(pipeline.yt_fetch, "fetch_youtube_raw", fake_fetch)
+    monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
+
+    result = pipeline.process_video(video, cache_dir, dry_run=True)
+
+    assert seen == {"target": video_id, "cache_dir": cache_dir}
+    assert result.status == "skipped_no_songs"
+
+
 def test_action_records_individual_failure(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         raise RuntimeError("blocked")
