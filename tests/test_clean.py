@@ -195,7 +195,19 @@ def test_live_segment_bare_titles_filtered():
         assert clean.is_obviously_non_song_text(title) is True
 
 
+def test_no_artist_viewer_reaction_timestamps_filtered():
+    """BV1omnG6nEfV：观众对直播过程的 TS 感想不是无歌手歌曲。"""
+    source = "\n".join(
+        [
+            "43:48 初見でおそるべき肺活量を見せつける歌シンガーあまこも",
+            "48:56 急に早口になるあまこも",
+            "44:05 さすがVsinger",
+        ]
+    )
+    assert clean.extract_plain_songs_from_source_timeline(source) == []
 def test_original_numbered_format_kept():
+
+
     # 「01. バラライカ」带空格序号会先被 strip_leading_timeline_decorations 剥离
     line = "0:03:55 01. バラライカ / 月島きらり starring 久住小春（モーニング娘。）"
     parsed = clean.parse_song_line_after_timestamp(line)

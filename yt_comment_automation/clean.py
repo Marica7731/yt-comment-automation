@@ -870,6 +870,12 @@ _BARE_TITLE_EXCLUDE = re.compile(
 )
 
 
+# R17 无歌手路径的观众 TS 反应句不是 SETLIST 条目。只匹配明确的评价/身份描述语法，避免误伤同名歌名。
+_BARE_TITLE_REACTION_RE = re.compile(
+    r"(?:^初見で|おそるべき|を見せつける|歌シンガー|^急に.+になる|^さすが(?:Vsinger|Vtuber))"
+)
+
+
 def is_bare_title_excluded(song: str) -> bool:
     """无歌手歌名的结构排除判定（URL、账号、日期等确定性非歌内容）。
 
@@ -891,6 +897,8 @@ def _looks_like_bare_song_title(text: str, source_line: str = "") -> bool:
     if _BARE_TITLE_EXCLUDE.search(t):
         return False
     if source_line and _BARE_TITLE_EXCLUDE.search(source_line):
+        return False
+    if _BARE_TITLE_REACTION_RE.search(t):
         return False
     # 直播环节/章节标记（OP、配信スタート、出発進行、Cパート 等）不是歌名
     if is_non_song_section_marker(t):
