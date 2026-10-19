@@ -201,6 +201,45 @@ def test_official_parser_excludes_blocked_comment_author():
     ]
 
 
+def test_watch_page_retries_transient_missing_initial_data(monkeypatch):
+    calls = []
+    good = (
+        'var ytInitialData = {"a":1};'
+        'var cfg = {"INNERTUBE_API_KEY":"k",'
+        '"INNERTUBE_CLIENT_VERSION":"2.x"};'
+    )
+    # 真实故障形态：HTTP 200 但页面只有配置、没有 ytInitialData。
+    transient = 'var cfg = {"INNERTUBE_API_KEY":"k","INNERTUBE_CLIENT_VERSION":"2.x"};'
+
+    def fake_get(url):
+        calls.append(url)
+        return transient if len(calls) == 1 else good
+
+    monkeypatch.setattr(yt_fetch, "_http_get", fake_get)
+    monkeypatch.setattr(yt_fetch, "WATCH_PAGE_RETRY_DELAY_SECONDS", 0.0)
+
+    api_key, client_version, initial_data = yt_fetch._fetch_watch_page("abcdefghijk")
+    assert len(calls) == 2
+    assert api_key == "k"
+    assert client_version == "2.x"
+    assert initial_data == {"a": 1}
+
+
+def test_watch_page_is_bounded_when_page_never_recovers(monkeypatch):
+    calls = []
+
+    def fake_get(url):
+        calls.append(url)
+        return 'var cfg = {"INNERTUBE_API_KEY":"k"};'
+
+    monkeypatch.setattr(yt_fetch, "_http_get", fake_get)
+    monkeypatch.setattr(yt_fetch, "WATCH_PAGE_RETRY_DELAY_SECONDS", 0.0)
+
+    with pytest.raises(yt_fetch.YtFetchError, match="ytInitialData not found"):
+        yt_fetch._fetch_watch_page("abcdefghijk")
+    assert len(calls) == yt_fetch.WATCH_PAGE_ATTEMPTS
+
+
 def test_request_gap_is_configurable(monkeypatch):
     from yt_comment_automation import req_pace
 

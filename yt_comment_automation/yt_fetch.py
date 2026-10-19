@@ -121,6 +121,37 @@ def _http_get(url: str) -> str:
         return resp.read().decode("utf-8", errors="replace")
 
 
+# 反爬/同意页常返回 HTTP 200 但缺 ytInitialData，属瞬时页面；做有界重试。
+WATCH_PAGE_ATTEMPTS = 3
+WATCH_PAGE_RETRY_DELAY_SECONDS = 3.0
+
+
+def _fetch_watch_page(video_id: str) -> tuple[str, str, Any]:
+    """GET watch 页并解析 INNERTUBE_API_KEY / CLIENT_VERSION / ytInitialData。
+
+    单次响应可能是反爬或同意页（HTTP 200 但缺 ytInitialData/API key），
+    该形态是瞬时的；用有界重试拿到真正的视频页，全部失败才抛错。
+    """
+    url = WATCH_URL.format(video_id=video_id)
+    last_error: Exception | None = None
+    for attempt in range(WATCH_PAGE_ATTEMPTS):
+        if attempt:
+            time.sleep(WATCH_PAGE_RETRY_DELAY_SECONDS)
+        html = _http_get(url)
+        api_key = _extract_re(html, r'"INNERTUBE_API_KEY":"([^"]+)"')
+        if not api_key:
+            last_error = YtFetchError(f"未能从 watch 页解析 INNERTUBE_API_KEY: {video_id}")
+            continue
+        try:
+            initial_data = _extract_json_after(html, "ytInitialData")
+        except YtFetchError as err:
+            last_error = err
+            continue
+        client_version = _extract_re(html, r'"INNERTUBE_CLIENT_VERSION":"([^"]+)"') or "2.20260601.00.00"
+        return api_key, client_version, initial_data
+    raise last_error if last_error else YtFetchError(f"未能抓取 watch 页: {video_id}")
+
+
 def _http_post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
     headers = {**_headers(), "Content-Type": "application/json"}
@@ -514,12 +545,7 @@ def _fetch_youtube_innertube_raw(
             # 缓存过期，继续向下重新抓取
 
     url = WATCH_URL.format(video_id=video_id)
-    html = _http_get(url)
-    api_key = _extract_re(html, r'"INNERTUBE_API_KEY":"([^"]+)"')
-    if not api_key:
-        raise YtFetchError(f"未能从 watch 页解析 INNERTUBE_API_KEY: {video_id}")
-    client_version = _extract_re(html, r'"INNERTUBE_CLIENT_VERSION":"([^"]+)"') or "2.20260601.00.00"
-    initial_data = _extract_json_after(html, "ytInitialData")
+    api_key, client_version, initial_data = _fetch_watch_page(video_id)
 
     # 优先用「新しい順（最新）」抓评论，置顶歌单在热门排序下常被算法排除、抓不到；
     # 找不到最新排序 token 时回退默认（热门）排序。
