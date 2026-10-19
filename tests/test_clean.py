@@ -583,6 +583,19 @@ def test_figaro_greeting_marker_not_counted_as_song():
     assert clean.is_non_song_section_marker("雑談タイム") is True
 
 
+def test_thanks_time_marker_is_not_counted_as_song():
+    """BV15nnj6xEuT：感谢/超级感谢时段是章节标记，不是无歌手歌曲。"""
+    source = (
+        "0:02:35 Start\n"
+        "2:22:54 💲スーパーありがとうタイム🐈‍⬛\n"
+        "1. 0:10:53 ウミユリ海底譚 (Sea Lily Deep Sea Tale) - n-buna (n-buna)\n"
+        "2. 0:18:37 天使にふれたよ！ (Tenshi ni Fureta yo!) - 放課後ティータイム (Ho-kago Tea Time)"
+    )
+    assert clean.is_non_song_section_marker("スーパーありがとうタイム") is True
+    items = clean.extract_plain_songs_from_source_timeline(source)
+    assert [item.song for item in items] == ["ウミユリ海底譚", "天使にふれたよ！"]
+
+
 def test_angle_bracket_transliteration_is_removed_from_song_titles():
     """BV1qupS6fET7：`歌名〈罗马字〉/ 歌手` 的罗马字括号必须整体移除。"""
     source = (

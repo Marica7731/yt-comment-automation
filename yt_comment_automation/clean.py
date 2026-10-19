@@ -985,12 +985,13 @@ def parse_song_line_after_timestamp(line: str) -> Optional[ParsedSong]:
 
 
 _NON_SONG_SECTION_MARKER_RE = re.compile(
-    r"^(opening|open|op|start|starting|intro|introduction|幕開け|開幕|開始|スタート|オープニング|closing|close|end|ending|ed|outro|閉幕|終幕|終了|エンディング|配信スタート|配信開始|配信終了|出発進行|タイムスタンプ|セットリスト|setlist|曲リスト|(?:[a-z]+)?パート|(?:ご)?挨拶(?:タイム)?|(?:ご)?あいさつ(?:タイム)?|自己紹介(?:タイム)?|お知らせ|告知|雑談(?:タイム)?|トーク(?:タイム)?)$"
+    r"^(opening|open|op|start|starting|intro|introduction|幕開け|開幕|開始|スタート|オープニング|closing|close|end|ending|ed|outro|閉幕|終幕|終了|エンディング|配信スタート|配信開始|配信終了|出発進行|タイムスタンプ|セットリスト|setlist|曲リスト|(?:[a-z]+)?パート|(?:ご)?挨拶(?:タイム)?|(?:ご)?あいさつ(?:タイム)?|自己紹介(?:タイム)?|お知らせ|告知|雑談(?:タイム)?|トーク(?:タイム)?|スーパーありがとうタイム)$"
 )
 
 
 def normalize_section_marker_text(text: str) -> str:
-    value = unicodedata.normalize("NFKC", text or "")
+    value = strip_trailing_visual_decorations(strip_weird_leading_chars(text or ""))
+    value = unicodedata.normalize("NFKC", value)
     value = re.sub(r"[\s　_\-—–−/／|｜￤∣丨:：;；,，.。!！?？~～・･]+", "", value)
     return value.strip().lower()
 
