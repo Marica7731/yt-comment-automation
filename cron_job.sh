@@ -55,3 +55,5 @@ fi
 
 # 保留最近 30 个日志
 ls -1t "$LOG_DIR"/run_*.log 2>/dev/null | tail -n +31 | xargs -r rm -f
+
+exit "$RUN_EXIT"

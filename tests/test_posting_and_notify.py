@@ -244,6 +244,7 @@ def test_cron_process_exit_uses_detailed_crash_report():
     assert "notify.git_summary()" in script
     assert "process exit code=" in script
     assert "yt_comment_automation/pipeline.py" in script
+    assert script.rstrip().endswith('exit "$RUN_EXIT"')
 
 
 def test_cli_crash_sends_notify(mocker=None):
