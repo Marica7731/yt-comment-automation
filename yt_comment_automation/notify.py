@@ -475,6 +475,32 @@ def build_yt_rate_limit_brief(
     )
 
 
+def summarize_action_failures(data_dir: Any = "/opt/yt-comment-automation/data", limit: int = 3) -> list[str]:
+    """把本轮 Action payload 的 failures 压成几行，供崩溃/失败通知直接点名根因。"""
+    from pathlib import Path
+
+    path = Path(data_dir) / "incremental_audit" / "latest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(payload, dict):
+        return []
+    rows: list[str] = []
+    for item in payload.get("failures") or []:
+        if not isinstance(item, dict):
+            continue
+        video_id = str(item.get("video_id") or "").strip()
+        error = str(item.get("error") or "").strip()
+        if not (video_id or error):
+            continue
+        rows.append(f"{video_id}: {error}" if video_id else error)
+    if limit > 0 and len(rows) > limit:
+        extra = len(rows) - limit
+        rows = rows[:limit] + [f"...另有 {extra} 条失败"]
+    return rows
+
+
 def build_crash_brief(
     traceback_text: str,
     *,

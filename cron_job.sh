@@ -30,6 +30,10 @@ from yt_comment_automation import notify
 
 exit_code = os.environ.get("CRON_RUN_EXIT", "unknown")
 log_file = os.environ.get("CRON_LOGFILE", "")
+try:
+    action_failures = notify.summarize_action_failures("/opt/yt-comment-automation/data")
+except Exception:
+    action_failures = []
 brief = notify.build_crash_brief(
     f"ProcessExitError: cron_job.sh exited with {exit_code}",
     files=[
@@ -46,6 +50,7 @@ brief = notify.build_crash_brief(
     failures=[
         f"process exit code={exit_code}",
         f"log={log_file}",
+        *action_failures,
     ],
 )
 ok, note = notify.send_feishu_message(brief)
