@@ -28,7 +28,7 @@ LOGFILE="$LOG_DIR/incremental_$(date +%Y%m%d_%H%M%S).log"
   echo "===== incremental cycle end $(date '+%Y-%m-%d %H:%M:%S %z') ====="
 } >> "$LOGFILE" 2>&1
 
-ls -1t "$LOG_DIR"/incremental_*.log 2>/dev/null | tail -n +31 | xargs -r rm -f
+ls -1t "$LOG_DIR"/incremental_[0-9]*.log 2>/dev/null | tail -n +31 | xargs -r rm -f
 
 if [ "$ACTION_RC" -ne 0 ] || [ "$PIPELINE_RC" -ne 0 ]; then
   exit 1

@@ -1,4 +1,6 @@
 """bili_comment 发布、通知与错误处理单元测试。"""
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -374,3 +376,28 @@ def test_config_has_no_legacy_feishu_bridge_loader():
     source = inspect.getsource(config)
     assert "_load_feishu_bridge" not in source
     assert "FEISHU_BRIDGE_ENV" not in source
+
+
+def test_incremental_log_rotation_keeps_scheduler_log(tmp_path):
+    script = (Path(__file__).resolve().parents[1] / "dev/wdc_incremental_cycle.sh").read_text(
+        encoding="utf-8"
+    )
+    cleanup_line = next(
+        line for line in script.splitlines() if line.startswith("ls -1t \"$LOG_DIR\"/incremental_")
+    )
+    for index in range(31):
+        path = tmp_path / f"incremental_20261020_{index:06d}.log"
+        path.write_text("cycle", encoding="utf-8")
+        os.utime(path, (index + 1, index + 1))
+    scheduler_log = tmp_path / "incremental_scheduler.log"
+    scheduler_log.write_text("scheduler", encoding="utf-8")
+
+    subprocess.run(
+        ["bash", "-c", cleanup_line],
+        check=True,
+        env={**os.environ, "LOG_DIR": str(tmp_path)},
+    )
+
+    assert scheduler_log.read_text(encoding="utf-8") == "scheduler"
+    assert len(list(tmp_path.glob("incremental_[0-9]*.log"))) == 30
+    assert not (tmp_path / "incremental_20261020_000000.log").exists()
