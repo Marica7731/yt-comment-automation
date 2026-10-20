@@ -168,7 +168,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--timeout 和 --poll-interval 必须大于 0")
     summary = run(args.timeout, args.poll_interval, refresh=not args.no_refresh)
     print(json.dumps(summary, ensure_ascii=False))
-    return 1 if summary.get("failures") else 0
+    # Fetch failures are part of a successfully synced payload and are handled per target
+    # by the cache-only pipeline. Only dispatch/wait/sync failures are orchestration errors.
+    return 0
 
 
 if __name__ == "__main__":

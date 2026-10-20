@@ -39,8 +39,8 @@ PENDING_RECHECK_HOURS = 12
 # 本地规则结果可信的下限：低于此数量时仍保留原始来源交 Codex 审核
 MIN_CONFIDENT_SONGS = 5
 
-# 本次运行已发过 YouTube 429 通知的 bvid（多个视频同时限流时只提醒一次，避免刷屏）
-_yt_rate_limited_notified: set[str] = set()
+# 本次运行已发过 YouTube 抓取失败通知的 bvid（多目标失败时只提醒一次，避免刷屏）
+_yt_fetch_failure_notified: set[str] = set()
 
 
 @dataclass
@@ -50,7 +50,7 @@ class VideoResult:
     title: str
     part_date: str
     collection: str
-    status: str = ""  # posted / skipped_throttled / skipped_no_songs / raw_fetch_invalid / error_cache_miss / error / needs_codex_review
+    status: str = ""  # posted / skipped_throttled / skipped_no_songs / skipped_action_fetch_failed / raw_fetch_invalid / error_cache_miss / error / needs_codex_review
     song_count: int = 0
     source: str = ""  # local / codex_review
     message: str = ""
@@ -480,6 +480,48 @@ def _queue_codex_review(
     return result
 
 
+def _notify_yt_fetch_failure_once(
+    video: VideoResult,
+    error: str,
+    test_line: str,
+    *,
+    rate_limited: bool,
+) -> None:
+    """Send one fetch-failure alert per pipeline run, even when several targets fail."""
+    if _yt_fetch_failure_notified:
+        return
+    _yt_fetch_failure_notified.add(video.bvid)
+    files = [
+        "yt_comment_automation/pipeline.py",
+        "yt_comment_automation/yt_fetch.py",
+        "cron_job.sh",
+    ]
+    try:
+        if rate_limited:
+            brief = notify.build_yt_rate_limit_brief(
+                video.bvid,
+                error,
+                files=files,
+                tests=[test_line],
+                commit=notify.git_summary(),
+                failures=[error],
+            )
+        else:
+            brief = notify.build_failure_brief(
+                video.bvid,
+                error,
+                files=files,
+                tests=[test_line],
+                commit=notify.git_summary(),
+                failures=[error],
+                status="skipped_action_fetch_failed",
+            )
+        ok, note = notify.send_feishu_message(brief)
+        logger.info("[%s] 飞书 YouTube 抓取失败通知: %s %s", video.bvid, ok, note)
+    except Exception as notify_err:  # noqa: BLE001
+        logger.warning("[%s] 飞书 YouTube 抓取失败通知失败: %s", video.bvid, notify_err)
+
+
 def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: bool) -> VideoResult:
     result = VideoResult(
         bvid=video.bvid,
@@ -584,6 +626,19 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
             )
     except Exception as err:  # noqa: BLE001
         if isinstance(err, yt_fetch.YtCacheMissError):
+            action_error = youtube_cache_sync.action_failure_for(cache_dir.parent, yt_id)
+            if action_error:
+                result.status = "skipped_action_fetch_failed"
+                result.error = f"YouTube Action 抓取失败: {action_error}"
+                result.detail = "本轮 Action 未返回该目标，已跳过并等待下轮重试"
+                logger.warning("[%s] %s", video.bvid, result.error)
+                _notify_yt_fetch_failure_once(
+                    result,
+                    result.error,
+                    f"Action fetch_youtube_raw({yt_id}) failed: {action_error}",
+                    rate_limited=yt_fetch.is_rate_limited_error(Exception(action_error)),
+                )
+                return result
             result.status = "error_cache_miss"
             result.error = str(err)
             logger.error("[%s] Action 缓存缺失，按生产异常处理", video.bvid)
@@ -592,28 +647,12 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         result.error = f"YouTube 抓取失败: {type(err).__name__}: {err}"
         # 429 重试 5 次后仍失败 → 飞书提醒（一轮只提醒一次）
         if yt_fetch.is_rate_limited_error(err):
-            if not _yt_rate_limited_notified:
-                _yt_rate_limited_notified.add(video.bvid)
-                try:
-                    brief = notify.build_yt_rate_limit_brief(
-                        video.bvid,
-                        result.error,
-                        files=[
-                            "yt_comment_automation/pipeline.py",
-                            "yt_comment_automation/yt_fetch.py",
-                            "cron_job.sh",
-                        ],
-                        tests=[
-                            f"fetch_youtube_raw({yt_id}) → HTTP 429",
-                            "429 retry exhausted after 5 attempts",
-                        ],
-                        commit=notify.git_summary(),
-                        failures=[result.error],
-                    )
-                    ok, note = notify.send_feishu_message(brief)
-                    logger.info("[%s] 飞书 YouTube 429 通知: %s %s", video.bvid, ok, note)
-                except Exception as notify_err:  # noqa: BLE001
-                    logger.warning("[%s] 飞书 YouTube 429 通知失败: %s", video.bvid, notify_err)
+            _notify_yt_fetch_failure_once(
+                result,
+                result.error,
+                f"fetch_youtube_raw({yt_id}) → HTTP 429; retry exhausted after 5 attempts",
+                rate_limited=True,
+            )
         return result
 
     if action_pending:
@@ -843,8 +882,8 @@ def run_pipeline(
     recheck_bvids = review.deleted_bvids(data_dir) | review_pending_bvids
     posted = load_processed(data_dir) - recheck_bvids
 
-    # 每次运行重置限流通知去重（跨 cron 周期每个视频可再提醒）
-    _yt_rate_limited_notified.clear()
+    # 每次运行重置抓取失败通知去重（跨 cron 周期可再次提醒）
+    _yt_fetch_failure_notified.clear()
 
     # 抓取合集
     logger.info("抓取合集视频列表...")

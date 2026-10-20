@@ -471,6 +471,39 @@ def test_cli_returns_nonzero_for_cache_miss(monkeypatch, capsys):
     assert "本轮错误: 1" in capsys.readouterr().out
 
 
+def test_cli_does_not_crash_for_handled_action_fetch_failure(monkeypatch, capsys):
+    from yt_comment_automation import cli
+
+    monkeypatch.setenv("DRY_RUN", "1")
+    monkeypatch.setattr(
+        pipeline,
+        "run_pipeline",
+        lambda **kwargs: type(
+            "Record",
+            (),
+            {
+                "results": [
+                    {
+                        "bvid": "BV1Rate429",
+                        "part_date": "2026-10-20",
+                        "status": "skipped_action_fetch_failed",
+                        "song_count": 0,
+                        "source": "",
+                        "detail": "等待下轮重试",
+                        "error": "HTTP Error 429",
+                    }
+                ]
+            },
+        )(),
+    )
+    monkeypatch.setattr("sys.argv", ["yt-comment-automation", "run"])
+
+    assert cli.main() == 0
+    output = capsys.readouterr().out
+    assert "skipped_action_fetch_failed" in output
+    assert "本轮错误" not in output
+
+
 def test_codex_scope_excludes_pre_takeover_videos(monkeypatch):
     from yt_comment_automation import config
 

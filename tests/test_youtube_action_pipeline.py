@@ -168,6 +168,155 @@ def test_action_records_individual_failure(tmp_path, monkeypatch):
     assert "blocked" in payload["failures"][0]["error"]
 
 
+def test_action_failure_for_matches_real_rate_limit_payload(tmp_path):
+    data_dir = tmp_path / "data"
+    audit_dir = data_dir / "incremental_audit"
+    audit_dir.mkdir(parents=True)
+    failures = [
+        {
+            "video_id": video_id,
+            "error": "HTTPError: HTTP Error 429: Too Many Requests",
+        }
+        for video_id in (
+            "hIXYLxmCsP4",
+            "sWdaRFW8mNY",
+            "mIWnyXUFZjQ",
+            "IbP39N0kArg",
+            "Q23YjKHdBC0",
+        )
+    ]
+    (audit_dir / "latest.json").write_text(
+        json.dumps({"results": {}, "failures": failures}),
+        encoding="utf-8",
+    )
+
+    assert youtube_cache_sync.action_failure_for(data_dir, "hIXYLxmCsP4") == (
+        "HTTPError: HTTP Error 429: Too Many Requests"
+    )
+    assert youtube_cache_sync.action_failure_for(data_dir, "notlisted00") == ""
+
+
+def test_wdc_action_runner_treats_synced_fetch_failures_as_orchestration_success(
+    monkeypatch, capsys
+):
+    from dev import wdc_run_youtube_action as runner
+
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda *args, **kwargs: {
+            "fetched": 0,
+            "failures": [{'video_id': 'hIXYLxmCsP4', 'error': 'HTTP 429'}],
+        },
+    )
+
+    assert runner.main(["--timeout", "1", "--poll-interval", "1"]) == 0
+    assert "HTTP 429" in capsys.readouterr().out
+
+
+def _cache_miss_video(video_id: str, bvid: str) -> collections.CollectionVideo:
+    return collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid=bvid,
+        title="rate limited target",
+        part_date="2026-10-20",
+        yt_id=video_id,
+    )
+
+
+def _prepare_cache_miss_process(monkeypatch) -> None:
+    monkeypatch.setattr(pipeline.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.bili_comment, "find_own_comment", lambda bvid, cookies: None)
+    monkeypatch.setattr(
+        pipeline,
+        "_fetch_bili_video_info",
+        lambda bvid, cookies: (None, "", []),
+    )
+
+    def cache_miss(*args, **kwargs):
+        raise yt_fetch.YtCacheMissError("GitHub Action 缓存缺失")
+
+    monkeypatch.setattr(pipeline.yt_fetch, "fetch_youtube_raw", cache_miss)
+    pipeline._yt_fetch_failure_notified.clear()
+
+
+def test_action_429_cache_miss_is_skipped_with_one_rate_limit_notification(
+    tmp_path, monkeypatch
+):
+    data_dir = tmp_path / "data"
+    audit_dir = data_dir / "incremental_audit"
+    audit_dir.mkdir(parents=True)
+    targets = [
+        ("hIXYLxmCsP4", "BV1Rate429A"),
+        ("sWdaRFW8mNY", "BV1Rate429B"),
+    ]
+    (audit_dir / "latest.json").write_text(
+        json.dumps(
+            {
+                "results": {},
+                "failures": [
+                    {
+                        "video_id": video_id,
+                        "error": "HTTPError: HTTP Error 429: Too Many Requests",
+                    }
+                    for video_id, _ in targets
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _prepare_cache_miss_process(monkeypatch)
+    sent = []
+    monkeypatch.setattr(pipeline.notify, "git_summary", lambda: "abc1234")
+    monkeypatch.setattr(
+        pipeline.notify,
+        "build_yt_rate_limit_brief",
+        lambda *args, **kwargs: "rate-limit-brief",
+    )
+    monkeypatch.setattr(
+        pipeline.notify,
+        "send_feishu_message",
+        lambda brief: sent.append(brief) or (True, "ok"),
+    )
+
+    results = [
+        pipeline.process_video(
+            _cache_miss_video(video_id, bvid),
+            data_dir / "yt_raw",
+            dry_run=False,
+        )
+        for video_id, bvid in targets
+    ]
+
+    assert [result.status for result in results] == [
+        "skipped_action_fetch_failed",
+        "skipped_action_fetch_failed",
+    ]
+    assert all("429" in result.error for result in results)
+    assert sent == ["rate-limit-brief"]
+
+
+def test_unexplained_cache_miss_remains_production_error(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    (data_dir / "incremental_audit").mkdir(parents=True)
+    (data_dir / "incremental_audit" / "latest.json").write_text(
+        json.dumps({"results": {}, "failures": []}),
+        encoding="utf-8",
+    )
+    _prepare_cache_miss_process(monkeypatch)
+
+    result = pipeline.process_video(
+        _cache_miss_video("mIWnyXUFZjQ", "BV1Unexplained"),
+        data_dir / "yt_raw",
+        dry_run=False,
+    )
+
+    assert result.status == "error_cache_miss"
+    assert "GitHub Action 缓存缺失" in result.error
+
+
 def test_already_sufficient_comment_consumes_action_pending(tmp_path, monkeypatch):
     video_id = "abcdefghijk"
     data_dir = tmp_path / "data"

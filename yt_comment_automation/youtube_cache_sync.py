@@ -58,6 +58,23 @@ def _save_pending(data_dir: Path, video_ids: set[str]) -> None:
     path.write_text(json.dumps(sorted(video_ids)), encoding="utf-8")
 
 
+def action_failure_for(data_dir: Path, video_id: str) -> str:
+    """Return the same-round Action failure for a YouTube ID, if present."""
+    path = data_dir / "incremental_audit" / "latest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    key = str(video_id)
+    for item in payload.get("failures") or []:
+        if not isinstance(item, dict) or str(item.get("video_id") or "") != key:
+            continue
+        return str(item.get("error") or "Action 抓取失败").strip()
+    return ""
+
+
 def _clear_stale_content(cache_dir: Path) -> None:
     for path in cache_dir.glob("*.info.json"):
         path.unlink(missing_ok=True)
