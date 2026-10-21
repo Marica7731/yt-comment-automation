@@ -16,6 +16,39 @@ class FakeComment:
         self.message = message
 
 
+def test_get_video_owner_mid_reads_video_owner_with_existing_view_request(monkeypatch):
+    calls = []
+
+    def request_json(url, cookies, referer, data=None):
+        calls.append((url, cookies, referer, data))
+        return {"code": 0, "data": {"owner": {"mid": 3546597260528367}}}
+
+    monkeypatch.setattr(bili_comment, "_request_json", request_json)
+
+    owner_mid = bili_comment.get_video_owner_mid("BV1rgnT63EJ7", {"SESSDATA": "session"})
+
+    assert owner_mid == "3546597260528367"
+    assert calls == [
+        (
+            f"{bili_comment.VIEW_API}?bvid=BV1rgnT63EJ7",
+            {"SESSDATA": "session"},
+            "https://www.bilibili.com/",
+            None,
+        )
+    ]
+
+
+def test_get_video_owner_mid_fails_closed_when_owner_is_missing(monkeypatch):
+    monkeypatch.setattr(
+        bili_comment,
+        "_request_json",
+        lambda *args, **kwargs: {"code": 0, "data": {"aid": 123}},
+    )
+
+    with pytest.raises(RuntimeError, match="owner.mid"):
+        bili_comment.get_video_owner_mid("BV1rgnT63EJ7", {})
+
+
 def test_find_own_comment_any_message(monkeypatch):
     """本账号任一评论（哪怕 1 行）都算已发过。"""
     comments = [

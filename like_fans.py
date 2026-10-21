@@ -86,10 +86,12 @@ headers = {
 our_root_rpid_cache = {}  # oid → 我们主评论 rpid（查楼中楼真实状态的 root）
 item_uri = {}  # oid → 视频页 uri（楼中楼兜底时反查 bvid 用）
 
-# 自家视频集合：自动发布记录 ∪ 合集快照。仅用于评论区补扫的范围限制——
-# 补扫扫的是整个评论区，外人视频（我们只是观众）绝不能扫（10-01 误赞
-# 死了啦😭/转生踢我 事故）。msgfeed 点赞不限视频：回复我们的都赞。
+# 自家视频集合：自动发布记录 ∪ 合集快照作为已确认 BVID；msgfeed 出现的
+# 未登记视频须先核对 view.owner.mid == OWNER_MID，再纳入评论区补扫。
+# 补扫扫整个评论区，外人视频（我们只是观众）绝不能扫（10-01 误赞事故）。
+# msgfeed 点赞不限视频：回复我们的都赞。
 OWN_BVIDS: set[str] = set()
+VIDEO_OWNER_CACHE: dict[str, bool] = {}
 
 
 def snapshot_bvids(snapshot):
@@ -123,7 +125,25 @@ def _bvid_from_uri(uri: str) -> str | None:
 
 
 def is_own_video(bvid: str | None) -> bool:
-    return bool(bvid) and bvid in OWN_BVIDS
+    clean_bvid = str(bvid or "").strip()
+    if not clean_bvid:
+        return False
+    if clean_bvid in OWN_BVIDS:
+        return True
+    if clean_bvid in VIDEO_OWNER_CACHE:
+        return VIDEO_OWNER_CACHE[clean_bvid]
+    try:
+        owner_mid = bili_comment.get_video_owner_mid(clean_bvid, cookies)
+    except Exception as err:  # noqa: BLE001
+        print(f"  ⚠️视频归属复核失败 {clean_bvid}: {err}", flush=True)
+        VIDEO_OWNER_CACHE[clean_bvid] = False
+        return False
+    is_owned = str(owner_mid or "").strip() == OWNER_MID
+    VIDEO_OWNER_CACHE[clean_bvid] = is_owned
+    if is_owned:
+        OWN_BVIDS.add(clean_bvid)
+        print(f"  ✓视频归属核验通过 {clean_bvid}，纳入评论区补扫", flush=True)
+    return is_owned
 
 
 def collect_video_oids(items):

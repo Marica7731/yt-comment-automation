@@ -95,8 +95,8 @@
 
 ### 点赞（like_auto.py 调 like_fans.py，由 WDC cron 每 20 分钟触发）
 - msgfeed「回复我的」游标翻页：响应 `cursor{id,time}`，下一页参数 `id` + `reply_time`（实测所得，勿猜其他参数名）；**页内有新赞才继续翻**，整页已赞/重复即停，上限 10 页。
-- msgfeed 点赞不限视频（回复我的=别人回复我们）；**评论区补扫限自家视频**（OWN_BVIDS=processed posted ∪ collections_snapshot）——补扫扫整个评论区，外人视频绝不能扫。
-- `collections_snapshot.json` 当前实际格式是顶层 list，不是 `{"videos": [...]}`；加载器必须同时兼容两种结构，否则 OWN_BVIDS 为空并漏掉全部折叠评论补扫。
+- msgfeed 点赞不限视频（回复我们的=别人回复我们）；**评论区补扫只限经确认属于本账号的视频**。优先使用 `processed.json` 与 `collections_snapshot.json` 中的 BVID；消息列表出现未登记视频时，通过现有带 cookie 的 view 请求核对 `owner.mid == OWNER_MID` 后才纳入补扫。归属查询失败或属于其他账号时跳过补扫，避免扫到外部视频。
+- `collections_snapshot.json` 当前实际格式是顶层 list，不是 `{"videos": [...]}`；加载器同时兼容两种结构。消息列表中未登记的 BVID 还会通过 view.owner.mid 核实归属后决定是否补扫。
 - 每个点赞批次必须亲自读取原始 msgfeed 与评论区 JSON，逐项对比原始条目、队列、`liked_rpids.json` 和真实 `action/result`；禁止只信 `like_fans.py` 的候选数或通知汇总。
 - 点赞 8 秒频控只在真实点赞后消耗；点赞成功即写 liked_rpids.json。
 - 点赞列表新鲜度硬门禁：执行时距 `fetched_at/queued_at` 不得超过 180 秒。`like_auto.py` 每轮先重扫，再批准当前新鲜批次；stale/verify/api/exception 会在重扫后最多重试 8 轮。批准操作同步当前批次上限，避免旧 `max_count` 阻断。

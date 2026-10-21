@@ -104,6 +104,17 @@ def get_aid(bvid: str, cookies: dict[str, str]) -> int:
     return int(data["data"]["aid"])
 
 
+def get_video_owner_mid(bvid: str, cookies: dict[str, str]) -> str:
+    """通过带 cookie 的视频信息读取确认视频所属账号。"""
+    data = _request_json(f"{VIEW_API}?bvid={bvid}", cookies, "https://www.bilibili.com/")
+    if data.get("code") != 0:
+        raise RuntimeError(f"view 接口异常 {bvid}: {data.get('message')}")
+    owner_mid = str(((data.get("data") or {}).get("owner") or {}).get("mid") or "").strip()
+    if not owner_mid:
+        raise RuntimeError(f"view 接口缺少 owner.mid: {bvid}")
+    return owner_mid
+
+
 def list_comments(bvid: str, cookies: dict[str, str], max_pages: int = 3) -> list[BiliComment]:
     """拉取视频顶层评论（不包含楼中楼）。"""
     aid = get_aid(bvid, cookies)

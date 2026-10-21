@@ -44,6 +44,39 @@ def test_collect_video_oids_keeps_videos_from_earlier_pages():
     }
 
 
+def test_collect_video_oids_checks_untracked_video_owner_before_sweep():
+    from types import SimpleNamespace
+
+    owner_calls = []
+
+    def get_video_owner_mid(bvid, cookies):
+        owner_calls.append(bvid)
+        return "owner" if bvid == "BV1owned1234" else "another-account"
+
+    namespace = {
+        "_bvid_from_uri": lambda uri: next(
+            (value for value in ("BV1owned1234", "BV1foreign1234") if value in uri),
+            "",
+        ),
+        "OWN_BVIDS": set(),
+        "VIDEO_OWNER_CACHE": {},
+        "OWNER_MID": "owner",
+        "cookies": {},
+        "bili_comment": SimpleNamespace(get_video_owner_mid=get_video_owner_mid),
+    }
+    namespace = _load_functions({"collect_video_oids", "is_own_video"}, namespace)
+
+    items = [
+        {"item": {"uri": "https://www.bilibili.com/video/BV1owned1234", "subject_id": 11}},
+        {"item": {"uri": "https://www.bilibili.com/video/BV1foreign1234", "subject_id": 22}},
+        {"item": {"uri": "https://www.bilibili.com/video/BV1owned1234", "subject_id": 11}},
+    ]
+
+    assert namespace["collect_video_oids"](items) == {"BV1owned1234": 11}
+    assert owner_calls == ["BV1owned1234", "BV1foreign1234"]
+    assert namespace["OWN_BVIDS"] == {"BV1owned1234"}
+
+
 def test_external_like_is_written_to_dedup_state_once():
     state = set()
     saved = []
