@@ -70,6 +70,58 @@ def test_action_payload_and_wdc_sync(tmp_path, monkeypatch):
     assert not youtube_cache_sync.is_pending_action(data_dir, video_id)
 
 
+def test_action_rejects_transient_empty_snapshot_for_known_video(tmp_path, monkeypatch):
+    video_id = "sWdaRFW8mNY"
+    description = "⚠️リクエストについて\n\n・リクエストはいつでも大歓迎です"
+    comments = [
+        {
+            "id": "UgylqwP8ceLETK3V6lh4AaABAg",
+            "text": "1:53:54の『paranoia』は確立された歌い方がやはりいいなぁと思いました。",
+        },
+        {
+            "id": "UgwaU_vrssEIAabS8VN4AaABAg",
+            "text": "💜┈┈セットリスト┈┈🎼\n0:17:33 三日月\n1:53:54 paranoia",
+        },
+    ]
+    nonempty = {
+        "id": video_id,
+        "description": description,
+        "comments": [{"text": item["text"]} for item in comments],
+        "comment_entries": comments,
+    }
+    empty = {
+        "id": video_id,
+        "description": description,
+        "comments": [],
+        "comment_entries": [],
+    }
+    samples = iter([nonempty, empty, nonempty])
+
+    def fake_fetch(*args, **kwargs):
+        return next(samples)
+
+    monkeypatch.setattr(youtube_action.yt_fetch, "fetch_youtube_raw", fake_fetch)
+    action_dir = tmp_path / "action"
+    first = youtube_action.run([video_id], action_dir)
+    assert not first["failures"]
+
+    second = youtube_action.run([video_id], action_dir)
+    assert video_id not in second["results"]
+    assert second["review_candidates"] == []
+    assert "empty comment snapshot for previously non-empty video" in (
+        second["failures"][0]["error"]
+    )
+
+    saved = json.loads((action_dir / "state.json").read_text())
+    saved_video = saved["videos"][video_id]
+    assert saved_video["comment_count"] == len(comments)
+    assert set(saved_video["comments"]) == {item["id"] for item in comments}
+
+    third = youtube_action.run([video_id], action_dir)
+    assert not third["failures"]
+    assert third["review_candidates"] == []
+
+
 def test_cache_only_pipeline_preserves_incoming_action_cache(tmp_path, monkeypatch):
 
 

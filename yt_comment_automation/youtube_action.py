@@ -11,6 +11,28 @@ from . import yt_fetch
 from . import incremental
 
 
+def _has_comment_text(raw: dict) -> bool:
+    entries = raw.get("comment_entries")
+    if not isinstance(entries, list) or not entries:
+        entries = raw.get("comments")
+    if not isinstance(entries, list):
+        return False
+    return any(
+        isinstance(item, dict) and str(item.get("text") or "").strip()
+        for item in entries
+    )
+
+
+def _empty_snapshot_for_known_video(raw: dict, previous: dict | None) -> bool:
+    if not isinstance(previous, dict):
+        return False
+    try:
+        previous_count = int(previous.get("comment_count") or 0)
+    except (TypeError, ValueError):
+        previous_count = 0
+    return previous_count > 0 and not _has_comment_text(raw)
+
+
 def run(video_ids: list[str], output_dir: Path) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = output_dir / "cache"
@@ -26,6 +48,12 @@ def run(video_ids: list[str], output_dir: Path) -> dict:
     for video_id in video_ids:
         try:
             raw = yt_fetch.fetch_youtube_raw(video_id, cache_dir=cache_dir, force=True)
+            if _empty_snapshot_for_known_video(raw, previous_state["videos"].get(video_id)):
+                previous_count = previous_state["videos"][video_id].get("comment_count", 0)
+                raise yt_fetch.YtFetchError(
+                    "empty comment snapshot for previously non-empty video "
+                    f"(previous_count={previous_count})"
+                )
             payload["results"][video_id] = raw
         except Exception as err:  # noqa: BLE001
             payload["failures"].append(
