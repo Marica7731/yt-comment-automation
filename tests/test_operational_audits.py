@@ -34,6 +34,40 @@ def test_incremental_audit_accepts_consistent_raw_and_state(tmp_path: Path):
     assert result["review_candidates"] == ["abcdefghijk"]
 
 
+def test_incremental_audit_accepts_recovery_after_rejected_empty_snapshot(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    audit_dir = data_dir / "incremental_audit"
+    audit_dir.mkdir(parents=True)
+    video_id = "sWdaRFW8mNY"
+    raw = _raw("💜┈┈セットリスト┈┈🎼\n0:17:33 三日月\n0:23:15 カワキチアメク")
+    state, _ = incremental.update_state(incremental.empty_state(), {video_id: raw})
+    state, changes = incremental.update_state(state, {video_id: raw})
+    latest = {
+        "fetched_at": "2026-10-21T14:00:14+0000",
+        "results": {video_id: raw},
+        "changes": changes,
+        "review_candidates": incremental.review_candidates(changes),
+        "failures": [],
+    }
+    previous = {
+        "fetched_at": "2026-10-21T13:40:14+0000",
+        "results": {},
+        "changes": {},
+        "review_candidates": [],
+        "failures": [
+            {"video_id": video_id, "error": "YtFetchError: empty comment snapshot"}
+        ],
+    }
+    (audit_dir / "latest.json").write_text(json.dumps(latest), encoding="utf-8")
+    (audit_dir / "previous.json").write_text(json.dumps(previous), encoding="utf-8")
+    incremental.save_state(state, data_dir / "incremental_state.json")
+
+    result = incremental_audit.audit(data_dir)
+
+    assert result["ok"] is True
+    assert result["review_candidates"] == []
+
+
 def test_incremental_audit_detects_state_mismatch(tmp_path: Path):
     data_dir = tmp_path / "data"
     audit_dir = data_dir / "incremental_audit"

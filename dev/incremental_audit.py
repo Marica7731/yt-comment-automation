@@ -70,10 +70,15 @@ def audit(data_dir: Path) -> dict[str, Any]:
         if not isinstance(declared, dict):
             issues.append(f"{video_id}:change_missing")
             continue
-        if previous_results.get(video_id):
-            baseline = incremental.build_video_snapshot(previous_results[video_id])
+        previous_raw = previous_results.get(video_id)
+        if isinstance(previous_raw, dict):
+            baseline = incremental.build_video_snapshot(previous_raw)
             recomputed = incremental.diff_video(baseline, current)
             expected_review = incremental.should_review(recomputed, new_video=False)
+        elif declared.get("new_video") is False:
+            # A rejected empty snapshot is omitted from the next payload's prior
+            # results; the persisted state check above is the available baseline.
+            continue
         else:
             recomputed = incremental.diff_video(None, current)
             expected_review = incremental.should_review(recomputed, new_video=True)
