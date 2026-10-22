@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -106,6 +107,34 @@ def _post_file_upload(file_path: Path, token: str) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _http_error_summary(err: urllib.error.HTTPError) -> str:
+    """Return actionable, credential-free details for an HTTP error response."""
+    parts = [f"HTTP {err.code}"]
+    try:
+        raw_body = err.read(4096).decode("utf-8", "replace")
+        payload = json.loads(raw_body)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        payload = {}
+
+    api_code = payload.get("code")
+    api_msg = payload.get("msg")
+    if api_code is not None:
+        parts.append(f"code={api_code}")
+    if isinstance(api_msg, str) and api_msg.strip():
+        parts.append("msg=" + re.sub(r"\s+", " ", api_msg).strip()[:240])
+
+    error = payload.get("error")
+    violations = error.get("permission_violations") if isinstance(error, dict) else None
+    scopes = sorted({
+        str(row.get("subject", "")).strip()
+        for row in (violations or [])
+        if isinstance(row, dict) and str(row.get("subject", "")).strip()
+    })
+    if scopes:
+        parts.append("required_scopes=" + ",".join(scopes))
+    return " ".join(parts)
+
+
 def send_feishu_file(file_path: str | Path, dry_run: bool = False) -> tuple[bool, str]:
     """Send one local file to the configured YT-comment-automation Feishu recipient.
 
@@ -135,6 +164,8 @@ def send_feishu_file(file_path: str | Path, dry_run: bool = False) -> tuple[bool
         return False, f"飞书 token 失败: {err}"
     try:
         upload = _post_file_upload(path, token)
+    except urllib.error.HTTPError as err:
+        return False, f"飞书文件上传失败: {_http_error_summary(err)}"
     except Exception as err:  # noqa: BLE001
         return False, f"飞书文件上传失败: {type(err).__name__}"
     if upload.get("code") != 0:

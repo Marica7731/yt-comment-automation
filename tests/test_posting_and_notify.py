@@ -486,6 +486,46 @@ def test_send_feishu_file_reports_uncertain_message_without_retry(monkeypatch, t
     assert len(message_calls) == 1
 
 
+def test_send_feishu_file_reports_http_status_and_missing_scope(monkeypatch, tmp_path):
+    import io
+    import json
+    import urllib.error
+
+    from yt_comment_automation import notify
+
+    file_path = tmp_path / "songlist.md"
+    file_path.write_text("songlist\n", encoding="utf-8")
+    monkeypatch.setattr(notify.config, "feishu_app_id", lambda: "test-app-id")
+    monkeypatch.setattr(notify.config, "feishu_app_secret", lambda: "test-app-secret")
+    monkeypatch.setattr(notify.config, "feishu_open_id", lambda: "ou-test-recipient")
+    monkeypatch.setattr(notify, "_get_tenant_access_token", lambda app_id, secret: "test-tenant-token")
+    payload = {
+        "code": 99991672,
+        "msg": "Access denied",
+        "error": {"permission_violations": [{"subject": "im:resource:upload"}]},
+    }
+    http_error = urllib.error.HTTPError(
+        notify.FILE_UPLOAD_URL,
+        400,
+        "Bad Request",
+        hdrs=None,
+        fp=io.BytesIO(json.dumps(payload).encode("utf-8")),
+    )
+    monkeypatch.setattr(
+        notify,
+        "_post_file_upload",
+        lambda path, token: (_ for _ in ()).throw(http_error),
+    )
+
+    ok, receipt = notify.send_feishu_file(file_path)
+
+    assert not ok
+    assert "HTTP 400" in receipt
+    assert "code=99991672" in receipt
+    assert "required_scopes=im:resource:upload" in receipt
+    assert "test-tenant-token" not in receipt
+
+
 def test_send_feishu_file_rejects_empty_and_oversize_before_network(monkeypatch, tmp_path):
     from yt_comment_automation import notify
 

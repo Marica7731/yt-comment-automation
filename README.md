@@ -106,6 +106,8 @@ python3 send_feishu_file.py /absolute/path/to/result.md
 
 此入口使用本项目 `private.env` 中的 `FEISHU_APP_ID`、`FEISHU_APP_SECRET` 和 `MY_FEISHU_OPEN_ID`；不复用其他项目或时间线机器人的配置。文件先经 `im/v1/files` 上传，再以 `msg_type=file` 发给配置的收件人。文件必须非空且不超过 30 MB。消息发送 API 不提供幂等键；若发送请求超时、回执不明，不要直接重跑，应先核对飞书消息状态。该入口只发送附件，不发布 B 站评论。
 
+机器人还需申请并开通 `im:resource:upload` 或 `im:resource` 应用身份权限；缺少权限时，文件上传接口会返回 `99991672`。发送器会在错误回执中显示 HTTP 状态、飞书错误码和缺失权限，便于直接处理应用权限配置。
+
 ## 评论格式与发布规则
 
 - 每行严格 `时间戳 NN. 歌名 - 歌手`（例：`0:03:55 01. バラライカ - 月島きらり`）
