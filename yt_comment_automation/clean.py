@@ -534,7 +534,9 @@ def clean_song_or_artist_part(text: str) -> str:
         "",
         t,
     )
-    t = re.sub(r"[\-—–−/／|｜￤∣丨:：;；]+$", "", t)
+    # 歌名可合法以连字符收尾（如 RADWIMPS《夕星-ゆうづつ-》）；只有空格后的连字符按装饰剥离。
+    t = re.sub(r"(?<=\s)[\-—–−]+$", "", t)
+    t = re.sub(r"[/／|｜￤∣丨:：;；]+$", "", t)
     t = t.strip()
     t = strip_trailing_year_annotation(t)
     return strip_trailing_visual_decorations(strip_loose_edge_title_quotes(t))
