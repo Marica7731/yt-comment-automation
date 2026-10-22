@@ -164,6 +164,8 @@ def approve_comment(
     if not cleaned:
         raise ValueError("审核通过的评论内容为空")
     item = load_comment(bvid, data_dir)
+    if item.get("status") == "deleted":
+        raise RuntimeError(f"{bvid} 已按用户要求删除，deleted 是终态，禁止重新审核发布")
     if item.get("status") in {"applied", "applied_unverified"}:
         raise RuntimeError(f"{bvid} 已经发布，不能重复审核")
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")

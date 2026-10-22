@@ -676,6 +676,40 @@ def test_cleanup_delete_only_removes_comment_without_republish(tmp_path: Path, m
     assert result["delete_results"] == [{"rpid": "123456", "response": {"code": 0, "message": ""}}]
 
 
+def test_approve_comment_rejects_real_deleted_terminal_record(tmp_path: Path):
+    """A delete-only record must not be revived by the normal approve/apply path."""
+    bvid = "BV1ZehV6LEMc"
+    message = "0:22:30 02. God knows... - 平野綾"
+    payload = {
+        "bvid": bvid,
+        "yt_id": "OW_iFx4GK-8",
+        "title": "✧歌枠コラボ✧にじゅな＆稍麦で最高の夜へ！【にじゅな】#ややにじゅ",
+        "draft_messages": [message],
+        "draft_song_count": 1,
+        "source_text": "25:39、52:40ここ好き！！！",
+        "upgrade_mode": False,
+    }
+    review.queue_comment(payload, tmp_path)
+    item = review.load_comment(bvid, tmp_path)
+    item.update({
+        "status": "deleted",
+        "approved_messages": [message],
+        "rpids": [],
+        "previous_rpids": ["316404618993"],
+        "deleted_rpids": ["316404618993"],
+        "cleanup_note": "按用户要求删除，未重发",
+    })
+    review._write_json(review.review_dir(tmp_path) / f"{bvid}.json", item)
+
+    with pytest.raises(RuntimeError, match="deleted 是终态"):
+        review.approve_comment(bvid, [message], tmp_path)
+
+    unchanged = review.load_comment(bvid, tmp_path)
+    assert unchanged["status"] == "deleted"
+    assert unchanged["deleted_rpids"] == ["316404618993"]
+    assert unchanged["cleanup_note"] == "按用户要求删除，未重发"
+
+
 def test_list_comments_ignores_messages_json_array(tmp_path: Path):
     review.review_dir(tmp_path).joinpath("notes.messages.json").write_text("[]", encoding="utf-8")
     payload = {
