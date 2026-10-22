@@ -121,6 +121,10 @@ def should_keep_inline_setlist_range_line(line: str) -> bool:
     source = normalize_timeline_marker_chars(line or "").strip()
     if not source:
         return False
+    # 活动场次信息（開場 18:15 開演 19:00）含多个钟点，但不是歌曲时间轴。
+    # 保留整行，避免按时间戳切成 18:15 / 19:00 后误配后续活动标题。
+    if re.match(r"^(?:開場|開演|受付|終演).*\d{1,2}:\d{2}", source):
+        return True
     # 1曲目 38:12~43:24「ガーネット／奥華子」
     if re.search(
         r"^第?\s*\d{1,3}\s*(?:曲目|曲)\s*[：:\s\u3000]*\d{1,2}:\d{2}(?::\d{2})?\s*[~～〜\-－—–−]\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:[「『｢《〈【]|[\s\S]*[\/／|｜￤∣丨])[\s\S]+$",
@@ -753,6 +757,12 @@ def is_obviously_non_song_text(text: str) -> bool:
     if not t:
         return True
     if re.match(r"^(開始|开始|结束|終了|end|start|スタート)$", t, re.IGNORECASE):
+        return True
+    # 活动场次时间是宣传元数据，不是直播回放里的歌曲时间轴。
+    # 例如「開場 18:15 開演 19:00」曾被拆成 0:18:15「開演」。
+    if re.match(r"^(?:開場|開演|受付|終演)\s*\d{1,2}:\d{2}(?::\d{2})?", t):
+        return True
+    if re.fullmatch(r"(?:開場|開演|受付|終演)", t):
         return True
     if re.match(r"^(talk|mc|雑談|聊天|感想|告知|返场|休息)$", t, re.IGNORECASE):
         return True
