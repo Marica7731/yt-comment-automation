@@ -1,4 +1,5 @@
 """Codex 审核队列的持久化、批准和执行测试。"""
+import json
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
@@ -283,6 +284,33 @@ def test_review_cli_apply_exception_sends_detailed_failure(monkeypatch):
     assert "segments：" not in brief
     assert "failures：" not in brief
     assert "失败详情：发布批次校验失败" not in brief
+
+
+def test_review_cli_apply_prints_comment_and_feishu_receipts(monkeypatch, capsys):
+    item = {
+        "bvid": "BV1ApplyReceipt",
+        "status": "applied",
+        "song_count": 9,
+        "rpids": ["r1"],
+        "segments": 1,
+        "verification": {"ok": True, "detail": "回读通过"},
+        "feishu_notification": {"status": "sent", "detail": "message_id=receipt"},
+    }
+    monkeypatch.setattr(review, "apply_comment", lambda bvid, dry_run=False: item)
+
+    exit_code = review_cli.main(["apply", "--bvid", "BV1ApplyReceipt"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output == {
+        "bvid": "BV1ApplyReceipt",
+        "status": "applied",
+        "song_count": 9,
+        "rpids": ["r1"],
+        "segments": 1,
+        "verification": {"ok": True, "detail": "回读通过"},
+        "feishu_notification": {"status": "sent", "detail": "message_id=receipt"},
+    }
 
 
 def test_codex_review_reaches_queue_before_local_gate(tmp_path: Path, monkeypatch):

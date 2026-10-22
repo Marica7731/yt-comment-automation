@@ -148,7 +148,20 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as err:
             review.notify_apply_failure(args.bvid, str(err))
             raise
-        print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification")}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "bvid": item["bvid"],
+                    "status": item.get("status"),
+                    "song_count": item.get("song_count"),
+                    "rpids": item.get("rpids") or [],
+                    "segments": item.get("segments") or 0,
+                    "verification": item.get("verification"),
+                    "feishu_notification": item.get("feishu_notification"),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0 if item.get("status") in {"applied", "dry_run"} else 1
     if args.command == "verify":
         item = review.reverify_applied(args.bvid)
