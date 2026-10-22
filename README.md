@@ -77,6 +77,8 @@ python -m yt_comment_automation.review_cli apply --bvid BV1xxx
 python3 like_auto.py --max-count 10 --rounds 8
 ```
 
+`review_cli apply` publishes and verifies the Bilibili comment before sending the Feishu notice. Its result records `feishu_notification.status` (`sent`, `failed`, `unknown`, or `not_attempted`) and the response detail in the same review item; an `unknown` notification is not retried automatically because the message may already have been delivered.
+
 ## 配置项（private.env / 环境变量）
 
 | 变量 | 说明 |

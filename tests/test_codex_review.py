@@ -347,6 +347,10 @@ def test_comment_apply_marks_processed_and_verifies(tmp_path: Path, monkeypatch)
 
     assert item["status"] == "applied"
     assert item["verification"]["ok"] is True
+    assert item["feishu_notification"]["status"] == "sent"
+    assert item["feishu_notification"]["detail"] == "ok"
+    stored = review.load_comment("BV1Apply", tmp_path)
+    assert stored["feishu_notification"]["status"] == "sent"
     assert "BV1Apply" in (tmp_path / "processed.json").read_text(encoding="utf-8")
     assert "yt_comment_automation/review.py" in success_kwargs["files"]
     assert any("review_cli apply --bvid BV1Apply" in x for x in success_kwargs["tests"])
@@ -355,6 +359,45 @@ def test_comment_apply_marks_processed_and_verifies(tmp_path: Path, monkeypatch)
     assert success_kwargs["segments"] == 1
     assert success_kwargs["song_count"] == 1
     assert success_kwargs["failures"] == []
+
+
+def test_apply_notification_records_failed_result_without_retry(tmp_path, monkeypatch):
+    item = {"bvid": "BV1NotifyFail", "status": "applied"}
+    path = tmp_path / "BV1NotifyFail.json"
+    review._write_json(path, item)
+    calls = []
+    monkeypatch.setattr(
+        review.notify,
+        "send_feishu_message",
+        lambda brief: calls.append(brief) or (False, "Feishu rejected message"),
+    )
+
+    receipt = review._send_apply_feishu_notification(item, path, "notice")
+
+    assert receipt["status"] == "failed"
+    assert receipt["detail"] == "Feishu rejected message"
+    assert len(calls) == 1
+    assert review._load(path)["feishu_notification"]["status"] == "failed"
+
+
+def test_apply_notification_exception_is_recorded_as_unknown_without_retry(tmp_path, monkeypatch):
+    item = {"bvid": "BV1NotifyUnknown", "status": "applied"}
+    path = tmp_path / "BV1NotifyUnknown.json"
+    review._write_json(path, item)
+    calls = []
+
+    def fail_after_request(brief):
+        calls.append(brief)
+        raise TimeoutError("response lost")
+
+    monkeypatch.setattr(review.notify, "send_feishu_message", fail_after_request)
+
+    receipt = review._send_apply_feishu_notification(item, path, "notice")
+
+    assert receipt["status"] == "unknown"
+    assert receipt["detail"] == "response lost"
+    assert len(calls) == 1
+    assert review._load(path)["feishu_notification"]["status"] == "unknown"
 
 def test_verify_own_comments_normalizes_bilibili_html_entities(monkeypatch):
     class Own:

@@ -289,6 +289,41 @@ def verify_own_comments(bvid: str, messages: list[str], cookies: dict[str, str])
         return False, f"评论区回读失败: {err}"
 
 
+def _send_apply_feishu_notification(
+    item: dict[str, Any], data_path: Path, brief: str
+) -> dict[str, Any]:
+    """Send the apply notice once and persist its result without retrying ambiguity."""
+    attempted_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    item["feishu_notification"] = {"status": "sending", "attempted_at": attempted_at}
+    try:
+        _write_json(data_path, item)
+    except Exception as err:  # noqa: BLE001
+        item["feishu_notification"]["pre_send_receipt_error"] = str(err)[:300]
+
+    try:
+        sent, detail = notify.send_feishu_message(brief)
+    except Exception as err:  # noqa: BLE001
+        receipt = {
+            "status": "unknown",
+            "attempted_at": attempted_at,
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "detail": str(err)[:500],
+        }
+    else:
+        receipt = {
+            "status": "sent" if sent else "failed",
+            "attempted_at": attempted_at,
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "detail": str(detail)[:500],
+        }
+    item["feishu_notification"] = receipt
+    try:
+        _write_json(data_path, item)
+    except Exception as err:  # noqa: BLE001
+        receipt["receipt_write_error"] = str(err)[:300]
+    return receipt
+
+
 def _check_recorded_rpids(
     bvid: str, rpids: list[str], cookies: dict[str, str]
 ) -> list[dict[str, Any]]:
@@ -879,9 +914,17 @@ def apply_comment(
                 status=item.get("status", ""),
                 commit=commit,
             )
-        notify.send_feishu_message(brief)
-    except Exception:  # noqa: BLE001
-        pass
+        _send_apply_feishu_notification(item, data_path, brief)
+    except Exception as err:  # noqa: BLE001
+        item["feishu_notification"] = {
+            "status": "not_attempted",
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "detail": str(err)[:500],
+        }
+        try:
+            _write_json(data_path, item)
+        except Exception:  # noqa: BLE001
+            pass
     return item
 def _normalize_comment_for_compare(text: str) -> str:
     """Normalize Bilibili render changes before exact comparison."""
