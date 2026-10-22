@@ -29,7 +29,8 @@ yt_comment_automation/
   yt_fetch.py      油管评论/简介抓取（无 cookie；内容结果仅在当前调用内存中使用）
   clean.py         本地规则清洗：时间戳/歌名/歌手提取
   bili_comment.py  B站评论：cookie 加载、已有评论检测、发布
-  notify.py        飞书文本消息
+  notify.py        飞书文本与文件消息
+send_feishu_file.py  通过本项目飞书机器人发送本地文件
   pipeline.py      管道编排（增量/全量/指定）
   cli.py           命令行入口
   incremental.py   原始评论/简介哈希与四类重审触发
@@ -92,6 +93,16 @@ python3 like_auto.py --max-count 10 --rounds 8
 | `YOUTUBE_FETCH_MODE` | WDC 管线固定 `cache_only`；内容来自同轮 Action payload |
 | `YOUTUBE_REQUEST_MIN_GAP_SECONDS` | YouTube 相邻请求最小间隔；GitHub Action workflow 使用 3 秒 |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
+
+## 飞书文件发送
+
+需要把本地结果文件交付给当前用户时，可在 WDC 仓库根目录运行：
+
+```bash
+python3 send_feishu_file.py /absolute/path/to/result.md
+```
+
+此入口使用本项目 `private.env` 中的 `FEISHU_APP_ID`、`FEISHU_APP_SECRET` 和 `MY_FEISHU_OPEN_ID`；不复用其他项目或时间线机器人的配置。文件先经 `im/v1/files` 上传，再以 `msg_type=file` 发给配置的收件人。文件必须非空且不超过 30 MB。消息发送 API 不提供幂等键；若发送请求超时、回执不明，不要直接重跑，应先核对飞书消息状态。该入口只发送附件，不发布 B 站评论。
 
 ## 评论格式与发布规则
 

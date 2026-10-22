@@ -11,12 +11,16 @@ import re
 import subprocess
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Iterable, Optional
+from uuid import uuid4
 
 from . import config
 
 TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 MESSAGE_URL = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
+FILE_UPLOAD_URL = "https://open.feishu.cn/open-apis/im/v1/files"
+MAX_FEISHU_FILE_BYTES = 30 * 1024 * 1024
 UA = "yt-comment-automation/0.1"
 
 # 通知时间统一用北京时间（UTC+8）；B 站简介/YouTube 用日本时间（UTC+9）
@@ -67,6 +71,94 @@ def send_feishu_message(text: str, dry_run: bool = False) -> tuple[bool, str]:
     if resp.get("code") != 0:
         return False, f"飞书发送失败: code={resp.get('code')} msg={resp.get('msg')}"
     return True, f"飞书已发送 message_id={resp.get('data', {}).get('message_id', '')}"
+
+
+def _post_file_upload(file_path: Path, token: str) -> dict:
+    """Upload one local file and return the Feishu API response."""
+    file_name = file_path.name.replace("\r", "_").replace("\n", "_")
+    header_name = file_name.encode("ascii", errors="replace").decode("ascii").replace('"', "'")
+    boundary = "----yt-comment-automation-" + uuid4().hex
+    chunks: list[bytes] = []
+    for name, value in (("file_type", "stream"), ("file_name", file_name)):
+        chunks.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode("utf-8")
+        )
+    content = file_path.read_bytes()
+    if not content:
+        raise ValueError("不允许上传空文件")
+    if len(content) > MAX_FEISHU_FILE_BYTES:
+        raise ValueError("文件超出飞书 30 MB 上传上限")
+    chunks.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{header_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode("ascii")
+    )
+    chunks.extend((content, b"\r\n", f"--{boundary}--\r\n".encode("ascii")))
+    request = urllib.request.Request(
+        FILE_UPLOAD_URL,
+        data=b"".join(chunks),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": UA,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def send_feishu_file(file_path: str | Path, dry_run: bool = False) -> tuple[bool, str]:
+    """Send one local file to the configured YT-comment-automation Feishu recipient.
+
+    The message API has no idempotency key. A transport error after the message
+    request is sent is reported as uncertain and must not be retried blindly.
+    """
+    path = Path(file_path).expanduser()
+    if not path.is_file():
+        return False, f"飞书文件发送失败：文件不存在 {path}"
+    file_size = path.stat().st_size
+    if file_size == 0:
+        return False, "飞书文件发送失败：不允许发送空文件"
+    if file_size > MAX_FEISHU_FILE_BYTES:
+        return False, "飞书文件发送失败：文件超出 30 MB 上传上限"
+
+    app_id = config.feishu_app_id()
+    app_secret = config.feishu_app_secret()
+    open_id = config.feishu_open_id()
+    if not (app_id and app_secret and open_id):
+        return False, "缺少 FEISHU_APP_ID/FEISHU_APP_SECRET/MY_FEISHU_OPEN_ID"
+    if dry_run:
+        return True, f"[dry-run] 飞书附件：{path.name} ({file_size} bytes)"
+
+    try:
+        token = _get_tenant_access_token(app_id, app_secret)
+    except Exception as err:  # noqa: BLE001
+        return False, f"飞书 token 失败: {err}"
+    try:
+        upload = _post_file_upload(path, token)
+    except Exception as err:  # noqa: BLE001
+        return False, f"飞书文件上传失败: {type(err).__name__}"
+    if upload.get("code") != 0:
+        return False, f"飞书文件上传被拒绝: code={upload.get('code')} msg={upload.get('msg')}"
+    file_key = upload.get("data", {}).get("file_key")
+    if not file_key:
+        return False, "飞书文件上传响应缺少 file_key"
+
+    try:
+        response = _post_json(
+            MESSAGE_URL,
+            {
+                "receive_id": open_id,
+                "msg_type": "file",
+                "content": json.dumps({"file_key": file_key}, ensure_ascii=False),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    except Exception as err:  # noqa: BLE001
+        return False, f"飞书文件消息结果不确定（不要重发）: {type(err).__name__}"
+    if response.get("code") != 0:
+        return False, f"飞书文件消息被拒绝: code={response.get('code')} msg={response.get('msg')}"
+    message_id = response.get("data", {}).get("message_id", "")
+    return True, f"飞书文件已发送 message_id={message_id} file_key={file_key} bytes={file_size}"
 
 
 def git_summary() -> str:

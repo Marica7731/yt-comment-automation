@@ -401,3 +401,106 @@ def test_incremental_log_rotation_keeps_scheduler_log(tmp_path):
     assert scheduler_log.read_text(encoding="utf-8") == "scheduler"
     assert len(list(tmp_path.glob("incremental_[0-9]*.log"))) == 30
     assert not (tmp_path / "incremental_20261020_000000.log").exists()
+
+class _FakeFeishuResponse:
+    def __init__(self, value):
+        import json
+
+        self._body = json.dumps(value).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return self._body
+
+
+def test_send_feishu_file_uploads_and_sends_one_file_message(monkeypatch, tmp_path):
+    import json
+
+    from yt_comment_automation import notify
+
+    file_path = tmp_path / "songlist.md"
+    file_path.write_bytes("0:00:12 01. テスト曲 - テスト歌手\n".encode("utf-8"))
+    monkeypatch.setattr(notify.config, "feishu_app_id", lambda: "test-app-id")
+    monkeypatch.setattr(notify.config, "feishu_app_secret", lambda: "test-app-secret")
+    monkeypatch.setattr(notify.config, "feishu_open_id", lambda: "ou-test-recipient")
+    monkeypatch.setattr(notify, "_get_tenant_access_token", lambda app_id, secret: "test-tenant-token")
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        assert timeout == 30
+        assert request.get_header("Authorization") == "Bearer test-tenant-token"
+        if request.full_url == notify.FILE_UPLOAD_URL:
+            content_type = request.get_header("Content-type")
+            assert content_type.startswith("multipart/form-data; boundary=")
+            body = request.data
+            assert b'name="file_type"' in body and b"stream" in body
+            assert b'name="file_name"' in body and b"songlist.md" in body
+            assert b'name="file"; filename="songlist.md"' in body
+            assert file_path.read_bytes() in body
+            return _FakeFeishuResponse({"code": 0, "data": {"file_key": "file_test_key"}})
+        assert request.full_url == notify.MESSAGE_URL
+        message = json.loads(request.data.decode("utf-8"))
+        assert message["receive_id"] == "ou-test-recipient"
+        assert message["msg_type"] == "file"
+        assert json.loads(message["content"]) == {"file_key": "file_test_key"}
+        return _FakeFeishuResponse({"code": 0, "data": {"message_id": "om_test_message"}})
+
+    monkeypatch.setattr(notify.urllib.request, "urlopen", fake_urlopen)
+    ok, receipt = notify.send_feishu_file(file_path)
+
+    assert ok
+    assert "message_id=om_test_message" in receipt
+    assert "file_key=file_test_key" in receipt
+    assert len(requests) == 2
+    assert requests[0].full_url == notify.FILE_UPLOAD_URL
+    assert requests[1].full_url == notify.MESSAGE_URL
+
+
+def test_send_feishu_file_reports_uncertain_message_without_retry(monkeypatch, tmp_path):
+    from yt_comment_automation import notify
+
+    file_path = tmp_path / "songlist.md"
+    file_path.write_text("songlist\n", encoding="utf-8")
+    monkeypatch.setattr(notify.config, "feishu_app_id", lambda: "test-app-id")
+    monkeypatch.setattr(notify.config, "feishu_app_secret", lambda: "test-app-secret")
+    monkeypatch.setattr(notify.config, "feishu_open_id", lambda: "ou-test-recipient")
+    monkeypatch.setattr(notify, "_get_tenant_access_token", lambda app_id, secret: "test-tenant-token")
+    monkeypatch.setattr(notify, "_post_file_upload", lambda path, token: {"code": 0, "data": {"file_key": "file_test_key"}})
+    message_calls = []
+
+    def fail_message(*args, **kwargs):
+        message_calls.append((args, kwargs))
+        raise TimeoutError("response lost")
+
+    monkeypatch.setattr(notify, "_post_json", fail_message)
+    ok, receipt = notify.send_feishu_file(file_path)
+
+    assert not ok
+    assert "结果不确定（不要重发）" in receipt
+    assert len(message_calls) == 1
+
+
+def test_send_feishu_file_rejects_empty_and_oversize_before_network(monkeypatch, tmp_path):
+    from yt_comment_automation import notify
+
+    empty = tmp_path / "empty.md"
+    empty.write_bytes(b"")
+    oversized = tmp_path / "oversized.md"
+    oversized.write_bytes(b"1234")
+    monkeypatch.setattr(notify, "MAX_FEISHU_FILE_BYTES", 3)
+    monkeypatch.setattr(notify.config, "feishu_app_id", lambda: "test-app-id")
+    monkeypatch.setattr(notify.config, "feishu_app_secret", lambda: "test-app-secret")
+    monkeypatch.setattr(notify.config, "feishu_open_id", lambda: "ou-test-recipient")
+    monkeypatch.setattr(notify, "_get_tenant_access_token", lambda *args: (_ for _ in ()).throw(AssertionError("network must not start")))
+
+    ok_empty, receipt_empty = notify.send_feishu_file(empty)
+    ok_large, receipt_large = notify.send_feishu_file(oversized)
+
+    assert not ok_empty and "空文件" in receipt_empty
+    assert not ok_large and "30 MB" in receipt_large
