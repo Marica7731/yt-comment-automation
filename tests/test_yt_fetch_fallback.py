@@ -170,6 +170,29 @@ def test_innertube_parser_excludes_blocked_comment_author():
     ]
 
 
+def test_innertube_parser_excludes_unreliable_jp_nimono_real_sample():
+    data = {
+        "contents": [
+            {
+                "commentEntityPayload": {
+                    "properties": {
+                        "commentId": "Ugwry9k5B2-BtxzgzfF4AaABAg",
+                        "content": {
+                            "content": "歌位置メモ\n0:08:34 ; 0:12:39 亜麻色の髪の乙女 / 島谷ひとみ"
+                        },
+                    },
+                    "author": {
+                        "channelId": "UCIrT2s7NYs2Gkcnp-i0V_Cg",
+                        "displayName": "@JP.にもの",
+                    },
+                }
+            }
+        ]
+    }
+
+    assert yt_fetch._extract_comment_entries(data) == []
+
+
 def test_official_parser_excludes_blocked_comment_author():
     items = [
         {

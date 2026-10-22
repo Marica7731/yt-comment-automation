@@ -28,7 +28,12 @@ YOUTUBEI_NEXT = "https://www.youtube.com/youtubei/v1/next?prettyPrint=false&key=
 TIMESTAMP_RE = re.compile(r"(^|[^\d])(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
 
 # 用户确认该频道发布的歌单不可信；channel ID 稳定，不受改名影响。
-BLOCKED_COMMENT_AUTHOR_CHANNEL_IDS = frozenset({"UC5efbPKzrDaVfMaH5ghB8Bg"})
+BLOCKED_COMMENT_AUTHOR_CHANNEL_IDS = frozenset(
+    {
+        "UC5efbPKzrDaVfMaH5ghB8Bg",
+        "UCIrT2s7NYs2Gkcnp-i0V_Cg",
+    }
+)
 
 
 def _is_blocked_comment_author(author_id: str) -> bool:
