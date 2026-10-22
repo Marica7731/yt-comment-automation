@@ -39,6 +39,7 @@ def test_r05_single_quotes():
 def test_r06_transliteration_paren():
     assert rules.strip_parenthetical_transliteration("絶頂讃歌 (Zetchou Sanka | Orgasm Anthem)") == "絶頂讃歌"
     assert rules.strip_parenthetical_transliteration("ryo(supercell)") == "ryo(supercell)"
+    assert rules.strip_parenthetical_transliteration("千石撫子(CV. 花澤香菜)") == "千石撫子(CV. 花澤香菜)"
 
 
 def test_r07_performance_notes():

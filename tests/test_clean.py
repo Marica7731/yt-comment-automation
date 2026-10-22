@@ -80,6 +80,24 @@ def test_extract_song_artist_core_basic():
     assert parsed == {"song": "441", "artist": "miwa"}
 
 
+def test_cv_credit_suffix_is_preserved_for_real_setlist_lines():
+    parsed = clean.extract_song_artist_core(
+        "恋愛サーキュレーション / 千石撫子(CV. 花澤香菜)"
+    )
+    assert parsed == {
+        "song": "恋愛サーキュレーション",
+        "artist": "千石撫子(CV. 花澤香菜)",
+    }
+
+    parsed = clean.extract_song_artist_core(
+        "オレンジ / 逢坂大河(CV. 釘宮理恵)・櫛枝実乃梨(CV. 堀江由衣)・川嶋亜美(CV. 喜多村英梨)"
+    )
+    assert parsed == {
+        "song": "オレンジ",
+        "artist": "逢坂大河(CV. 釘宮理恵)・櫛枝実乃梨(CV. 堀江由衣)・川嶋亜美(CV. 喜多村英梨)",
+    }
+
+
 def test_extract_song_artist_core_double_slash():
     parsed = clean.extract_song_artist_core("曖昧劣情Lover // 電ポルP")
     assert parsed == {"song": "曖昧劣情Lover", "artist": "電ポルP"}
