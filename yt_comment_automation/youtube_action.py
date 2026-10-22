@@ -83,7 +83,9 @@ def main(argv: list[str] | None = None) -> int:
     video_ids = [item.strip() for item in args.video_ids.split(",") if item.strip()]
     payload = run(video_ids, Path(args.output_dir))
     print(json.dumps({"fetched": len(payload["results"]), "failures": payload["failures"]}, ensure_ascii=False))
-    return 1 if payload["failures"] else 0
+    # Per-video failures are part of the published payload and are handled by the
+    # WDC pipeline. Only failures before payload creation should fail the Action.
+    return 0
 
 
 if __name__ == "__main__":

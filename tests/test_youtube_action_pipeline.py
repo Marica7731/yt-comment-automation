@@ -220,6 +220,23 @@ def test_action_records_individual_failure(tmp_path, monkeypatch):
     assert "blocked" in payload["failures"][0]["error"]
 
 
+def test_action_cli_succeeds_when_individual_failures_are_in_payload(tmp_path, monkeypatch, capsys):
+    payload = {
+        "results": {},
+        "failures": [
+            {"video_id": "sWdaRFW8mNY", "error": "YtFetchError: empty snapshot"}
+        ],
+    }
+    monkeypatch.setattr(youtube_action, "run", lambda *args: payload)
+
+    assert youtube_action.main([
+        "--video-ids", "sWdaRFW8mNY",
+        "--output-dir", str(tmp_path / "action"),
+    ]) == 0
+    output = capsys.readouterr().out
+    assert "empty snapshot" in output
+
+
 def test_action_failure_for_matches_real_rate_limit_payload(tmp_path):
     data_dir = tmp_path / "data"
     audit_dir = data_dir / "incremental_audit"
