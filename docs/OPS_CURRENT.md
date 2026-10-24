@@ -43,8 +43,9 @@ are:
 
 The reviewer must inspect the Action's actual `latest.json` and
 `previous.json`, not only hashes, counts, or pipeline summaries. Only a
-structured song list may be published. Missing-artist rows require authorized
-archive evidence or another reliable confirmation.
+structured song list may be published. A structured SETLIST is sufficient
+context to identify its rows as songs; missing artist is not a blocker. Publish
+those rows without an artist rather than holding the whole item in `pending`.
 
 Publication still uses `review_cli approve --messages-file` followed by
 `review_cli apply`; success requires `verification.ok=true` and a live Bilibili
