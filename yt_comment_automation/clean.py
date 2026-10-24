@@ -12,6 +12,7 @@ from typing import Optional
 
 from .rules import apply_song_cleanup as apply_unified_rules  # noqa: F401
 from .rules import has_protected_title as rules_has_protected_title  # noqa: F401
+from .rules import is_numbered_yawn_marker
 
 # ---------- 基础文本规整 ----------
 
@@ -896,6 +897,14 @@ def is_bare_title_excluded(song: str) -> bool:
     return bool(_BARE_TITLE_EXCLUDE.search((song or "").strip()))
 
 
+def _is_numbered_yawn_marker_line(line: str) -> bool:
+    """识别带时间戳的あくびN聊天计数器，不匹配无编号歌名。"""
+    if not extract_first_timestamp_info(line or "")["label"]:
+        return False
+    body = strip_leading_timeline_decorations(line)
+    return is_numbered_yawn_marker(body)
+
+
 def _looks_like_bare_song_title(text: str, source_line: str = "") -> bool:
     """无歌手裸歌名判定（简介 SETLIST「0:04:34 Citylight Fantasy」）。
 
@@ -1282,12 +1291,20 @@ def extract_plain_songs_from_source_timeline(text: str) -> list[ParsedSong]:
         for line in split_collapsed_timeline_lines(normalized)
         if strip_weird_leading_chars(line)
     ]
+    numbered_yawn_count = sum(
+        1 for line in raw_lines if _is_numbered_yawn_marker_line(line)
+    )
+    ignore_numbered_yawns = numbered_yawn_count >= 3
     range_items: list[ParsedSong] = []  # 区间行直接产 ParsedSong（带结束时间）
     merged_lines: list[str] = []
     i = 0
     while i < len(raw_lines):
         line = raw_lines[i]
         if not line:
+            i += 1
+            continue
+
+        if ignore_numbered_yawns and _is_numbered_yawn_marker_line(line):
             i += 1
             continue
 

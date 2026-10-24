@@ -119,6 +119,11 @@ def strip_release_date_parens(text: str) -> str:
     return RELEASE_DATE_PAREN_SUFFIX_RE.sub("", text or "")
 
 
+def is_numbered_yawn_marker(text: str) -> bool:
+    normalized = normalize_fullwidth((text or "").strip())
+    return bool(re.fullmatch(r"^あくび[0-9]{1,3}$", normalized))
+
+
 def strip_parenthetical_transliteration(text: str) -> str:
     """R06：删除末尾含空格或 | 的罗马字/译文括号（保护 ryo(supercell)）。"""
     return TRANSLITERATION_PAREN_SUFFIX_RE.sub("", text or "")
