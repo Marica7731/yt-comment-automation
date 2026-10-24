@@ -366,6 +366,20 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--apply":
             )
         except Exception as err:  # noqa: BLE001
             print(f"飞书通知失败: {err}", flush=True)
+    if liked_n:
+        try:
+            success_brief = notify.build_like_success_brief(
+                apply_result.get("executed", [])
+            )
+            if success_brief:
+                sent, detail = notify.send_terminal_success_message(success_brief)
+                if not sent:
+                    print(f"点赞成功终态通知失败: {detail}", flush=True)
+        except Exception as err:  # noqa: BLE001
+            print(
+                f"点赞成功终态通知异常: {type(err).__name__}",
+                flush=True,
+            )
     raise SystemExit(0 if failed_n == 0 else 1)
 
 print(f"==== 点赞任务 run {RUN_TS} ====", flush=True)

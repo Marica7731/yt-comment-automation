@@ -19,7 +19,7 @@
 | Codex 增量检查 | 每 20 分钟 | 审计 WDC Action 结果、全部非终态队列、日志和部署状态，并审核、发布或修复 | 当前会话 |
 | 双链路审计 | 每日北京 22:00/04:00 | `dev/incremental_audit.py` + `dev/like_success_audit.py` | 对应日志与飞书 |
 
-- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：仅从 WDC `/opt/yt-comment-automation/private.env` 或进程环境读取 `FEISHU_APP_ID/FEISHU_APP_SECRET/MY_FEISHU_OPEN_ID`，通知机器人固定为 `yt-comment-automation`；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据，禁止读取旧 bridge。
+- 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：仅从 WDC `/opt/yt-comment-automation/private.env` 或进程环境读取 `FEISHU_APP_ID/FEISHU_APP_SECRET/MY_FEISHU_OPEN_ID`，常规通知使用 `yt-comment-automation`；验证通过的评论成功与实际点赞成功明细额外使用 `FEISHU_SUCCESS_APP_ID/FEISHU_SUCCESS_APP_SECRET/FEISHU_SUCCESS_UNION_ID` 发送给成功终态机器人；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据，禁止读取旧 bridge。
 - `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲,合集4`、`IGNORE_BVIDS`（7 个无歌单/非完整歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
 - **所有 B 站 API 请求必须带 cookie**（裸请求 412，换 UA 没用）。
 - 本地对应仓库：`G:\codex-work\yt-comment-automation`。发布流程：本地改 → commit/push → WDC `git pull` → 实跑验证。

@@ -2,7 +2,8 @@
 
 环境变量：
 - FEISHU_APP_ID / FEISHU_APP_SECRET：自建应用凭据
-- MY_FEISHU_OPEN_ID（或 FEISHU_OPEN_ID）：接收人 open_id
+- MY_FEISHU_OPEN_ID（或 FEISHU_OPEN_ID）：常规通知接收人 open_id
+- FEISHU_SUCCESS_*：评论/点赞成功终态机器人凭据与 union_id
 """
 from __future__ import annotations
 
@@ -20,6 +21,9 @@ from . import config
 
 TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 MESSAGE_URL = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id"
+TERMINAL_SUCCESS_MESSAGE_URL = (
+    "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=union_id"
+)
 FILE_UPLOAD_URL = "https://open.feishu.cn/open-apis/im/v1/files"
 MAX_FEISHU_FILE_BYTES = 30 * 1024 * 1024
 UA = "yt-comment-automation/0.1"
@@ -72,6 +76,42 @@ def send_feishu_message(text: str, dry_run: bool = False) -> tuple[bool, str]:
     if resp.get("code") != 0:
         return False, f"飞书发送失败: code={resp.get('code')} msg={resp.get('msg')}"
     return True, f"飞书已发送 message_id={resp.get('data', {}).get('message_id', '')}"
+
+
+def send_terminal_success_message(text: str, dry_run: bool = False) -> tuple[bool, str]:
+    """Send only terminal success notices via the dedicated union_id bot."""
+    app_id = config.feishu_success_app_id()
+    app_secret = config.feishu_success_app_secret()
+    union_id = config.feishu_success_union_id()
+    if not (app_id and app_secret and union_id):
+        return False, (
+            "缺少 FEISHU_SUCCESS_APP_ID/FEISHU_SUCCESS_APP_SECRET/"
+            "FEISHU_SUCCESS_UNION_ID"
+        )
+    if dry_run:
+        return True, "[dry-run] 飞书成功终态消息:\n" + text
+    try:
+        token = _get_tenant_access_token(app_id, app_secret)
+    except Exception as err:  # noqa: BLE001
+        return False, f"成功终态飞书 token 失败: {type(err).__name__}"
+    try:
+        resp = _post_json(
+            TERMINAL_SUCCESS_MESSAGE_URL,
+            {
+                "receive_id": union_id,
+                "msg_type": "text",
+                "content": json.dumps({"text": text}, ensure_ascii=False),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    except urllib.error.HTTPError as err:
+        return False, f"成功终态飞书发送失败: {_http_error_summary(err)}"
+    except Exception as err:  # noqa: BLE001
+        return False, f"成功终态飞书发送结果不确定: {type(err).__name__}（不要自动重发）"
+    if resp.get("code") != 0:
+        return False, f"成功终态飞书发送失败: code={resp.get('code')} msg={resp.get('msg')}"
+    message_id = resp.get("data", {}).get("message_id", "")
+    return True, f"成功终态飞书已发送 message_id={message_id}"
 
 
 def _post_file_upload(file_path: Path, token: str) -> dict:
@@ -412,6 +452,24 @@ def build_like_action_brief(
     lines.append(f"commit：{commit or git_summary()}")
     lines.append(f"时间：{beijing_now()}")
     return "\n".join(lines)
+
+
+def build_like_success_brief(results: Iterable[dict[str, Any]]) -> str:
+    """Return only successfully liked reply IDs and their original contents."""
+    rows = [
+        row
+        for row in results
+        if str(row.get("result") or row.get("status") or "") == "liked"
+    ]
+    return "\n".join(
+        "rpid={rpid} content={content}".format(
+            rpid=row.get("rpid", ""),
+            content=(
+                str(row.get("content", "")).replace("\r", " ").replace("\n", " ").strip()
+            ),
+        )
+        for row in rows
+    )
 
 
 def build_like_review_brief(

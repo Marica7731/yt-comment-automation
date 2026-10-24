@@ -9,7 +9,7 @@
 - 远程生产：WDC `/opt/yt-comment-automation`
 - GitHub：`Marica7731/yt-comment-automation`
 - 目标：从 B 站自家合集视频对应的 YouTube 原始评论/简介中识别增量歌单，由 Codex 审核并发布；粉丝回复点赞由 WDC 独立自动化。
-- 凭据：B 站 cookie、飞书凭据和 YouTube key 只存 WDC `private.env` 或其指向的运行时文件；GitHub token 只存 WDC `/root/.secrets/github-token`。任何密钥值都不得写入仓库、日志、通知或 Agent 配置。
+- 凭据：B 站 cookie、常规飞书凭据、成功终态机器人凭据（`FEISHU_SUCCESS_*`）和 YouTube key 只存 WDC `private.env` 或其指向的运行时文件；GitHub token 只存 WDC `/root/.secrets/github-token`。任何密钥值都不得写入仓库、日志、通知或 Agent 配置。
 
 ## 调度身份
 

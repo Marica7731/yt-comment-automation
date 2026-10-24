@@ -368,6 +368,116 @@ def test_like_action_brief_lists_candidates():
     assert "resolve_real_liked precheck → passed" in brief
 
 
+def test_like_success_brief_only_lists_liked_rpid_and_content():
+    from yt_comment_automation import notify
+
+    brief = notify.build_like_success_brief(
+        [
+            {"rpid": "901", "content": "[比心]\n下一行", "result": "liked"},
+            {"rpid": "902", "content": "已赞", "result": "already_liked"},
+            {"rpid": "903", "content": "失败", "result": "api_error"},
+        ]
+    )
+
+    assert brief == "rpid=901 content=[比心] 下一行"
+
+
+def test_send_terminal_success_message_uses_dedicated_union_id_bot(monkeypatch):
+    import json
+
+    from yt_comment_automation import config, notify
+
+    monkeypatch.setattr(config, "feishu_success_app_id", lambda: "success-app")
+    monkeypatch.setattr(config, "feishu_success_app_secret", lambda: "success-secret")
+    monkeypatch.setattr(config, "feishu_success_union_id", lambda: "union-user")
+    monkeypatch.setattr(
+        notify, "_get_tenant_access_token", lambda app_id, secret: "test-token"
+    )
+    requests = []
+
+    def fake_post(url, payload, headers=None):
+        requests.append((url, payload, headers))
+        return {"code": 0, "data": {"message_id": "message-1"}}
+
+    monkeypatch.setattr(notify, "_post_json", fake_post)
+
+    ok, detail = notify.send_terminal_success_message("rpid=901 content=hello")
+
+    assert ok
+    assert "message-1" in detail
+    assert len(requests) == 1
+    url, payload, headers = requests[0]
+    assert url == notify.TERMINAL_SUCCESS_MESSAGE_URL
+    assert "receive_id_type=union_id" in url
+    assert payload["receive_id"] == "union-user"
+    assert payload["msg_type"] == "text"
+    assert json.loads(payload["content"]) == {"text": "rpid=901 content=hello"}
+    assert headers["Authorization"] == "Bearer test-token"
+
+
+def test_apply_success_sends_separate_terminal_success_notice(tmp_path, monkeypatch):
+    import json
+
+    from yt_comment_automation import review
+
+    terminal_messages = []
+    monkeypatch.setattr(
+        review.notify, "send_feishu_message", lambda text: (True, "old bot")
+    )
+    monkeypatch.setattr(
+        review.notify,
+        "send_terminal_success_message",
+        lambda text: terminal_messages.append(text) or (True, "success bot"),
+    )
+    item = {"status": "applied"}
+    data_path = tmp_path / "review.json"
+
+    review._send_apply_feishu_notification(item, data_path, "✅评论发送成功")
+
+    saved = json.loads(data_path.read_text(encoding="utf-8"))
+    assert terminal_messages == ["✅评论发送成功"]
+    assert saved["feishu_notification"]["status"] == "sent"
+    assert saved["terminal_success_feishu_notification"]["status"] == "sent"
+
+
+def test_unverified_apply_does_not_send_terminal_success_notice(tmp_path, monkeypatch):
+    from yt_comment_automation import review
+
+    terminal_messages = []
+    monkeypatch.setattr(
+        review.notify, "send_feishu_message", lambda text: (True, "old bot")
+    )
+    monkeypatch.setattr(
+        review.notify,
+        "send_terminal_success_message",
+        lambda text: terminal_messages.append(text) or (True, "success bot"),
+    )
+    item = {"status": "applied_unverified"}
+
+    review._send_apply_feishu_notification(item, tmp_path / "review.json", "未验收")
+
+    assert terminal_messages == []
+
+
+def test_terminal_success_notification_does_not_fallback_to_standard_bot(monkeypatch):
+    from yt_comment_automation import notify
+
+    monkeypatch.setenv("FEISHU_APP_ID", "standard-app")
+    monkeypatch.setenv("FEISHU_APP_SECRET", "standard-secret")
+    monkeypatch.setenv("MY_FEISHU_OPEN_ID", "standard-open-id")
+    for key in (
+        "FEISHU_SUCCESS_APP_ID",
+        "FEISHU_SUCCESS_APP_SECRET",
+        "FEISHU_SUCCESS_UNION_ID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    sent, detail = notify.send_terminal_success_message("test")
+
+    assert not sent
+    assert "FEISHU_SUCCESS_APP_ID" in detail
+
+
 def test_config_has_no_legacy_feishu_bridge_loader():
     import inspect
 

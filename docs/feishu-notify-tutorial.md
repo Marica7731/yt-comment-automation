@@ -5,7 +5,7 @@
 ## 一、准备：创建飞书自建应用
 
 1. 打开 [飞书开放平台](https://open.feishu.cn/app) → 「创建企业自建应用」。
-2. 本项目固定使用应用名称 `yt-comment-automation`；旧机器人 `总控` 不参与本项目通知。
+2. 常规通知使用 `yt-comment-automation`；经验证的评论成功和实际点赞成功明细另走成功终态机器人。旧机器人 `总控` 不参与本项目通知。
 3. 在「凭证与基础信息」页拿到：
    - `App ID`（形如 `cli_xxxxxxxxxxxxxxxx`）
    - `App Secret`（形如 `xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`）
@@ -46,6 +46,13 @@ token = resp["tenant_access_token"]
 方式 C（本项目）：只从当前项目 `private.env` 或进程环境读取 `MY_FEISHU_OPEN_ID`；旧 bridge 的 open_id 不能跨应用复用。
 
 ## 三、发送文本消息（核心代码）
+
+成功终态机器人使用独立配置 `FEISHU_SUCCESS_APP_ID`、
+`FEISHU_SUCCESS_APP_SECRET` 和 `FEISHU_SUCCESS_UNION_ID`，接收人类型为
+`union_id`。它只接收通过回读验收的评论成功摘要和实际点赞成功的
+`rpid/content` 行；其他普通通知继续使用原来的 `FEISHU_APP_ID`、
+`FEISHU_APP_SECRET` 与 `MY_FEISHU_OPEN_ID`。两组凭据都只放在 WDC
+`private.env`，不要写入仓库。
 
 ```python
 import json

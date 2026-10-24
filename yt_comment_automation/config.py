@@ -2,7 +2,8 @@
 
 敏感配置：
 - BILI_COOKIE_FILE: biliup 格式 cookie JSON（SESSDATA/bili_jct/DedeUserID）
-- FEISHU_APP_ID / FEISHU_APP_SECRET / MY_FEISHU_OPEN_ID: 当前项目飞书机器人
+- FEISHU_APP_ID / FEISHU_APP_SECRET / MY_FEISHU_OPEN_ID: 常规通知机器人
+- FEISHU_SUCCESS_APP_ID / FEISHU_SUCCESS_APP_SECRET / FEISHU_SUCCESS_UNION_ID: 成功终态机器人
 - 发布和点赞均走 Codex 审核队列；生产不读取任何外部模型凭据
 - 飞书凭据只从当前进程环境或本项目 private.env 读取，禁止回退旧机器人/桥接文件
 - SONG_SERCH_LYRICS_ROOT: song_serch_lyrics 仓库根目录（复用其评论抓取实现）
@@ -63,6 +64,19 @@ def feishu_app_secret() -> str:
 
 def feishu_open_id() -> str:
     return get("MY_FEISHU_OPEN_ID", get("FEISHU_OPEN_ID"))
+
+
+def feishu_success_app_id() -> str:
+    """Dedicated app credentials for verified comment/like success notices."""
+    return get("FEISHU_SUCCESS_APP_ID")
+
+
+def feishu_success_app_secret() -> str:
+    return get("FEISHU_SUCCESS_APP_SECRET")
+
+
+def feishu_success_union_id() -> str:
+    return get("FEISHU_SUCCESS_UNION_ID")
 
 
 

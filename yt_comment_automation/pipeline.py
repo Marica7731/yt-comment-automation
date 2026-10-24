@@ -965,7 +965,19 @@ def run_pipeline(
                     source_lines=result.source_lines,
                     final_message=result.message,
                 )
-                ok, note = notify.send_feishu_message(brief)
+                try:
+                    ok, note = notify.send_feishu_message(brief)
+                finally:
+                    try:
+                        terminal_sent, terminal_note = (
+                            notify.send_terminal_success_message(brief)
+                        )
+                        if not terminal_sent:
+                            logger.warning("  歌单成功终态通知失败: %s", terminal_note)
+                    except Exception as err:  # noqa: BLE001
+                        logger.warning(
+                            "  歌单成功终态通知异常: %s", type(err).__name__
+                        )
                 logger.info("  飞书通知: %s %s", ok, note)
         elif result.status == "error" and not dry_run:
             brief = notify.build_failure_brief(

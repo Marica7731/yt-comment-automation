@@ -389,7 +389,45 @@ def _send_apply_feishu_notification(
         _write_json(data_path, item)
     except Exception as err:  # noqa: BLE001
         receipt["receipt_write_error"] = str(err)[:300]
+    if item.get("status") == "applied":
+        _send_terminal_success_feishu_notification(item, data_path, brief)
     return receipt
+
+
+def _send_terminal_success_feishu_notification(
+    item: dict[str, Any], data_path: Path, brief: str
+) -> dict[str, Any]:
+    """Send the verified success terminal separately and persist its receipt."""
+    attempted_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    key = "terminal_success_feishu_notification"
+    item[key] = {"status": "sending", "attempted_at": attempted_at}
+    try:
+        _write_json(data_path, item)
+    except Exception as err:  # noqa: BLE001
+        item[key]["pre_send_receipt_error"] = str(err)[:300]
+
+    try:
+        sent, detail = notify.send_terminal_success_message(brief)
+    except Exception as err:  # noqa: BLE001
+        terminal_receipt = {
+            "status": "unknown",
+            "attempted_at": attempted_at,
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "detail": str(err)[:500],
+        }
+    else:
+        terminal_receipt = {
+            "status": "sent" if sent else "failed",
+            "attempted_at": attempted_at,
+            "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "detail": str(detail)[:500],
+        }
+    item[key] = terminal_receipt
+    try:
+        _write_json(data_path, item)
+    except Exception as err:  # noqa: BLE001
+        terminal_receipt["receipt_write_error"] = str(err)[:300]
+    return terminal_receipt
 
 
 def _check_recorded_rpids(
