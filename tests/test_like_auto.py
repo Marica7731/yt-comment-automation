@@ -59,7 +59,7 @@ def test_parse_args_rejects_oversized_batch():
         like_auto.parse_args(["--max-count", "21"])
 
 
-def test_run_like_auto_approves_only_selected_batch(tmp_path: Path, monkeypatch):
+def test_run_like_auto_processes_remaining_pending_batches(tmp_path: Path, monkeypatch):
     review_path = tmp_path / "like_review.json"
     like_review.merge_candidates(
         [
@@ -72,10 +72,16 @@ def test_run_like_auto_approves_only_selected_batch(tmp_path: Path, monkeypatch)
 
     def fake_run(command, **kwargs):
         calls.append([str(part) for part in command])
+        if "--apply" in command:
+            payload = like_review.load_review(review_path)
+            for item in payload["candidates"]:
+                if item.get("status") == "approved":
+                    item.update({"status": "applied", "result": "liked"})
+            like_review.save_review(payload, review_path)
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(like_auto.subprocess, "run", fake_run)
-    code = like_auto.run_like_auto(1, review_path)
+    code = like_auto.run_like_auto(1, review_path, max_rounds=2, pause_seconds=0)
 
     assert code == 0
     assert calls == [
@@ -86,10 +92,17 @@ def test_run_like_auto_approves_only_selected_batch(tmp_path: Path, monkeypatch)
             "--apply",
             str(review_path),
         ],
+        [str(like_auto.sys.executable), str(like_auto.ROOT / "like_fans.py")],
+        [
+            str(like_auto.sys.executable),
+            str(like_auto.ROOT / "like_fans.py"),
+            "--apply",
+            str(review_path),
+        ],
     ]
     payload = like_review.load_review(review_path)
     statuses = {str(item["rpid"]): item["status"] for item in payload["candidates"]}
-    assert statuses == {"11": "approved", "12": "pending"}
+    assert statuses == {"11": "applied", "12": "applied"}
     assert payload["max_count"] == 1
 
 

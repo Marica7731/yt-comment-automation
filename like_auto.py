@@ -2,7 +2,10 @@
 
 The collection and action paths stay in ``like_fans.py``. This wrapper turns
 fresh candidates into bounded approved batches and retries transient failures
-by rescanning the list before each round. Every action still passes through the
+by rescanning the list before each round. A successful batch does not end the
+run while fresh pending candidates remain; later rounds process the remaining
+batches until the queue is empty or the round budget is exhausted. Every action
+still passes through the
 same freshness, real-state verification, ledger, and pacing gates.
 """
 from __future__ import annotations
@@ -67,6 +70,7 @@ def run_like_auto(
         str(review_path),
     ]
     retryable_count = 0
+    remaining_count = 0
 
     for round_index in range(max_rounds):
         scan = _run(scan_command, scan_timeout)
@@ -104,15 +108,30 @@ def run_like_auto(
             and str(by_key.get(str(rpid), {}).get("result") or "") in RETRYABLE_RESULTS
         ]
         retryable_count = len(retryable)
-        if not retryable:
+        open_work = [
+            item
+            for item in payload.get("candidates") or []
+            if item.get("status") in {"pending", "approved"}
+            or (
+                item.get("status") == "failed"
+                and str(item.get("result") or "") in RETRYABLE_RESULTS
+            )
+        ]
+        remaining_count = len(open_work)
+        if not retryable and not open_work:
             return apply.returncode
         if round_index + 1 < max_rounds:
+            if open_work:
+                print(f"点赞直跑: 本轮后仍有 {len(open_work)} 条待处理，继续下一批", flush=True)
             if pause_seconds:
                 time.sleep(pause_seconds)
             continue
         break
 
-    print(f"点赞直跑: {max_rounds} 轮后仍有 {retryable_count} 条可重试失败", flush=True)
+    print(
+        f"点赞直跑: {max_rounds} 轮后仍有 {remaining_count} 条待处理、{retryable_count} 条可重试失败",
+        flush=True,
+    )
     return 1
 
 
