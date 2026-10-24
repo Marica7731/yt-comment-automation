@@ -472,6 +472,47 @@ def build_like_success_brief(results: Iterable[dict[str, Any]]) -> str:
     )
 
 
+def build_comment_success_terminal_brief(
+    bvid: str,
+    yt_link: str,
+    approved_messages: Any = None,
+    rpids: Iterable[str] | str = (),
+    reported_at: str = "",
+) -> str:
+    """Build the exact compact payload for the dedicated comment-success bot."""
+    if isinstance(approved_messages, str):
+        message_text = approved_messages.strip()
+    else:
+        message_text = "\n".join(
+            str(message).strip()
+            for message in (approved_messages or [])
+            if str(message).strip()
+        )
+    if isinstance(rpids, str):
+        rpids_text = rpids.strip()
+    else:
+        rpids_text = ",".join(
+            str(rpid).strip() for rpid in (rpids or []) if str(rpid).strip()
+        )
+
+    lines = [
+        "✅",
+        f"https://www.bilibili.com/video/{str(bvid or '').strip()}",
+    ]
+    clean_yt_link = str(yt_link or "").strip()
+    if clean_yt_link:
+        lines.append(clean_yt_link)
+    if message_text:
+        lines.append(message_text)
+    lines.extend(
+        [
+            f"rpids：{rpids_text or '[]'}",
+            f"报告时间：{reported_at or beijing_now()}",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def build_like_review_brief(
     candidates: Iterable[dict[str, Any]],
     commit: str = "",

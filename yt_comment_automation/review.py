@@ -390,7 +390,19 @@ def _send_apply_feishu_notification(
     except Exception as err:  # noqa: BLE001
         receipt["receipt_write_error"] = str(err)[:300]
     if item.get("status") == "applied":
-        _send_terminal_success_feishu_notification(item, data_path, brief)
+        terminal_brief = notify.build_comment_success_terminal_brief(
+            bvid=str(item.get("bvid") or ""),
+            yt_link=(
+                f"https://youtu.be/{item.get('yt_id', '')}"
+                if item.get("yt_id")
+                else ""
+            ),
+            approved_messages=item.get("approved_messages") or [],
+            rpids=item.get("rpids") or [],
+        )
+        _send_terminal_success_feishu_notification(
+            item, data_path, terminal_brief
+        )
     return receipt
 
 

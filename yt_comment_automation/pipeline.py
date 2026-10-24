@@ -969,8 +969,13 @@ def run_pipeline(
                     ok, note = notify.send_feishu_message(brief)
                 finally:
                     try:
+                        terminal_brief = notify.build_comment_success_terminal_brief(
+                            bvid=result.bvid,
+                            yt_link=f"https://youtu.be/{result.yt_id}" if result.yt_id else "",
+                            approved_messages=result.message,
+                        )
                         terminal_sent, terminal_note = (
-                            notify.send_terminal_success_message(brief)
+                            notify.send_terminal_success_message(terminal_brief)
                         )
                         if not terminal_sent:
                             logger.warning("  歌单成功终态通知失败: %s", terminal_note)

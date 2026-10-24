@@ -49,8 +49,9 @@ token = resp["tenant_access_token"]
 
 成功终态机器人使用独立配置 `FEISHU_SUCCESS_APP_ID`、
 `FEISHU_SUCCESS_APP_SECRET` 和 `FEISHU_SUCCESS_UNION_ID`，接收人类型为
-`union_id`。它只接收通过回读验收的评论成功摘要和实际点赞成功的
-`rpid/content` 行；其他普通通知继续使用原来的 `FEISHU_APP_ID`、
+`union_id`。评论成功终态只发送单独的 `✅`、B 站与 YouTube 链接、最终发布歌单、
+`rpids` 和报告时间；点赞成功终态只发送成功条目的 `rpid/content` 行。
+其他普通通知继续使用原来的 `FEISHU_APP_ID`、
 `FEISHU_APP_SECRET` 与 `MY_FEISHU_OPEN_ID`。两组凭据都只放在 WDC
 `private.env`，不要写入仓库。
 

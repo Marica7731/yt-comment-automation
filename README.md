@@ -12,7 +12,7 @@ B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视
 4. **本地规则生成草稿**：结构化来源先由本地规则生成候选，无法确定的原始时间戳交给 Codex 复核
 5. **审核后发布 + 飞书通知**：Codex 批准后由 WDC 发布；超长评论自动切分主评论 + 楼中楼续写
    （B 站链接 / 油管链接 / 评论时间 / 歌曲数量）
-   验证通过的评论发布终态、实际点赞成功明细会额外发送精简通知。
+   验证通过的评论终态只发送 ✅、B 站/YouTube 链接、最终歌单、rpids 和报告时间；点赞终态只发送成功条目的 rpid/content 行。
 
 YouTube 内容证据来自 WDC 触发的 GitHub Action 同轮原始返回；`dev/wdc_incremental_cycle.sh`
 负责 dispatch、等待 payload、同步和 cache-only 清洗。`latest.json` / `previous.json` 保留前后两份

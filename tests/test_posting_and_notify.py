@@ -382,6 +382,33 @@ def test_like_success_brief_only_lists_liked_rpid_and_content():
     assert brief == "rpid=901 content=[比心] 下一行"
 
 
+def test_comment_success_terminal_brief_contains_only_requested_payload():
+    from yt_comment_automation import notify
+
+    brief = notify.build_comment_success_terminal_brief(
+        bvid="BV1hjHT6cEsU",
+        yt_link="https://youtu.be/4l2ISltSdvs",
+        approved_messages=[
+            "0:03:45 01. ブルーバード - いきものがかり",
+            "0:07:35 02. 花は桜 君は美し - いきものがかり",
+        ],
+        rpids=["318082733937"],
+        reported_at="2026-10-25 03:47:11",
+    )
+
+    assert brief == "\n".join(
+        [
+            "✅",
+            "https://www.bilibili.com/video/BV1hjHT6cEsU",
+            "https://youtu.be/4l2ISltSdvs",
+            "0:03:45 01. ブルーバード - いきものがかり",
+            "0:07:35 02. 花は桜 君は美し - いきものがかり",
+            "rpids：318082733937",
+            "报告时间：2026-10-25 03:47:11",
+        ]
+    )
+
+
 def test_send_terminal_success_message_uses_dedicated_union_id_bot(monkeypatch):
     import json
 
@@ -420,25 +447,52 @@ def test_apply_success_sends_separate_terminal_success_notice(tmp_path, monkeypa
 
     from yt_comment_automation import review
 
+    standard_messages = []
     terminal_messages = []
     monkeypatch.setattr(
-        review.notify, "send_feishu_message", lambda text: (True, "old bot")
+        review.notify,
+        "send_feishu_message",
+        lambda text: standard_messages.append(text) or (True, "old bot"),
     )
     monkeypatch.setattr(
         review.notify,
         "send_terminal_success_message",
         lambda text: terminal_messages.append(text) or (True, "success bot"),
     )
-    item = {"status": "applied"}
+    monkeypatch.setattr(
+        review.notify, "beijing_now", lambda: "2026-10-25 03:47:11"
+    )
+    item = {
+        "status": "applied",
+        "bvid": "BV1hjHT6cEsU",
+        "yt_id": "4l2ISltSdvs",
+        "approved_messages": [
+            "0:03:45 01. ブルーバード - いきものがかり",
+            "0:07:35 02. 花は桜 君は美し - いきものがかり",
+        ],
+        "rpids": ["318082733937"],
+    }
     data_path = tmp_path / "review.json"
 
-    review._send_apply_feishu_notification(item, data_path, "✅评论发送成功")
+    review._send_apply_feishu_notification(item, data_path, "完整普通通知正文")
 
     saved = json.loads(data_path.read_text(encoding="utf-8"))
-    assert terminal_messages == ["✅评论发送成功"]
+    assert standard_messages == ["完整普通通知正文"]
+    assert terminal_messages == [
+        "\n".join(
+            [
+                "✅",
+                "https://www.bilibili.com/video/BV1hjHT6cEsU",
+                "https://youtu.be/4l2ISltSdvs",
+                "0:03:45 01. ブルーバード - いきものがかり",
+                "0:07:35 02. 花は桜 君は美し - いきものがかり",
+                "rpids：318082733937",
+                "报告时间：2026-10-25 03:47:11",
+            ]
+        )
+    ]
     assert saved["feishu_notification"]["status"] == "sent"
     assert saved["terminal_success_feishu_notification"]["status"] == "sent"
-
 
 def test_unverified_apply_does_not_send_terminal_success_notice(tmp_path, monkeypatch):
     from yt_comment_automation import review
