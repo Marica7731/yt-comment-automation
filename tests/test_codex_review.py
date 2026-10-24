@@ -188,9 +188,8 @@ def test_like_approval_refreshes_batch_cap(tmp_path: Path):
     assert result["failed"] == 0
 
 
-def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
-
-    payload = {
+def _review_payload() -> dict:
+    return {
         "bvid": "BV1Review",
         "yt_id": "yt",
         "title": "title",
@@ -198,6 +197,24 @@ def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
         "draft_song_count": 1,
         "source_text": "raw",
     }
+
+
+def test_comment_review_queue_preserves_first_pending_time(tmp_path: Path):
+    payload = _review_payload()
+    path = review.queue_comment(payload, tmp_path)
+    original = review.load_comment("BV1Review", tmp_path)
+    original["queued_at"] = "2026-10-24T12:41:30+0000"
+    path.write_text(json.dumps(original, ensure_ascii=False), encoding="utf-8")
+
+    review.queue_comment({**payload, "draft_messages": ["changed"], "source_text": "changed"}, tmp_path)
+
+    refreshed = review.load_comment("BV1Review", tmp_path)
+    assert refreshed["queued_at"] == "2026-10-24T12:41:30+0000"
+    assert refreshed["source_text"] == "changed"
+
+
+def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
+    payload = _review_payload()
     path = review.queue_comment(payload, tmp_path)
     review.approve_comment("BV1Review", ["0:01:00 01. A - B"], tmp_path)
     review.queue_comment({**payload, "draft_messages": ["changed"], "source_text": "changed"}, tmp_path)

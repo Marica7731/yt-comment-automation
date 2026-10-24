@@ -41,6 +41,7 @@ def queue_comment(payload: dict[str, Any], data_dir: Path | None = None) -> Path
     if not bvid:
         raise ValueError("审核队列缺少 bvid")
     path = review_dir(data_dir) / f"{bvid}.json"
+    current: dict[str, Any] = {}
     if path.exists():
         try:
             current = _load(path)
@@ -51,6 +52,10 @@ def queue_comment(payload: dict[str, Any], data_dir: Path | None = None) -> Path
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     payload = dict(payload)
     payload.update({"bvid": bvid, "status": "pending", "queued_at": now, "updated_at": now})
+    if current.get("status") == "pending" and current.get("queued_at"):
+        # Pending refreshes are not new work. Preserve the first queue time so
+        # an overdue item cannot look newly queued every 20 minutes.
+        payload["queued_at"] = current["queued_at"]
     _write_json(path, payload)
     return path
 
