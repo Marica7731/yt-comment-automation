@@ -428,6 +428,7 @@ def process_items(items):
 # 1. 游标翻页：整页都是已赞/重复才停；页内有新赞就继续下一页（安全上限 10 页）
 # 1. 游标翻页：完整扫描到末页或安全上限，避免第一页已赞掩盖后续漏赞。
 all_items = []
+sweep_items = []
 pages = fetch_msgfeed_pages()
 for page, items in enumerate(pages, 1):
     all_items.extend(items)
@@ -436,13 +437,17 @@ for page, items in enumerate(pages, 1):
         ii = it.get("item") or {}
         if ii.get("subject_id") is not None:
             item_uri[ii["subject_id"]] = ii.get("uri", "")
-    process_items(items)
+    page_new_likes = process_items(items)
+    # 第一页始终补扫折叠回复；后续页只在发现未赞项时补扫，避免
+    # 完整翻页把几十个旧视频都重新扫一遍而触发扫描超时。
+    if page == 1 or page_new_likes:
+        sweep_items.extend(items)
 page_count = len(pages)
 total_items = len(all_items)
 
 # 2. 评论区补扫：折叠评论（纯表情等）可能不进 msgfeed，msgfeed 聚合也只显示
 #    同会话最新一条——对涉及视频的评论区直接扫一遍，未赞的粉丝评论补赞。
-video_oids = collect_video_oids(all_items)
+video_oids = collect_video_oids(sweep_items)
 for bvid, oid in video_oids.items():
     for pn in (1, 2, 3):
         try:
