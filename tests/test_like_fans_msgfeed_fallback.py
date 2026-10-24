@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,36 @@ def test_msgfeed_fallback_reads_folded_like_state_across_pages():
 
     assert resolve(11, 101) is True
     assert calls == [(None, None), (1, 2)]
+
+
+def test_msgfeed_pagination_scans_second_page_after_all_liked_first_page():
+    calls = []
+
+    def fetch(cursor_id=None, cursor_time=None):
+        calls.append((cursor_id, cursor_time))
+        if cursor_id is None:
+            return (
+                [{"item": {"source_id": 1, "like_state": 1}}],
+                {"id": 10, "time": 20, "is_end": False},
+            )
+        return (
+            [{"item": {"source_id": 2, "like_state": 0}}],
+            {"is_end": True},
+        )
+
+    fetch_all = _load_function(
+        "fetch_msgfeed_pages",
+        {
+            "fetch_msgfeed_page": fetch,
+            "time": time,
+            "MSGFEED_MAX_PAGES": 10,
+        },
+    )
+
+    pages = fetch_all(pause=lambda _: None)
+
+    assert calls == [(None, None), (10, 20)]
+    assert [page[0]["item"]["source_id"] for page in pages] == [1, 2]
 
 
 def test_process_items_passes_msgfeed_root_id_to_state_check():

@@ -1,8 +1,9 @@
 """给消息中心「回复我的」粉丝回复点赞（带游标翻页）。
 
 规则（用户规格）：
-- 从 msgfeed 第一页开始；**整页都是已赞/重复才停止翻页**，页内出现新赞就继续
-  请求下一页（游标参数 id/reply_time 来自用户 HAR 实录），安全上限 10 页；
+- 从 msgfeed 第一页开始，按游标一直扫描到末页或 10 页安全上限；
+  不能因为第一页全是已赞/重复就跳过后面可能存在的历史漏赞；
+  游标参数 id/reply_time 来自用户 HAR 实录；
 - 已赞跳过（跳过明细只进日志，不发飞书）；自己的回复排除；
 - reply/action 是 toggle：只有确认「当前未赞」才发 action，绝不盲发（盲发会把赞取消）；
 - 接口里 mid 是字符串：比较一律 str() 归一，否则自己排除永不生效；
@@ -168,6 +169,7 @@ def remember_liked(rpid):
 BASE_MSGFEED = (
     "https://api.bilibili.com/x/msgfeed/reply?platform=web&build=0&mobi_app=web&web_location=0.0"
 )
+MSGFEED_MAX_PAGES = 10
 
 
 def save_liked_set():
@@ -181,13 +183,36 @@ def fetch_msgfeed_page(cursor_id=None, cursor_time=None):
     """拉一页「回复我的」；带游标参数即翻下一页（参数名来自用户 HAR 实录）。"""
     pace(2.0)
     url = BASE_MSGFEED
-    if cursor_id:
+    if cursor_id is not None and cursor_time is not None:
         url += f"&id={cursor_id}&reply_time={cursor_time}"
     req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     d = data.get("data") or {}
     return d.get("items") or [], d.get("cursor") or {}
+
+
+def fetch_msgfeed_pages(
+    fetch_page=fetch_msgfeed_page,
+    max_pages=MSGFEED_MAX_PAGES,
+    pause=time.sleep,
+):
+    """Scan every msgfeed page until the cursor ends or the safety cap is hit."""
+    cursor_id = cursor_time = None
+    pages = []
+    for page_index in range(max_pages):
+        items, cursor = fetch_page(cursor_id, cursor_time)
+        pages.append(items)
+        cur = cursor or {}
+        if cur.get("is_end"):
+            break
+        next_id, next_time = cur.get("id"), cur.get("time")
+        if next_id is None or next_time is None:
+            break
+        cursor_id, cursor_time = next_id, next_time
+        if page_index + 1 < max_pages:
+            pause(2)
+    return pages
 
 
 def resolve_from_msgfeed(oid, rpid):
@@ -401,33 +426,19 @@ def process_items(items):
 
 
 # 1. 游标翻页：整页都是已赞/重复才停；页内有新赞就继续下一页（安全上限 10 页）
-cursor_id = cursor_time = None
-page = 0
-total_items = 0
+# 1. 游标翻页：完整扫描到末页或安全上限，避免第一页已赞掩盖后续漏赞。
 all_items = []
-while True:
-    items, cursor = fetch_msgfeed_page(cursor_id, cursor_time)
+pages = fetch_msgfeed_pages()
+for page, items in enumerate(pages, 1):
     all_items.extend(items)
-    page += 1
-    total_items += len(items)
     print(f"第{page}页消息: {len(items)} 条", flush=True)
     for it in items:
         ii = it.get("item") or {}
         if ii.get("subject_id") is not None:
             item_uri[ii["subject_id"]] = ii.get("uri", "")
-    new_likes = process_items(items)
-    cur = cursor or {}
-    if new_likes == 0:
-        print(f"第{page}页无新增或待刷新点赞，停止翻页", flush=True)
-        break
-    if cur.get("is_end"):
-        print("已到末页", flush=True)
-        break
-    if page >= 10:
-        print("达安全页数上限（10 页），停止", flush=True)
-        break
-    cursor_id, cursor_time = cur.get("id"), cur.get("time")
-    time.sleep(2)
+    process_items(items)
+page_count = len(pages)
+total_items = len(all_items)
 
 # 2. 评论区补扫：折叠评论（纯表情等）可能不进 msgfeed，msgfeed 聚合也只显示
 #    同会话最新一条——对涉及视频的评论区直接扫一遍，未赞的粉丝评论补赞。
@@ -468,4 +479,4 @@ for bvid, oid in video_oids.items():
 review_payload = save_review_candidates()
 review_summary = f"点赞候选待 Codex 审核: {review_payload['count']} 条，文件: {REVIEW_PATH}"
 print(review_summary, flush=True)
-print(f"翻页: {page} 页 / {total_items} 条", flush=True)
+print(f"翻页: {page_count} 页 / {total_items} 条", flush=True)
