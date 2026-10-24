@@ -94,7 +94,7 @@
 - 忽略列表 `IGNORE_BVIDS` 现有 7 个：BV1MW3R6vEoE,BV17KGK62EyU,BV1VERyBnEG6,BV1WAYb6zEoE,BV1one569EZt,BV18ZaZ6hE2F,BV1ZehV6LEMc。
 
 ### 点赞（like_auto.py 调 like_fans.py，由 WDC cron 每 20 分钟触发）
-- msgfeed「回复我的」游标翻页：响应 `cursor{id,time}`，下一页参数 `id` + `reply_time`（实测所得，勿猜其他参数名）；**页内有新赞才继续翻**，整页已赞/重复即停，上限 10 页。
+- msgfeed「回复我的」游标翻页：响应 `cursor{id,time}`，下一页参数 `id` + `reply_time`（实测所得，勿猜其他参数名）；**必须完整扫描到末页或 10 页安全上限**，不能因第一页全是已赞/重复就停止，否则会漏掉后续页的新回复。
 - msgfeed 点赞不限视频（回复我们的=别人回复我们）；**评论区补扫只限经确认属于本账号的视频**。优先使用 `processed.json` 与 `collections_snapshot.json` 中的 BVID；消息列表出现未登记视频时，通过现有带 cookie 的 view 请求核对 `owner.mid == OWNER_MID` 后才纳入补扫。归属查询失败或属于其他账号时跳过补扫，避免扫到外部视频。
 - `collections_snapshot.json` 当前实际格式是顶层 list，不是 `{"videos": [...]}`；加载器同时兼容两种结构。消息列表中未登记的 BVID 还会通过 view.owner.mid 核实归属后决定是否补扫。
 - 每个点赞批次必须亲自读取原始 msgfeed 与评论区 JSON，逐项对比原始条目、队列、`liked_rpids.json` 和真实 `action/result`；禁止只信 `like_fans.py` 的候选数或通知汇总。
@@ -141,7 +141,7 @@
 - Codex 审核是发布前人工/代理决策点，未批准的候选不会产生网络 action；审核文件损坏时必须先修复账本。
 - 多 P 视频的区间标签退化为开始时间（split_items_by_pages 重建条目）。
 - msgfeed 聚合只显示同会话最新一条，旧回复靠评论区补扫兜底（补扫限自家视频，外人视频下的折叠回复覆盖不到）。
-- 翻页上限 5 页（100 条触达），超过的深部歌单抓不到（与旧行为一致）。
+- 点赞 msgfeed 翻页上限 10 页（200 条触达），超过安全上限的更深历史消息不会在当轮扫描；评论区补扫仍只覆盖确认属于本账号的视频。
 - 3 字纯假名真歌名（すずめ）本地路径拒收，交由 Codex 依据原始来源审核。
 - 歌单 run 日志只留 10 小时，长期审计靠 data/run_*.json（约保留 1 个月）。
 

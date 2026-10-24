@@ -425,7 +425,6 @@ def process_items(items):
     return new_likes
 
 
-# 1. 游标翻页：整页都是已赞/重复才停；页内有新赞就继续下一页（安全上限 10 页）
 # 1. 游标翻页：完整扫描到末页或安全上限，避免第一页已赞掩盖后续漏赞。
 all_items = []
 sweep_items = []
