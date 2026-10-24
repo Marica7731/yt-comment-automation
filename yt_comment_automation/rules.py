@@ -1,4 +1,4 @@
-"""确定性统一规则实现（对应根目录 RULES.md R01-R17）。
+"""确定性统一规则实现（对应根目录 RULES.md R01-R19）。
 
 规则来源：RULES.md 与 tests/test_rules.py 的人工审核记录。
 本模块把这些规则以确定性函数落地，供 clean.py 与插件移植。

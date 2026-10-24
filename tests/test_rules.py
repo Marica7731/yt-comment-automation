@@ -1,4 +1,4 @@
-"""rules.py 统一规则单元测试（对应 RULES.md R01-R17）。"""
+"""rules.py 统一规则单元测试（对应 RULES.md R01-R19）。"""
 import sys
 from pathlib import Path
 

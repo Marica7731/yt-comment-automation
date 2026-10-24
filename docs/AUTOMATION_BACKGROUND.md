@@ -1,6 +1,6 @@
 # yt-comment-automation 定时任务背景
 
-最后更新：2026-10-19
+最后更新：2026-10-25
 
 ## 项目身份
 
@@ -14,9 +14,9 @@
 ## 调度身份
 
 - WDC `dev/wdc_incremental_cycle.sh` 每 20 分钟触发一次 GitHub Action，等待同轮 payload，同步到 WDC，再运行 cache-only 清洗。
-- Codex 增量检查心跳约每 10 分钟运行一次；它只消费 WDC 已完成的结果，不为常规检查重复 dispatch。
+- Codex 增量检查心跳每 20 分钟运行一次；它消费 WDC 已完成的结果，不为常规检查重复 dispatch，并继续处理待审、运维和可修缺陷。
 - 每日北京时间 22:00 和 04:00 运行评论/点赞运维审计。
-- 日期和时间约束只放在调度配置里，不写进执行 prompt 的正文。
+- 北京时间 04:00 与 22:00 的双链路审计窗口在执行 prompt 中明确声明，其余轮次执行增量与单链路运维检查。
 - 每次自动化运行先读取 `README.md`、本文件、`docs/OPS_CURRENT.md`、`docs/HANDOVER.md` 和 `RULES.md`。
 
 ## 网络与执行边界

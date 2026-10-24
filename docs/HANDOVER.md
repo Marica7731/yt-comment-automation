@@ -1,13 +1,13 @@
 # yt-comment-automation 交接文档
 
-> 最后更新：2026-10-19。本文档面向接手本项目的维护者（人或代理），覆盖架构、部署、数据、机制、坑与验证纪律。接手前必读；当前调度以 `docs/OPS_CURRENT.md` 和 `docs/AUTOMATION_BACKGROUND.md` 为准。
+> 最后更新：2026-10-25。本文档面向接手本项目的维护者（人或代理），覆盖架构、部署、数据、机制、坑与验证纪律。接手前必读；当前调度以 `docs/OPS_CURRENT.md` 和 `docs/AUTOMATION_BACKGROUND.md` 为准。
 
 ## 1. 项目是什么
 
-自动监控 B 站 4 个合集（直播/直播2/直播3/凛々咲，497 个自家视频）里的 VTuber 歌枠投稿，抓取对应 YouTube 直播的评论区/简介中的时间戳歌单，清洗成规范格式后作为 B 站评论发布到视频下方，并附带源/发布双时间轴的飞书通知。附带两个附属任务：粉丝回复自动点赞、每日清洗复盘。
+自动监控 B 站 5 个合集（直播/直播2/直播3/凛々咲/合集4，2026-10-25 快照为 660 个自家视频）里的 VTuber 歌枠投稿，抓取对应 YouTube 直播的评论区/简介中的时间戳歌单，清洗成规范格式后作为 B 站评论发布到视频下方，并附带源/发布双时间轴的飞书通知。附带两个附属任务：粉丝回复自动点赞、每日清洗复盘。
 
 - 仓库：`https://github.com/Marica7731/yt-comment-automation`（public，master，无密钥；private.env 被 gitignore）
-- 生产：WDC VPS `/opt/yt-comment-automation`；WDC 每 20 分钟 dispatch GitHub Action 并跑 cache-only 清洗，Codex 约每 10 分钟检查增量，点赞由 WDC 独立自动执行，每日 22:00/04:00 做双链路审计。
+- 生产：WDC VPS `/opt/yt-comment-automation`；WDC 每 20 分钟 dispatch GitHub Action 并跑 cache-only 清洗，Codex 每 20 分钟检查增量并推进待审、运维和修复，点赞由 WDC 独立自动执行，每日 22:00/04:00 做双链路审计。
 - 下游消费：`G:\codex-work\plugin` 的油猴插件 + `RULES.md` 共享确定性清洗规则。
 
 ## 2. 部署与调度全景（WDC）
@@ -16,11 +16,11 @@
 |---|---|---|---|
 | YouTube 增量 | `*/20 * * * *`（WDC） | `dev/wdc_incremental_cycle.sh` -> `dev/wdc_run_youtube_action.py` -> `cron_job.sh` | `logs/incremental_*.log`、`logs/run_*.log` |
 | 粉丝点赞 | `*/20 * * * *`（WDC） | `like_auto.py --max-count 10 --rounds 8` | `logs/like_auto.log` |
-| Codex 增量检查 | 约每 10 分钟 | 只读 WDC Action 结果、审核候选并在需要时发布评论 | 当前会话 |
+| Codex 增量检查 | 每 20 分钟 | 审计 WDC Action 结果、全部非终态队列、日志和部署状态，并审核、发布或修复 | 当前会话 |
 | 双链路审计 | 每日北京 22:00/04:00 | `dev/incremental_audit.py` + `dev/like_success_audit.py` | 对应日志与飞书 |
 
 - 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：仅从 WDC `/opt/yt-comment-automation/private.env` 或进程环境读取 `FEISHU_APP_ID/FEISHU_APP_SECRET/MY_FEISHU_OPEN_ID`，通知机器人固定为 `yt-comment-automation`；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据，禁止读取旧 bridge。
-- `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲`、`IGNORE_BVIDS`（7 个无歌单/非完整歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
+- `private.env` 其他项：`COLLECTION_NAMES=直播,直播2,直播3,凛々咲,合集4`、`IGNORE_BVIDS`（7 个无歌单/非完整歌单视频，逗号分隔）、`OWNER_MID=3546597260528367`。
 - **所有 B 站 API 请求必须带 cookie**（裸请求 412，换 UA 没用）。
 - 本地对应仓库：`G:\codex-work\yt-comment-automation`。发布流程：本地改 → commit/push → WDC `git pull` → 实跑验证。
 
@@ -121,7 +121,7 @@
 ## 6. 验证纪律（血泪沉淀，违反必出事故）
 
 1. **部署脚本后必须实跑验证**；重大改动用**原样直接触发命令连跑两轮**看稳态（只跑一轮手工测试不算数——重抓间隔账本 bug 就是第二轮才暴露的）。
-2. 代码改动先 `python -m py_compile` + `pyflakes` + `pytest tests/`（当前 82 项）；重构后必跑 pyflakes（多P改造曾遗留 NameError 崩 28 小时）。
+2. 代码改动先 `python -m py_compile` + `pyflakes` + `pytest tests/`，以本次实际收集与通过数量记录；重构后必跑 pyflakes（多P改造曾遗留 NameError 崩 28 小时）。
 3. Python 写文件用 Write 工具，禁止 heredoc 嵌码（Git Bash 引号会毁 f-string）；复杂逻辑写脚本文件跑，不塞 `python -c`。
 4. **禁止编造 API 的 host/路径/参数**：参数不确定就自己抓包看真实请求（浏览器 HAR/服务端实测），抓不到就明说没依据。HTTP 200 ≠ 参数正确（编造参数被静默忽略返回首页同款数据），必须比对返回内容。
 5. 诊断先看日志/cache 再下结论；用户贴的飞书通知可能滞后于已做的修复；汇报时间必须换算北京时间。
@@ -155,7 +155,7 @@
 
 - `README.md`：项目简介
 - `docs/AUTOMATION_BACKGROUND.md`：独立定时任务的持久背景、网络边界和每轮流程
-- `RULES.md`：R01-R17 清洗规则权威文档（本地/插件共用）
+- `RULES.md`：R01-R19 清洗规则权威文档（本地/插件共用）
 - `docs/feishu-notify-tutorial.md`：飞书通知通用教程
 - `CODEX_GOAL.md`：目标跟踪约定（完成后重命名归档）
-- `tests/`：111 项单元测试
+- `tests/`：回归测试集，数量以完整 pytest 的实际收集结果为准

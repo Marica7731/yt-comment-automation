@@ -1,6 +1,6 @@
 # Current operations
 
-This file records the user-approved operational split as of 2026-10-19.
+This file records the user-approved operational split as of 2026-10-25.
 
 ## YouTube incremental fetch
 
@@ -28,7 +28,7 @@ accumulate as an unbounded Git history.
 
 ## Comment review windows
 
-Codex checks the WDC result approximately every 10 minutes. It does not create a
+Codex checks the WDC result every 20 minutes. It does not create a
 new review just because a cycle ran.
 
 A candidate is reviewed when a video increment is paired with a timestamped
