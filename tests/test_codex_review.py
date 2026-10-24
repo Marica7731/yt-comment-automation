@@ -237,6 +237,18 @@ def test_comment_review_reject_records_reason(tmp_path: Path):
     assert item["reviewed_at"]
 
 
+def test_mark_user_owned_removes_item_from_pending_and_blocks_requeue(tmp_path: Path):
+    review.queue_comment(_review_payload(), tmp_path)
+
+    item = review.mark_user_owned("BV1Review", "用户明确自行处理", tmp_path)
+    review.queue_comment(_review_payload(), tmp_path)
+
+    assert item["status"] == "user_owned"
+    assert item["user_owned_reason"] == "用户明确自行处理"
+    assert review.load_comment("BV1Review", tmp_path)["status"] == "user_owned"
+    assert review.list_comments(data_dir=tmp_path, status="pending") == []
+
+
 def test_reconcile_published_restores_rejected_from_live_readback(tmp_path: Path, monkeypatch):
     review.queue_comment(_review_payload(), tmp_path)
     review.reject_comment("BV1Review", "当前简介没有歌单", tmp_path)

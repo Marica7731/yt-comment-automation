@@ -51,6 +51,10 @@ Publication still uses `review_cli approve --messages-file` followed by
 `review_cli apply`; success requires `verification.ok=true` and a live Bilibili
 read-back.
 
+When the user explicitly takes over an item, `review_cli mark-user-owned` moves
+it out of automated review without touching Bilibili. Later pipeline refreshes do
+not requeue it, and the heartbeat continues with all remaining work.
+
 ## Fan-reply likes
 
 WDC runs `like_auto.py` every 20 minutes. It is a direct unattended wrapper:

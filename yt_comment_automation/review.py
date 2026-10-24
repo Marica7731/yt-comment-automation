@@ -47,7 +47,15 @@ def queue_comment(payload: dict[str, Any], data_dir: Path | None = None) -> Path
             current = _load(path)
         except (OSError, ValueError):
             current = {}
-        if current.get("status") in {"approved", "applying", "applied", "applied_unverified"}:
+        if current.get("status") in {
+            "approved",
+            "applying",
+            "applied",
+            "applied_unverified",
+            "rejected",
+            "deleted",
+            "user_owned",
+        }:
             return path
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     payload = dict(payload)
@@ -212,6 +220,34 @@ def reject_comment(
             "updated_at": now,
         }
     )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return item
+
+
+def mark_user_owned(
+    bvid: str,
+    reason: str,
+    data_dir: Path | None = None,
+    reviewer: str = "codex",
+) -> dict[str, Any]:
+    """Remove an item from automated review because the user owns its handling."""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") in {"applying", "applied", "applied_unverified", "deleted"}:
+        raise RuntimeError(f"{bvid} 已进入发布/删除终态，不能标为人工接管")
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("人工接管必须提供原因")
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    item.update(
+        {
+            "status": "user_owned",
+            "user_owned_reason": reason,
+            "reviewer": reviewer,
+            "reviewed_at": now,
+            "updated_at": now,
+        }
+    )
+    item.pop("rejection_reason", None)
     _write_json(review_dir(data_dir) / f"{bvid}.json", item)
     return item
 

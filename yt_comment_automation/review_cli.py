@@ -7,6 +7,7 @@
   python -m yt_comment_automation.review_cli apply --bvid BV1xxx
   python -m yt_comment_automation.review_cli verify --bvid BV1xxx
   python -m yt_comment_automation.review_cli reconcile-published --bvid BV1xxx --rpid 123
+  python -m yt_comment_automation.review_cli mark-user-owned --bvid BV1xxx --reason manual
   python -m yt_comment_automation.review_cli recover-missing --bvid BV1xxx
   python -m yt_comment_automation.review_cli retry-with-artist --bvid BV1xxx
   python -m yt_comment_automation.review_cli retry-without-artist --bvid BV1xxx
@@ -47,7 +48,17 @@ def main(argv: list[str] | None = None) -> int:
     p_list = sub.add_parser("list", help="列出审核队列")
     p_list.add_argument(
         "--status",
-        choices=["pending", "approved", "applying", "applied", "applied_unverified", "deleted", "rejected", "all"],
+        choices=[
+            "pending",
+            "approved",
+            "applying",
+            "applied",
+            "applied_unverified",
+            "deleted",
+            "rejected",
+            "user_owned",
+            "all",
+        ],
         default="all",
     )
 
@@ -117,6 +128,13 @@ def main(argv: list[str] | None = None) -> int:
     p_reject.add_argument("--bvid", required=True)
     p_reject.add_argument("--reason", required=True)
     p_reject.add_argument("--reviewer", default="codex")
+
+    p_user_owned = sub.add_parser(
+        "mark-user-owned", help="标记为用户人工接管，自动心跳不再审核该条"
+    )
+    p_user_owned.add_argument("--bvid", required=True)
+    p_user_owned.add_argument("--reason", required=True)
+    p_user_owned.add_argument("--reviewer", default="codex")
 
     p_mark_invalid = sub.add_parser(
         "mark-raw-fetch-invalid", help="将未发布候选标记为本轮强制抓取无效"
@@ -266,6 +284,23 @@ def main(argv: list[str] | None = None) -> int:
             reviewer=args.reviewer,
         )
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "reason": item.get("rejection_reason")}, ensure_ascii=False))
+        return 0
+    if args.command == "mark-user-owned":
+        item = review.mark_user_owned(
+            args.bvid,
+            args.reason,
+            reviewer=args.reviewer,
+        )
+        print(
+            json.dumps(
+                {
+                    "bvid": item["bvid"],
+                    "status": item.get("status"),
+                    "reason": item.get("user_owned_reason"),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
     if args.command == "mark-raw-fetch-invalid":
         item = review.mark_raw_fetch_invalid(
