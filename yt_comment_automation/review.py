@@ -189,6 +189,33 @@ def approve_comment(
     return item
 
 
+def reject_comment(
+    bvid: str,
+    reason: str,
+    data_dir: Path | None = None,
+    reviewer: str = "codex",
+) -> dict[str, Any]:
+    """Close a candidate that must not be published, with an audited reason."""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") in {"applied", "applied_unverified", "deleted"}:
+        raise RuntimeError(f"{bvid} 已进入发布终态，禁止改为 rejected")
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("rejected 必须提供具体原因")
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    item.update(
+        {
+            "status": "rejected",
+            "rejection_reason": reason,
+            "reviewer": reviewer,
+            "reviewed_at": now,
+            "updated_at": now,
+        }
+    )
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return item
+
+
 def _mark_processed(data_dir: Path, bvid: str) -> None:
     path = data_dir / "processed.json"
     try:

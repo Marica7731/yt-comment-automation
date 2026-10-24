@@ -227,6 +227,16 @@ def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
     assert path.is_file()
 
 
+def test_comment_review_reject_records_reason(tmp_path: Path):
+    review.queue_comment(_review_payload(), tmp_path)
+
+    item = review.reject_comment("BV1Review", "来源只有活动时间，没有歌曲列表", tmp_path)
+
+    assert item["status"] == "rejected"
+    assert item["rejection_reason"] == "来源只有活动时间，没有歌曲列表"
+    assert item["reviewed_at"]
+
+
 def test_publish_batches_merge_single_page_messages():
     messages = [
         "01:37 01. A - X",

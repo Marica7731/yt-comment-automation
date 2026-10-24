@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     p_list = sub.add_parser("list", help="列出审核队列")
     p_list.add_argument(
         "--status",
-        choices=["pending", "approved", "applying", "applied", "applied_unverified", "deleted", "all"],
+        choices=["pending", "approved", "applying", "applied", "applied_unverified", "deleted", "rejected", "all"],
         default="all",
     )
 
@@ -102,6 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     p_republish.add_argument("--messages-file", required=True)
     p_republish.add_argument("--reviewer", default="codex")
     p_republish.add_argument("--note", default="")
+
+    p_reject = sub.add_parser("reject", help="将无歌单或明确不可发布的候选关闭为 rejected")
+    p_reject.add_argument("--bvid", required=True)
+    p_reject.add_argument("--reason", required=True)
+    p_reject.add_argument("--reviewer", default="codex")
 
     p_mark_invalid = sub.add_parser(
         "mark-raw-fetch-invalid", help="将未发布候选标记为本轮强制抓取无效"
@@ -224,6 +229,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0 if item.get("status") == "applied" else 1
+    if args.command == "reject":
+        item = review.reject_comment(
+            args.bvid,
+            args.reason,
+            reviewer=args.reviewer,
+        )
+        print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "reason": item.get("rejection_reason")}, ensure_ascii=False))
+        return 0
     if args.command == "mark-raw-fetch-invalid":
         item = review.mark_raw_fetch_invalid(
             args.bvid,
