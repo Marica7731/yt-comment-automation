@@ -58,6 +58,30 @@ def _save_pending(data_dir: Path, video_ids: set[str]) -> None:
     path.write_text(json.dumps(sorted(video_ids)), encoding="utf-8")
 
 
+def action_round_targets(data_dir: Path) -> set[str] | None:
+    """Return every ID dispatched in the current Action payload.
+
+    Results and explicit failures both belong to the dispatched round. A
+    missing or malformed payload returns None so callers can distinguish an
+    unavailable snapshot from a valid round with no targets.
+    """
+    path = data_dir / "incremental_audit" / "latest.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    targets = {str(video_id) for video_id in (payload.get("results") or {})}
+    for item in payload.get("failures") or []:
+        if not isinstance(item, dict):
+            continue
+        video_id = str(item.get("video_id") or "")
+        if video_id:
+            targets.add(video_id)
+    return targets
+
+
 def action_failure_for(data_dir: Path, video_id: str) -> str:
     """Return the same-round Action failure for a YouTube ID, if present."""
     path = data_dir / "incremental_audit" / "latest.json"

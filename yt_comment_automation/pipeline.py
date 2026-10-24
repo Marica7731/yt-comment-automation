@@ -918,6 +918,17 @@ def run_pipeline(
             if config.in_codex_scope(v.bvid, part_date=v.part_date)
         ]
 
+    if config.get("YOUTUBE_FETCH_MODE", "auto").lower() == "cache_only":
+        action_targets = youtube_cache_sync.action_round_targets(data_dir)
+        if action_targets is not None:
+            deferred = [video for video in candidates if video.yt_id not in action_targets]
+            if deferred:
+                logger.info(
+                    "本轮 Action 未包含 %d 个后来出现的候选，延迟到下一轮: %s",
+                    len(deferred),
+                    ", ".join(f"{video.bvid}({video.yt_id})" for video in deferred),
+                )
+            candidates = [video for video in candidates if video.yt_id in action_targets]
     candidates.sort(key=lambda v: v.part_date, reverse=True)
     if limit > 0:
         candidates = candidates[:limit]

@@ -132,6 +132,12 @@ def test_cache_only_pipeline_preserves_incoming_action_cache(tmp_path, monkeypat
     video_id = "abcdefghijk"
     raw_path = cache_dir / f"{video_id}.info.json"
     raw_path.write_text(json.dumps({"id": video_id}), encoding="utf-8")
+    audit_dir = data_dir / "incremental_audit"
+    audit_dir.mkdir()
+    (audit_dir / "latest.json").write_text(
+        json.dumps({"results": {video_id: {"id": video_id}}, "failures": []}),
+        encoding="utf-8",
+    )
     video = collections.CollectionVideo(
         collection="直播",
         section="歌枠",
