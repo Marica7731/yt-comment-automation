@@ -1056,3 +1056,67 @@ def mark_raw_fetch_invalid(
     )
     _write_json(review_dir(data_dir) / f"{bvid}.json", item)
     return item
+
+
+def reconcile_published_comment(
+    bvid: str,
+    rpid: str,
+    data_dir: Path | None = None,
+    reviewer: str = "codex",
+    note: str = "",
+) -> dict[str, Any]:
+    """Restore a misclassified item from a live own-comment readback.
+
+    This is audit repair, not publishing. It only accepts a positive rpid whose live
+    Bilibili record belongs to OWNER_MID and contains timestamped song lines.
+    """
+    item = load_comment(bvid, data_dir)
+    if item.get("status") in {"applying", "deleted"}:
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许恢复为已发布")
+    clean_rpid = str(rpid or "").strip()
+    if not re.fullmatch(r"[1-9][0-9]*", clean_rpid):
+        raise ValueError(f"非法 rpid，拒绝恢复: {rpid!r}")
+
+    cookies = bili_comment.load_cookie_map()
+    check = bili_comment.find_comment_by_rpid(bvid, clean_rpid, cookies)
+    if not check.get("exists"):
+        raise RuntimeError(
+            f"B站回读不到 rpid={clean_rpid}: code={check.get('code')} {check.get('message')}"
+        )
+    owner_mid = str(config.owner_mid()).strip()
+    live_mid = str(check.get("mid") or "").strip()
+    if not owner_mid or live_mid != owner_mid:
+        raise RuntimeError(
+            f"rpid={clean_rpid} 归属 mid={live_mid or '缺失'} 与 OWNER_MID={owner_mid} 不一致"
+        )
+
+    message = html.unescape(str(check.get("message") or "")).strip()
+    song_count = _count_song_lines([message])
+    if song_count <= 0:
+        raise RuntimeError(f"rpid={clean_rpid} 没有可解析的时间戳歌单行，拒绝恢复")
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    item.update(
+        {
+            "status": "applied",
+            "approved_messages": [message],
+            "song_count": song_count,
+            "existing_rpid": clean_rpid,
+            "rpids": [clean_rpid],
+            "verification": {
+                "ok": True,
+                "detail": f"B站实时回读通过: rpid={clean_rpid}, mid={owner_mid}, {song_count} 首",
+                "checked_at": now,
+                "evidence": "live_rpid_ownership_and_content_readback",
+            },
+            "reviewer": reviewer,
+            "note": note or "按 B 站真实回读恢复误判的已发布终态，未重发",
+            "reconciled_at": now,
+            "updated_at": now,
+        }
+    )
+    item.pop("rejection_reason", None)
+    item.pop("error", None)
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    _mark_processed(Path(data_dir or config.data_dir()), bvid)
+    return item

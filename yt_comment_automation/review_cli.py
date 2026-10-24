@@ -6,6 +6,7 @@
   python -m yt_comment_automation.review_cli approve --bvid BV1xxx --messages-file /tmp/msg.json
   python -m yt_comment_automation.review_cli apply --bvid BV1xxx
   python -m yt_comment_automation.review_cli verify --bvid BV1xxx
+  python -m yt_comment_automation.review_cli reconcile-published --bvid BV1xxx --rpid 123
   python -m yt_comment_automation.review_cli recover-missing --bvid BV1xxx
   python -m yt_comment_automation.review_cli retry-with-artist --bvid BV1xxx
   python -m yt_comment_automation.review_cli retry-without-artist --bvid BV1xxx
@@ -67,6 +68,15 @@ def main(argv: list[str] | None = None) -> int:
 
     p_verify = sub.add_parser("verify", help="只回读已发布评论，不重复发布")
     p_verify.add_argument("--bvid", required=True)
+
+    p_reconcile = sub.add_parser(
+        "reconcile-published",
+        help="按本账号 B 站真实回读恢复误判的已发布账本，不重发",
+    )
+    p_reconcile.add_argument("--bvid", required=True)
+    p_reconcile.add_argument("--rpid", required=True)
+    p_reconcile.add_argument("--reviewer", default="codex")
+    p_reconcile.add_argument("--note", default="")
 
     p_recover = sub.add_parser("recover-missing", help="确认评论不存在后补发一次")
     p_recover.add_argument("--bvid", required=True)
@@ -172,6 +182,26 @@ def main(argv: list[str] | None = None) -> int:
         item = review.reverify_applied(args.bvid)
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification")}, ensure_ascii=False))
         return 0 if item.get("status") == "applied" else 1
+    if args.command == "reconcile-published":
+        item = review.reconcile_published_comment(
+            args.bvid,
+            args.rpid,
+            reviewer=args.reviewer,
+            note=args.note,
+        )
+        print(
+            json.dumps(
+                {
+                    "bvid": item["bvid"],
+                    "status": item.get("status"),
+                    "song_count": item.get("song_count"),
+                    "rpids": item.get("rpids") or [],
+                    "verification": item.get("verification"),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 0
     if args.command == "recover-missing":
         item = review.recover_missing_comment(args.bvid)
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "verification": item.get("verification")}, ensure_ascii=False))

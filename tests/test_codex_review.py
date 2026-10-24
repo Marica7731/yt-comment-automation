@@ -237,6 +237,57 @@ def test_comment_review_reject_records_reason(tmp_path: Path):
     assert item["reviewed_at"]
 
 
+def test_reconcile_published_restores_rejected_from_live_readback(tmp_path: Path, monkeypatch):
+    review.queue_comment(_review_payload(), tmp_path)
+    review.reject_comment("BV1Review", "当前简介没有歌单", tmp_path)
+    live_message = "0:11:48 ~ 0:15:52 01. A / Artist\n0:21:57 ~ 0:25:39 02. B / Artist"
+
+    monkeypatch.setattr(review.config, "owner_mid", lambda: "owner")
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(
+        review.bili_comment,
+        "find_comment_by_rpid",
+        lambda bvid, rpid, cookies: {
+            "rpid": rpid,
+            "exists": True,
+            "mid": "owner",
+            "message": live_message,
+        },
+    )
+
+    item = review.reconcile_published_comment("BV1Review", "317960678337", tmp_path)
+
+    assert item["status"] == "applied"
+    assert item["approved_messages"] == [live_message]
+    assert item["song_count"] == 2
+    assert item["rpids"] == ["317960678337"]
+    assert item["verification"]["ok"] is True
+    assert "rejection_reason" not in item
+    processed = json.loads((tmp_path / "processed.json").read_text(encoding="utf-8"))
+    assert "BV1Review" in processed["posted"]
+
+
+def test_reconcile_published_rejects_other_account_rpid(tmp_path: Path, monkeypatch):
+    review.queue_comment(_review_payload(), tmp_path)
+    monkeypatch.setattr(review.config, "owner_mid", lambda: "owner")
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(
+        review.bili_comment,
+        "find_comment_by_rpid",
+        lambda bvid, rpid, cookies: {
+            "rpid": rpid,
+            "exists": True,
+            "mid": "someone-else",
+            "message": "0:01:00 01. A - B",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="归属"):
+        review.reconcile_published_comment("BV1Review", "317960678337", tmp_path)
+
+    assert review.load_comment("BV1Review", tmp_path)["status"] == "pending"
+
+
 def test_publish_batches_merge_single_page_messages():
     messages = [
         "01:37 01. A - X",
