@@ -111,6 +111,14 @@ def audit(
     previous_results = _raw_results(previous)
     issues: list[str] = []
 
+    for label, results in (("latest", latest_results), ("previous", previous_results)):
+        for video_id, raw in results.items():
+            raw_id = str(raw.get("id") or "")
+            if raw_id != video_id:
+                issues.append(
+                    f"{label}_result_id_mismatch:{video_id}:{raw_id or 'missing'}"
+                )
+
     if not latest:
         issues.append("missing_or_invalid_latest_payload")
     if latest and not latest.get("fetched_at"):

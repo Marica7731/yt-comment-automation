@@ -8,6 +8,7 @@ from yt_comment_automation import incremental, like_review
 
 def _raw(text: str) -> dict:
     return {
+        "id": "abcdefghijk",
         "description": "",
         "comment_entries": [{"id": "c1", "text": text}],
     }
@@ -41,6 +42,7 @@ def test_incremental_audit_accepts_recovery_after_rejected_empty_snapshot(tmp_pa
     audit_dir.mkdir(parents=True)
     video_id = "sWdaRFW8mNY"
     raw = _raw("💜┈┈セットリスト┈┈🎼\n0:17:33 三日月\n0:23:15 カワキチアメク")
+    raw["id"] = video_id
     state, _ = incremental.update_state(incremental.empty_state(), {video_id: raw})
     state, changes = incremental.update_state(state, {video_id: raw})
     latest = {
@@ -89,6 +91,28 @@ def test_incremental_audit_detects_state_mismatch(tmp_path: Path):
 
     assert result["ok"] is False
     assert "abcdefghijk:state_mismatch:description_hash" in result["issues"]
+
+
+def test_incremental_audit_flags_result_id_mismatch(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    audit_dir = data_dir / "incremental_audit"
+    audit_dir.mkdir(parents=True)
+    raw = _raw("0:01:00 Song - Artist")
+    raw["id"] = "differentid"
+    state, changes = incremental.update_state(incremental.empty_state(), {"abcdefghijk": raw})
+    latest = {
+        "fetched_at": "2026-10-19T04:00:00+0800",
+        "results": {"abcdefghijk": raw},
+        "changes": changes,
+        "review_candidates": incremental.review_candidates(changes),
+    }
+    (audit_dir / "latest.json").write_text(json.dumps(latest), encoding="utf-8")
+    incremental.save_state(state, data_dir / "incremental_state.json")
+
+    result = incremental_audit.audit(data_dir)
+
+    assert result["ok"] is False
+    assert "latest_result_id_mismatch:abcdefghijk:differentid" in result["issues"]
 
 
 def test_incremental_audit_flags_stale_open_review(tmp_path: Path):
