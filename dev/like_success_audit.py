@@ -42,10 +42,15 @@ def audit(data_dir: Path) -> dict[str, Any]:
     issues: list[str] = []
     seen: set[str] = set()
     now = datetime.now(timezone.utc)
+    latest_activity: datetime | None = None
     for item in review.get("candidates") or []:
         rpid = str(item.get("rpid"))
         status = str(item.get("status") or "pending")
         result = str(item.get("result") or "")
+        for field in ("queued_at", "fetched_at", "reviewed_at", "attempted_at", "executed_at"):
+            parsed = like_review._parse_timestamp(item.get(field))
+            if parsed and (latest_activity is None or parsed > latest_activity):
+                latest_activity = parsed
         counts[status] = counts.get(status, 0) + 1
         if result:
             results[result] = results.get(result, 0) + 1
@@ -60,6 +65,10 @@ def audit(data_dir: Path) -> dict[str, Any]:
             issues.append(f"hard_failed_candidate:{rpid}:{result or 'unknown'}")
         if status == "applied" and result == "liked" and rpid not in ledger:
             issues.append(f"liked_ledger_missing:{rpid}")
+    review_updated_at = like_review._parse_timestamp(review.get("updated_at"))
+    if latest_activity and (review_updated_at is None or review_updated_at < latest_activity):
+        updated_text = review.get("updated_at") or "missing"
+        issues.append(f"review_updated_at_stale:{updated_text}:latest={latest_activity.isoformat()}")
 
     if isinstance(ledger_raw, dict):
         if ledger_raw.get("schema_version") not in {None, 1}:
@@ -71,6 +80,8 @@ def audit(data_dir: Path) -> dict[str, Any]:
         "counts": counts,
         "results": results,
         "liked_rpids": len(ledger),
+        "review_updated_at": review.get("updated_at") or None,
+        "latest_candidate_at": latest_activity.isoformat() if latest_activity else None,
         "issues": issues,
         "ok": not issues,
     }

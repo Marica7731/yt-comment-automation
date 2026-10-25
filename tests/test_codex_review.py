@@ -26,6 +26,25 @@ def test_like_review_merge_preserves_approval(tmp_path: Path):
     assert by_rpid["12"]["status"] == "pending"
 
 
+def test_like_review_mutations_refresh_updated_at(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.save_review(
+        {"candidates": [{"oid": 1, "rpid": 10, "content": "hello"}]},
+        path,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["updated_at"] = "2000-01-01T00:00:00+0000"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    like_review.approve(["10"], path)
+
+    refreshed = like_review.load_review(path)
+    assert refreshed["updated_at"] != "2000-01-01T00:00:00+0000"
+    assert like_review._parse_timestamp(refreshed["updated_at"]) >= like_review._parse_timestamp(
+        refreshed["candidates"][0]["reviewed_at"]
+    )
+
+
 def test_like_review_apply_checks_state_before_action(tmp_path: Path):
     path = tmp_path / "like_review.json"
     liked: set[str] = set()

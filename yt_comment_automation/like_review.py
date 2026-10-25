@@ -60,6 +60,8 @@ def _list_freshness_error(item: dict[str, Any], now: datetime | None = None) -> 
 def _write(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
+    payload["version"] = 1
+    payload["updated_at"] = _now()
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
 

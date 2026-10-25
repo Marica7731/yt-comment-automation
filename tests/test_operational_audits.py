@@ -170,3 +170,31 @@ def test_like_audit_flags_stale_open_candidate(tmp_path: Path):
 
     assert result["ok"] is False
     assert any(issue.startswith("open_candidate_not_fresh:1") for issue in result["issues"])
+
+
+def test_like_audit_flags_stale_review_updated_at(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "like_review.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "updated_at": "2026-10-02T03:33:06+0000",
+                "candidates": [
+                    {
+                        "rpid": 1,
+                        "status": "applied",
+                        "result": "liked",
+                        "executed_at": "2026-10-25T13:21:40+0000",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (data_dir / "liked_rpids.json").write_text(json.dumps(["1"]), encoding="utf-8")
+
+    result = like_success_audit.audit(data_dir)
+
+    assert result["ok"] is False
+    assert any(issue.startswith("review_updated_at_stale:") for issue in result["issues"])
