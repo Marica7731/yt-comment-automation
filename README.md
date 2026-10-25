@@ -76,7 +76,7 @@ python -m yt_comment_automation.review_cli list --status pending
 python -m yt_comment_automation.review_cli approve --bvid BV1xxx --messages-file messages.json
 python -m yt_comment_automation.review_cli apply --bvid BV1xxx
 python -m yt_comment_automation.review_cli reconcile-published --bvid BV1xxx --rpid 123456789
-python -m yt_comment_automation.review_cli mark-user-owned --bvid BV1xxx --reason "用户自行处理"
+python -m yt_comment_automation.review_cli mark-user-owned --bvid BV1xxx --reason "用户确认忽略" --user-approval "用户原话"
 python -m yt_comment_automation.review_cli reopen-rejected --bvid BV1xxx --reason "恢复未经用户确认的拒绝"
 python3 like_auto.py --max-count 10 --rounds 8
 ```

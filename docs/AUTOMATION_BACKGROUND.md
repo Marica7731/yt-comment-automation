@@ -43,6 +43,8 @@
 
 `rejected` 和忽略都是只能由用户明确授权的终态。Codex 与自动心跳无权自行拒绝或忽略候选；原始抓取没有结构化歌单时必须保持 `pending`，继续检查 song_serch_lyrics 等现有来源并等待新证据。未经用户同意的旧拒绝项必须用 `review_cli reopen-rejected` 恢复待审。
 
+`review_cli reject` 与 `review_cli mark-user-owned` 都必须提供用户明确同意的原话并记录在审核文件中；缺少授权时命令直接失败。
+
 ## 评论发布与删除
 
 - 发布必须经过 `review_cli approve --messages-file`，再执行 `review_cli apply`。

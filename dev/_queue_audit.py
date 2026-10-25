@@ -64,7 +64,7 @@ def main():
         if status != "applied":
             print(f"{status:12} {bvid:16} queued={queued[:19]:19} rpid={rpid}  {title[:60]}")
     print()
-    bad = [r for r in rows if r[1] not in {"applied", "pending", "approved", "applying", "applied_unverified", "deleted", "rejected", "failed"}]
+    bad = [r for r in rows if r[1] not in {"applied", "pending", "approved", "applying", "applied_unverified", "deleted", "rejected", "user_owned", "failed"}]
     if bad:
         print("UNEXPECTED STATUS:")
         for r in bad:
