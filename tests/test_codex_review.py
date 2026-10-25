@@ -246,6 +246,34 @@ def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
     assert path.is_file()
 
 
+def test_pending_review_check_evidence_survives_refresh(tmp_path: Path):
+    payload = {**_review_payload(), "bvid": "BV1J9HV6FE3u"}
+    review.queue_comment(payload, tmp_path)
+    review.record_review_check(
+        "BV1J9HV6FE3u",
+        sources=[
+            "wdc:latest.json:lntoV1ZwDdc",
+            "wdc:previous.json:lntoV1ZwDdc",
+            "song_serch_lyrics:songlists/2026-10-25",
+        ],
+        result="no_structured_songlist",
+        detail="简介与 11 条评论均无结构化时间戳歌单，仅一条观后感提到单曲",
+        data_dir=tmp_path,
+    )
+    before = review.load_comment("BV1J9HV6FE3u", tmp_path)
+
+    review.queue_comment(
+        {**payload, "draft_messages": [], "source_text": "refreshed"}, tmp_path
+    )
+    refreshed = review.load_comment("BV1J9HV6FE3u", tmp_path)
+
+    assert refreshed["status"] == "pending"
+    assert refreshed["queued_at"] == before["queued_at"]
+    assert refreshed["source_text"] == "refreshed"
+    assert refreshed["last_review_check"]["result"] == "no_structured_songlist"
+    assert len(refreshed["review_checks"]) == 1
+
+
 def test_rejected_review_is_preserved_without_new_queue_log(tmp_path: Path, caplog):
     payload = {**_review_payload(), "bvid": "BV1D6HM6YEnj", "title": "TAB RUST"}
     review.queue_comment(payload, tmp_path)

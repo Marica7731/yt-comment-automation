@@ -26,6 +26,7 @@ NON_REQUEUE_STATUSES = frozenset(
         "user_owned",
     }
 )
+PERSISTED_PENDING_FIELDS = ("review_checks", "last_review_check")
 
 
 def review_dir(data_dir: Path | None = None) -> Path:
@@ -68,6 +69,9 @@ def queue_comment(payload: dict[str, Any], data_dir: Path | None = None) -> Path
         # Pending refreshes are not new work. Preserve the first queue time so
         # an overdue item cannot look newly queued every 20 minutes.
         payload["queued_at"] = current["queued_at"]
+        for field in PERSISTED_PENDING_FIELDS:
+            if field in current:
+                payload[field] = current[field]
     _write_json(path, payload)
     return path
 
@@ -78,6 +82,40 @@ def load_comment(bvid: str, data_dir: Path | None = None) -> dict[str, Any]:
         raise FileNotFoundError(f"没有该视频的审核文件: {path}")
     return _load(path)
 
+
+def record_review_check(
+    bvid: str,
+    *,
+    sources: list[str],
+    result: str,
+    detail: str = "",
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Record a bounded source check without changing the pending state."""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") != "pending":
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许记录待审核检查")
+    checked_sources = list(
+        dict.fromkeys(
+            str(source).strip() for source in sources if str(source).strip()
+        )
+    )
+    clean_result = str(result).strip()
+    if not checked_sources or not clean_result:
+        raise ValueError("审核检查至少需要一个来源和一个结果")
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    check = {
+        "checked_at": now,
+        "sources": checked_sources,
+        "result": clean_result,
+        "detail": str(detail).strip(),
+    }
+    history = [entry for entry in item.get("review_checks") or [] if isinstance(entry, dict)]
+    item["review_checks"] = [*history, check][-50:]
+    item["last_review_check"] = check
+    item["updated_at"] = now
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return item
 
 def _count_song_lines(messages: list[str]) -> int:
     return sum(

@@ -3,6 +3,9 @@
 常用命令：
   python -m yt_comment_automation.review_cli list
   python -m yt_comment_automation.review_cli show --bvid BV1xxx
+  python -m yt_comment_automation.review_cli record-check --bvid BV1xxx \
+    --source wdc:latest --source song_serch_lyrics:2026-10-25 \
+    --result no_structured_songlist --detail "已查，未找到结构化歌单"
   python -m yt_comment_automation.review_cli approve --bvid BV1xxx --messages-file /tmp/msg.json
   python -m yt_comment_automation.review_cli apply --bvid BV1xxx
   python -m yt_comment_automation.review_cli verify --bvid BV1xxx
@@ -64,6 +67,12 @@ def main(argv: list[str] | None = None) -> int:
 
     p_show = sub.add_parser("show", help="显示一个审核文件")
     p_show.add_argument("--bvid", required=True)
+
+    p_record_check = sub.add_parser("record-check", help="记录待审条目的规定来源核查")
+    p_record_check.add_argument("--bvid", required=True)
+    p_record_check.add_argument("--source", action="append", required=True)
+    p_record_check.add_argument("--result", required=True)
+    p_record_check.add_argument("--detail", default="")
 
     p_approve = sub.add_parser("approve", help="保存 Codex 审核通过的评论")
     p_approve.add_argument("--bvid", required=True)
@@ -177,6 +186,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "show":
         print(json.dumps(review.load_comment(args.bvid), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "record-check":
+        item = review.record_review_check(
+            args.bvid,
+            sources=args.source,
+            result=args.result,
+            detail=args.detail,
+        )
+        print(
+            json.dumps(
+                {
+                    "bvid": item["bvid"],
+                    "status": item.get("status"),
+                    "last_review_check": item.get("last_review_check"),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
     if args.command == "approve":
         messages = (

@@ -73,6 +73,7 @@ python -m yt_comment_automation.cli run --mode full
 
 # 6. Codex 审核命令（在 WDC 运行；批准后再执行 apply）
 python -m yt_comment_automation.review_cli list --status pending
+python -m yt_comment_automation.review_cli record-check --bvid BV1xxx --source wdc:latest --source song_serch_lyrics:2026-10-25 --result no_structured_songlist --detail "已查，未找到结构化歌单"
 python -m yt_comment_automation.review_cli approve --bvid BV1xxx --messages-file messages.json
 python -m yt_comment_automation.review_cli apply --bvid BV1xxx
 python -m yt_comment_automation.review_cli reconcile-published --bvid BV1xxx --rpid 123456789
@@ -82,6 +83,8 @@ python3 like_auto.py --max-count 10 --rounds 8
 ```
 
 `rejected` is a user-authorized terminal state. The CLI requires the user's explicit approval text and refuses to reject without it; automated heartbeats must leave unresolved candidates `pending` instead.
+
+`record-check` records bounded WDC/song_serch_lyrics source checks without changing a pending item's state. Pending refreshes preserve the latest check and its bounded history, so a missing structured list is visible as reviewed evidence instead of an untracked stale item.
 
 `review_cli apply` publishes and verifies the Bilibili comment before sending the Feishu notice. Its JSON output and saved review item include the song count, published `rpids`, segment count, comment verification, and `feishu_notification` status (`sent`, `failed`, `unknown`, or `not_attempted`) with response detail. An `unknown` notification is not retried automatically because the message may already have been delivered.
 
