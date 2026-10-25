@@ -437,6 +437,59 @@ def test_already_sufficient_comment_consumes_action_pending(tmp_path, monkeypatc
     assert not (data_dir / "yt_raw" / "action_pending_ids.json").exists()
 
 
+def test_already_posted_result_is_persisted_to_processed(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1AlreadyPosted",
+        title="already posted",
+        part_date="2026-10-01",
+        yt_id="abcdefghijk",
+    )
+
+    monkeypatch.setattr(pipeline.config, "data_dir", lambda: data_dir)
+    monkeypatch.setattr(pipeline.config, "get", lambda key, default=None: "auto")
+    monkeypatch.setattr(pipeline.config, "in_codex_scope", lambda *args, **kwargs: True)
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.review, "list_comments", lambda **kwargs: [])
+    monkeypatch.setattr(pipeline.review, "deleted_bvids", lambda data_dir=None: set())
+    monkeypatch.setattr(pipeline.collections, "fetch_all_collections", lambda: [video])
+    monkeypatch.setattr(
+        pipeline.collections,
+        "load_snapshot",
+        lambda path=None: collections.CollectionSnapshot(videos=[video]),
+    )
+    monkeypatch.setattr(
+        pipeline.collections,
+        "detect_new_videos",
+        lambda current, previous: [video],
+    )
+    monkeypatch.setattr(pipeline.collections, "save_snapshot", lambda videos: None)
+    monkeypatch.setattr(pipeline, "load_processed", lambda path: set())
+    monkeypatch.setattr(pipeline.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(
+        pipeline,
+        "process_video",
+        lambda candidate, cache_dir, dry_run: pipeline.VideoResult(
+            bvid=candidate.bvid,
+            yt_id=candidate.yt_id,
+            title=candidate.title,
+            part_date=candidate.part_date,
+            collection=candidate.collection,
+            status="already_posted",
+        ),
+    )
+
+    record = pipeline.run_pipeline(mode="incremental", dry_run=False)
+
+    assert record.total == 1
+    saved = json.loads((data_dir / "processed.json").read_text(encoding="utf-8"))
+    assert saved["posted"] == ["BV1AlreadyPosted"]
+
+
+
+
 @pytest.mark.parametrize("review_status", ["deleted", "pending"])
 def test_recheck_video_returns_to_due_targets(tmp_path, monkeypatch, review_status):
     from datetime import date

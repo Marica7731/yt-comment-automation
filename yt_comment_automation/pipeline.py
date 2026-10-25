@@ -950,7 +950,7 @@ def run_pipeline(
         result = process_video(video, cache_dir, dry_run)
         results.append(result)
         logger.info("  → %s (%d 首, %s)", result.status, result.song_count, result.detail or result.error)
-        if result.status in {"posted", "ignored"} and not dry_run:
+        if result.status in {"posted", "ignored", "already_posted"} and not dry_run:
             posted.add(result.bvid)
             # 立即落盘：防止本轮后续处理崩溃（如 YouTube/B站接口异常）导致
             # save_processed 不执行，下轮 cron 重新发布同一视频（重复评论事故）
