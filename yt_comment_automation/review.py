@@ -1160,7 +1160,13 @@ def reconcile_published_comment(
     This is audit repair, not publishing. It only accepts a positive rpid whose live
     Bilibili record belongs to OWNER_MID and contains timestamped song lines.
     """
-    item = load_comment(bvid, data_dir)
+    try:
+        item = load_comment(bvid, data_dir)
+    except FileNotFoundError:
+        # A legacy or interrupted publish can exist in processed.json without a
+        # review ledger file. Recreate the missing audit record from the live
+        # owner-only readback instead of failing reconciliation.
+        item = {"bvid": bvid}
     if item.get("status") in {"applying", "deleted"}:
         raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不允许恢复为已发布")
     clean_rpid = str(rpid or "").strip()

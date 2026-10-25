@@ -303,6 +303,33 @@ def test_reconcile_published_restores_rejected_from_live_readback(tmp_path: Path
     assert "BV1Review" in processed["posted"]
 
 
+def test_reconcile_published_creates_missing_ledger_from_live_readback(tmp_path: Path, monkeypatch):
+    live_message = "0:11:48 ~ 0:15:52 01. A / Artist\n0:21:57 ~ 0:25:39 02. B / Artist"
+
+    monkeypatch.setattr(review.config, "owner_mid", lambda: "owner")
+    monkeypatch.setattr(review.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(
+        review.bili_comment,
+        "find_comment_by_rpid",
+        lambda bvid, rpid, cookies: {
+            "rpid": rpid,
+            "exists": True,
+            "mid": "owner",
+            "message": live_message,
+        },
+    )
+
+    item = review.reconcile_published_comment("BV1MissingLedger", "317960678337", tmp_path)
+
+    assert item["bvid"] == "BV1MissingLedger"
+    assert item["status"] == "applied"
+    assert item["song_count"] == 2
+    assert item["verification"]["ok"] is True
+    assert review.load_comment("BV1MissingLedger", tmp_path) == item
+    processed = json.loads((tmp_path / "processed.json").read_text(encoding="utf-8"))
+    assert "BV1MissingLedger" in processed["posted"]
+
+
 def test_reconcile_published_rejects_other_account_rpid(tmp_path: Path, monkeypatch):
     review.queue_comment(_review_payload(), tmp_path)
     monkeypatch.setattr(review.config, "owner_mid", lambda: "owner")
