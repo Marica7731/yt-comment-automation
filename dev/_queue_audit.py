@@ -5,6 +5,13 @@ import json
 import os
 import sys
 from collections import Counter
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from yt_comment_automation import review  # noqa: E402
 
 QUEUE_DIR = sys.argv[1] if len(sys.argv) > 1 else "data/codex_review"
 
@@ -21,6 +28,19 @@ def load(path):
     if not isinstance(d, dict):
         return {"status": "BAD_TYPE", "type": type(d).__name__}
     return d
+
+
+def song_count_mismatches(queue_dir=QUEUE_DIR):
+    mismatches = []
+    for path in sorted(glob.glob(os.path.join(queue_dir, "*.json"))):
+        item = load(path)
+        if item.get("status") != "applied":
+            continue
+        actual = review._count_song_lines(item.get("approved_messages") or [])
+        stored = int(item.get("song_count") or 0)
+        if stored != actual:
+            mismatches.append((Path(path).stem, stored, actual))
+    return mismatches
 
 
 def main():
@@ -50,6 +70,14 @@ def main():
         for r in bad:
             print("  ", r[0], r[1])
 
+    mismatches = song_count_mismatches()
+    if mismatches:
+        print("SONG COUNT MISMATCH:")
+        for bvid, stored, actual in mismatches:
+            print(f"  {bvid} ledger={stored} actual={actual}")
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
