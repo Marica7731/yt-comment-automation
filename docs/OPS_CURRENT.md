@@ -51,6 +51,11 @@ Publication still uses `review_cli approve --messages-file` followed by
 `review_cli apply`; success requires `verification.ok=true` and a live Bilibili
 read-back.
 
+`rejected` and ignore are user-authorized terminal states only. Codex and the
+heartbeat may not reject or ignore a candidate on their own. If no structured
+source is found, keep the item `pending` and continue searching; wait for
+explicit user approval before any terminal exclusion.
+
 When the user explicitly takes over an item, `review_cli mark-user-owned` moves
 it out of automated review without touching Bilibili. Later pipeline refreshes do
 not requeue it, and the heartbeat continues with all remaining work.

@@ -127,13 +127,30 @@ def main(argv: list[str] | None = None) -> int:
     p_reject = sub.add_parser("reject", help="将无歌单或明确不可发布的候选关闭为 rejected")
     p_reject.add_argument("--bvid", required=True)
     p_reject.add_argument("--reason", required=True)
+    p_reject.add_argument(
+        "--user-approval",
+        required=True,
+        help="用户明确同意拒绝的原话；禁止自动心跳自行填写",
+    )
     p_reject.add_argument("--reviewer", default="codex")
+
+    p_reopen = sub.add_parser(
+        "reopen-rejected", help="撤销未经用户确认的拒绝并恢复待审"
+    )
+    p_reopen.add_argument("--bvid", required=True)
+    p_reopen.add_argument("--reason", required=True)
+    p_reopen.add_argument("--reviewer", default="codex")
 
     p_user_owned = sub.add_parser(
         "mark-user-owned", help="标记为用户人工接管，自动心跳不再审核该条"
     )
     p_user_owned.add_argument("--bvid", required=True)
     p_user_owned.add_argument("--reason", required=True)
+    p_user_owned.add_argument(
+        "--user-approval",
+        required=True,
+        help="用户明确同意忽略或人工接管该条目的原话；禁止自动心跳自行填写",
+    )
     p_user_owned.add_argument("--reviewer", default="codex")
 
     p_mark_invalid = sub.add_parser(
@@ -282,14 +299,33 @@ def main(argv: list[str] | None = None) -> int:
             args.bvid,
             args.reason,
             reviewer=args.reviewer,
+            user_approval=args.user_approval,
         )
         print(json.dumps({"bvid": item["bvid"], "status": item.get("status"), "reason": item.get("rejection_reason")}, ensure_ascii=False))
+        return 0
+    if args.command == "reopen-rejected":
+        item = review.reopen_rejected(
+            args.bvid,
+            args.reason,
+            reviewer=args.reviewer,
+        )
+        print(
+            json.dumps(
+                {
+                    "bvid": item["bvid"],
+                    "status": item.get("status"),
+                    "reason": item.get("reopen_reason"),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
     if args.command == "mark-user-owned":
         item = review.mark_user_owned(
             args.bvid,
             args.reason,
             reviewer=args.reviewer,
+            user_approval=args.user_approval,
         )
         print(
             json.dumps(

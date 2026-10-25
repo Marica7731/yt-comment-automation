@@ -77,8 +77,11 @@ python -m yt_comment_automation.review_cli approve --bvid BV1xxx --messages-file
 python -m yt_comment_automation.review_cli apply --bvid BV1xxx
 python -m yt_comment_automation.review_cli reconcile-published --bvid BV1xxx --rpid 123456789
 python -m yt_comment_automation.review_cli mark-user-owned --bvid BV1xxx --reason "用户自行处理"
+python -m yt_comment_automation.review_cli reopen-rejected --bvid BV1xxx --reason "恢复未经用户确认的拒绝"
 python3 like_auto.py --max-count 10 --rounds 8
 ```
+
+`rejected` is a user-authorized terminal state. The CLI requires the user's explicit approval text and refuses to reject without it; automated heartbeats must leave unresolved candidates `pending` instead.
 
 `review_cli apply` publishes and verifies the Bilibili comment before sending the Feishu notice. Its JSON output and saved review item include the song count, published `rpids`, segment count, comment verification, and `feishu_notification` status (`sent`, `failed`, `unknown`, or `not_attempted`) with response detail. An `unknown` notification is not retried automatically because the message may already have been delivered.
 

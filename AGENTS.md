@@ -38,6 +38,9 @@
 - 评论内容的最终发布决定由 Codex 基于原始数据和 `RULES.md` 作出，纯脚本不得代替审核。
 - 评论发布必须经过 `review_cli approve --messages-file` 和 `review_cli apply`；
   只有 `verification.ok=true` 且真实回读通过才算成功。
+- `rejected` 是需用户明确授权的忽略终态。Codex 和自动心跳无权自行拒绝或忽略候选；
+  检索不到、歌手缺失、来源不确定或暂时无法拟订时必须保持 `pending`，继续检索或等待用户决定。
+  `review_cli reject` 必须提供用户同意的原话；未经用户同意的旧拒绝项用 `reopen-rejected` 恢复。
 - 删除评论只能走项目既有删除门禁；任何归属不确定的情况都不得删除。
 - 所有命令必须设置有界 timeout，禁止无界等待。
 - 禁止手工 `curl`、直连外部接口、修改 crontab 或用未授权凭据绕过门禁。

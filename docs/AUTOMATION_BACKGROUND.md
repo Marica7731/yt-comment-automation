@@ -41,6 +41,8 @@
 
 只有原始评论或简介存在结构化歌曲列表时才可拟订发布文案。感谢语、观后感、反应短语、台词、日期/活动时间、零散梗和聊天时间点不是歌单。结构化 SETLIST 足以确认列出的歌名为歌曲；无歌手不是发布门槛，直接按无歌手格式发布。拿不准某行时可自行检索，能确认就发，检索不到也不得让其余已确认歌曲停在 pending。不得使用 `approve --use-draft`，最终 messages 必须由 Codex 阅读原始数据后重新拟订。
 
+`rejected` 和忽略都是只能由用户明确授权的终态。Codex 与自动心跳无权自行拒绝或忽略候选；原始抓取没有结构化歌单时必须保持 `pending`，继续检查 song_serch_lyrics 等现有来源并等待新证据。未经用户同意的旧拒绝项必须用 `review_cli reopen-rejected` 恢复待审。
+
 ## 评论发布与删除
 
 - 发布必须经过 `review_cli approve --messages-file`，再执行 `review_cli apply`。

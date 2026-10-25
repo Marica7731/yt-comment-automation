@@ -249,7 +249,13 @@ def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
 def test_rejected_review_is_preserved_without_new_queue_log(tmp_path: Path, caplog):
     payload = {**_review_payload(), "bvid": "BV1D6HM6YEnj", "title": "TAB RUST"}
     review.queue_comment(payload, tmp_path)
-    review.reject_comment("BV1D6HM6YEnj", "TAB RUST 游戏直播没有结构化歌单", tmp_path)
+    # Test setup records the explicit user approval required by the reject gate.
+    review.reject_comment(
+        "BV1D6HM6YEnj",
+        "TAB RUST 游戏直播没有结构化歌单",
+        tmp_path,
+        user_approval="用户确认忽略该非歌回视频",
+    )
     result = pipeline.VideoResult(
         bvid="BV1D6HM6YEnj",
         yt_id=payload["yt_id"],
@@ -273,28 +279,87 @@ def test_rejected_review_is_preserved_without_new_queue_log(tmp_path: Path, capl
 def test_comment_review_reject_records_reason(tmp_path: Path):
     review.queue_comment(_review_payload(), tmp_path)
 
-    item = review.reject_comment("BV1Review", "来源只有活动时间，没有歌曲列表", tmp_path)
+    with pytest.raises(RuntimeError, match="未经用户明确同意"):
+        review.reject_comment(
+            "BV1Review", "来源只有活动时间，没有歌曲列表", tmp_path
+        )
+    item = review.reject_comment(
+        "BV1Review",
+        "来源只有活动时间，没有歌曲列表",
+        tmp_path,
+        user_approval="用户明确同意忽略该来源",
+    )
 
     assert item["status"] == "rejected"
     assert item["rejection_reason"] == "来源只有活动时间，没有歌曲列表"
+    assert item["user_approval"] == "用户明确同意忽略该来源"
     assert item["reviewed_at"]
+
+
+def test_reopen_rejected_restores_unapproved_item_to_pending(tmp_path: Path):
+    review.queue_comment(_review_payload(), tmp_path)
+    item = review.load_comment("BV1Review", tmp_path)
+    item.update(
+        {
+            "status": "rejected",
+            "rejection_reason": "旧逻辑仅因原始抓取无歌单而拒绝",
+            "reviewed_at": "2026-10-25T04:25:51+0000",
+        }
+    )
+    review._write_json(tmp_path / "codex_review" / "BV1Review.json", item)
+
+    reopened = review.reopen_rejected(
+        "BV1Review", "用户指出这是歌回，必须继续检索",
+        tmp_path,
+    )
+
+    assert reopened["status"] == "pending"
+    assert reopened["reopen_reason"] == "用户指出这是歌回，必须继续检索"
+    assert "rejection_reason" not in reopened
+    assert reopened["rejection_history"][-1]["rejection_reason"] == "旧逻辑仅因原始抓取无歌单而拒绝"
+
+
+def test_reopen_rejected_refuses_user_approved_rejection(tmp_path: Path):
+    review.queue_comment(_review_payload(), tmp_path)
+    review.reject_comment(
+        "BV1Review",
+        "用户确认不是歌回",
+        tmp_path,
+        user_approval="用户确认忽略该视频",
+    )
+
+    with pytest.raises(RuntimeError, match="包含用户明确同意"):
+        review.reopen_rejected("BV1Review", "尝试恢复", tmp_path)
 
 
 def test_mark_user_owned_removes_item_from_pending_and_blocks_requeue(tmp_path: Path):
     review.queue_comment(_review_payload(), tmp_path)
 
-    item = review.mark_user_owned("BV1Review", "用户明确自行处理", tmp_path)
+    with pytest.raises(RuntimeError, match="未经用户明确同意"):
+        review.mark_user_owned("BV1Review", "用户明确自行处理", tmp_path)
+    item = review.mark_user_owned(
+        "BV1Review",
+        "用户明确自行处理",
+        tmp_path,
+        user_approval="用户明确同意忽略这条",
+    )
     review.queue_comment(_review_payload(), tmp_path)
 
     assert item["status"] == "user_owned"
     assert item["user_owned_reason"] == "用户明确自行处理"
+    assert item["user_approval"] == "用户明确同意忽略这条"
     assert review.load_comment("BV1Review", tmp_path)["status"] == "user_owned"
     assert review.list_comments(data_dir=tmp_path, status="pending") == []
 
 
 def test_reconcile_published_restores_rejected_from_live_readback(tmp_path: Path, monkeypatch):
     review.queue_comment(_review_payload(), tmp_path)
-    review.reject_comment("BV1Review", "当前简介没有歌单", tmp_path)
+    review.reject_comment(
+        "BV1Review",
+        "当前简介没有歌单",
+        tmp_path,
+        user_approval="用户明确同意忽略当前来源",
+    )
     live_message = "0:11:48 ~ 0:15:52 01. A / Artist\n0:21:57 ~ 0:25:39 02. B / Artist"
 
     monkeypatch.setattr(review.config, "owner_mid", lambda: "owner")

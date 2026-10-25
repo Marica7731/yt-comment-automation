@@ -206,6 +206,7 @@ def reject_comment(
     reason: str,
     data_dir: Path | None = None,
     reviewer: str = "codex",
+    user_approval: str = "",
 ) -> dict[str, Any]:
     """Close a candidate that must not be published, with an audited reason."""
     item = load_comment(bvid, data_dir)
@@ -214,11 +215,18 @@ def reject_comment(
     reason = reason.strip()
     if not reason:
         raise ValueError("rejected 必须提供具体原因")
+    approval = user_approval.strip()
+    if not approval:
+        raise RuntimeError(
+            f"{bvid} 未经用户明确同意，禁止标记为 rejected；未发布候选应保持 pending"
+        )
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     item.update(
         {
             "status": "rejected",
             "rejection_reason": reason,
+            "user_approval": approval,
+            "user_approved_at": now,
             "reviewer": reviewer,
             "reviewed_at": now,
             "updated_at": now,
@@ -228,11 +236,52 @@ def reject_comment(
     return item
 
 
+def reopen_rejected(
+    bvid: str,
+    reason: str,
+    data_dir: Path | None = None,
+    reviewer: str = "codex",
+) -> dict[str, Any]:
+    """Reopen a rejection that was recorded without explicit user approval."""
+    item = load_comment(bvid, data_dir)
+    if item.get("status") != "rejected":
+        raise RuntimeError(f"{bvid} 当前状态 {item.get('status')} 不是 rejected")
+    if str(item.get("user_approval") or "").strip():
+        raise RuntimeError(f"{bvid} 的拒绝记录包含用户明确同意，禁止自动恢复")
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("恢复拒绝项必须提供具体原因")
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    history = list(item.get("rejection_history") or [])
+    history.append(
+        {
+            "rejection_reason": item.get("rejection_reason"),
+            "reviewed_at": item.get("reviewed_at"),
+            "reviewer": item.get("reviewer"),
+        }
+    )
+    item.update(
+        {
+            "status": "pending",
+            "reopen_reason": reason,
+            "reopened_at": now,
+            "reopened_by": reviewer,
+            "rejection_history": history,
+            "updated_at": now,
+        }
+    )
+    item.pop("rejection_reason", None)
+    item.pop("reviewed_at", None)
+    _write_json(review_dir(data_dir) / f"{bvid}.json", item)
+    return item
+
+
 def mark_user_owned(
     bvid: str,
     reason: str,
     data_dir: Path | None = None,
     reviewer: str = "codex",
+    user_approval: str = "",
 ) -> dict[str, Any]:
     """Remove an item from automated review because the user owns its handling."""
     item = load_comment(bvid, data_dir)
@@ -241,11 +290,18 @@ def mark_user_owned(
     reason = reason.strip()
     if not reason:
         raise ValueError("人工接管必须提供原因")
+    approval = user_approval.strip()
+    if not approval:
+        raise RuntimeError(
+            f"{bvid} 未经用户明确同意，禁止标记为人工接管或忽略"
+        )
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     item.update(
         {
             "status": "user_owned",
             "user_owned_reason": reason,
+            "user_approval": approval,
+            "user_approved_at": now,
             "reviewer": reviewer,
             "reviewed_at": now,
             "updated_at": now,
