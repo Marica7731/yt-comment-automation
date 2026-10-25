@@ -51,6 +51,7 @@ class VideoResult:
     part_date: str
     collection: str
     status: str = ""  # posted / skipped_throttled / skipped_no_songs / skipped_action_fetch_failed / raw_fetch_invalid / error_cache_miss / error / needs_codex_review
+    # / preserved_review_state when an existing manual/terminal review state wins
     song_count: int = 0
     source: str = ""  # local / codex_review
     message: str = ""
@@ -471,6 +472,15 @@ def _queue_codex_review(
         "song_count": len(items),
     }
     path = review.queue_comment(payload, data_dir)
+    try:
+        saved_status = str(review.load_comment(result.bvid, data_dir).get("status") or "")
+    except FileNotFoundError:
+        saved_status = ""
+    if saved_status in review.NON_REQUEUE_STATUSES:
+        result.status = "preserved_review_state"
+        result.detail = f"保留审核状态 {saved_status}，未重新入队: {path.name}"
+        logger.info("[%s] %s", result.bvid, result.detail)
+        return result
     result.status = "needs_codex_review"
     result.source = source or "codex_review"
     result.song_count = len(items)

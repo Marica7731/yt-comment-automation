@@ -227,6 +227,30 @@ def test_comment_review_queue_does_not_overwrite_approved(tmp_path: Path):
     assert path.is_file()
 
 
+def test_rejected_review_is_preserved_without_new_queue_log(tmp_path: Path, caplog):
+    payload = {**_review_payload(), "bvid": "BV1D6HM6YEnj", "title": "TAB RUST"}
+    review.queue_comment(payload, tmp_path)
+    review.reject_comment("BV1D6HM6YEnj", "TAB RUST 游戏直播没有结构化歌单", tmp_path)
+    result = pipeline.VideoResult(
+        bvid="BV1D6HM6YEnj",
+        yt_id=payload["yt_id"],
+        title=payload["title"],
+        part_date="2026-10-25",
+        collection="直播2",
+    )
+
+    with caplog.at_level("INFO", logger="yt_comment_automation"):
+        result = pipeline._queue_codex_review(
+            result, [], [], "raw", "codex_review", False, "", tmp_path
+        )
+
+    assert result.status == "preserved_review_state"
+    assert "保留审核状态 rejected" in result.detail
+    assert "已写入 Codex 审核队列" not in caplog.text
+    assert review.load_comment("BV1D6HM6YEnj", tmp_path)["status"] == "rejected"
+    assert review.list_comments(data_dir=tmp_path, status="pending") == []
+
+
 def test_comment_review_reject_records_reason(tmp_path: Path):
     review.queue_comment(_review_payload(), tmp_path)
 

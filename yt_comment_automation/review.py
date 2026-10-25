@@ -15,6 +15,18 @@ from typing import Any
 
 from . import bili_comment, clean, config, notify
 
+NON_REQUEUE_STATUSES = frozenset(
+    {
+        "approved",
+        "applying",
+        "applied",
+        "applied_unverified",
+        "rejected",
+        "deleted",
+        "user_owned",
+    }
+)
+
 
 def review_dir(data_dir: Path | None = None) -> Path:
     path = (data_dir or config.data_dir()) / "codex_review"
@@ -47,15 +59,7 @@ def queue_comment(payload: dict[str, Any], data_dir: Path | None = None) -> Path
             current = _load(path)
         except (OSError, ValueError):
             current = {}
-        if current.get("status") in {
-            "approved",
-            "applying",
-            "applied",
-            "applied_unverified",
-            "rejected",
-            "deleted",
-            "user_owned",
-        }:
+        if current.get("status") in NON_REQUEUE_STATUSES:
             return path
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     payload = dict(payload)
