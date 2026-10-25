@@ -7,11 +7,14 @@ ROOT=/opt/yt-comment-automation
 cd "$ROOT" || exit 1
 LOG_DIR="$ROOT/logs"
 mkdir -p "$LOG_DIR"
+SCHEDULER_LOG="$LOG_DIR/incremental_scheduler.log"
 
 LOCKFILE=/tmp/yt-comment-incremental-cycle.lock
 exec 9>"$LOCKFILE"
 if ! flock -n 9; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S') incremental cycle already running" >> "$LOG_DIR/skip.log"
+  summary="$(date '+%Y-%m-%d %H:%M:%S') incremental cycle skipped: already running"
+  echo "$summary" >> "$LOG_DIR/skip.log"
+  echo "$summary" >> "$SCHEDULER_LOG"
   exit 0
 fi
 
@@ -27,6 +30,10 @@ LOGFILE="$LOG_DIR/incremental_$(date +%Y%m%d_%H%M%S).log"
   echo "pipeline_exit=$PIPELINE_RC"
   echo "===== incremental cycle end $(date '+%Y-%m-%d %H:%M:%S %z') ====="
 } >> "$LOGFILE" 2>&1
+
+printf '%s action_exit=%s pipeline_exit=%s log=%s\n' \
+  "$(date '+%Y-%m-%d %H:%M:%S %z')" "$ACTION_RC" "$PIPELINE_RC" "$(basename "$LOGFILE")" \
+  >> "$SCHEDULER_LOG"
 
 ls -1t "$LOG_DIR"/incremental_[0-9]*.log 2>/dev/null | tail -n +31 | xargs -r rm -f
 

@@ -546,6 +546,10 @@ def test_incremental_log_rotation_keeps_scheduler_log(tmp_path):
     script = (Path(__file__).resolve().parents[1] / "dev/wdc_incremental_cycle.sh").read_text(
         encoding="utf-8"
     )
+    assert 'SCHEDULER_LOG="$LOG_DIR/incremental_scheduler.log"' in script
+    summary = script.split('printf ', 1)[1]
+    assert 'action_exit=%s pipeline_exit=%s log=%s' in summary
+    assert '>> "$SCHEDULER_LOG"' in summary
     cleanup_line = next(
         line for line in script.splitlines() if line.startswith("ls -1t \"$LOG_DIR\"/incremental_")
     )
