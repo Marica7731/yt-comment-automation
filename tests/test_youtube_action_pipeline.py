@@ -548,6 +548,99 @@ def test_recheck_video_returns_to_due_targets(tmp_path, monkeypatch, review_stat
     assert youtube_targets.due_targets(tmp_path) == ["abcdefghijk"]
 
 
+def test_rejected_video_is_not_due_target(tmp_path, monkeypatch):
+    from datetime import date
+
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1Rejected",
+        title="rejected",
+        part_date=date.today().isoformat(),
+        yt_id="abcdefghijk",
+    )
+    monkeypatch.setattr(
+        youtube_targets.collections,
+        "load_snapshot",
+        lambda path=None: collections.CollectionSnapshot(videos=[video]),
+    )
+    monkeypatch.setattr(
+        youtube_targets.pipeline, "load_processed", lambda data_dir: set()
+    )
+    monkeypatch.setattr(
+        youtube_targets.review,
+        "list_comments",
+        lambda data_dir=None, status=None: (
+            [{"bvid": "BV1Rejected"}] if status == "rejected" else []
+        ),
+    )
+    monkeypatch.setattr(
+        youtube_targets.review, "deleted_bvids", lambda data_dir=None: set()
+    )
+    monkeypatch.setattr(youtube_targets.config, "ignore_bvids", lambda: set())
+    monkeypatch.setattr(
+        youtube_targets.pipeline, "load_upgrade_targets", lambda data_dir: {}
+    )
+    monkeypatch.setattr(
+        youtube_targets.config,
+        "in_codex_scope",
+        lambda *args, **kwargs: True,
+    )
+
+    assert youtube_targets.due_targets(tmp_path) == []
+
+
+def test_rejected_video_is_not_processed_by_incremental_pipeline(tmp_path, monkeypatch):
+    from datetime import date
+
+    video = collections.CollectionVideo(
+        collection="直播",
+        section="歌枠",
+        bvid="BV1Rejected",
+        title="rejected",
+        part_date=date.today().isoformat(),
+        yt_id="abcdefghijk",
+    )
+    data_dir = tmp_path / "data"
+
+    monkeypatch.setattr(pipeline.config, "data_dir", lambda: data_dir)
+    monkeypatch.setattr(pipeline.config, "get", lambda key, default=None: "auto")
+    monkeypatch.setattr(pipeline, "_remove_content_caches", lambda *args, **kwargs: None)
+    monkeypatch.setattr(pipeline.bili_comment, "load_cookie_map", lambda: {})
+    monkeypatch.setattr(pipeline.collections, "fetch_all_collections", lambda: [video])
+    monkeypatch.setattr(
+        pipeline.collections,
+        "load_snapshot",
+        lambda path=None: collections.CollectionSnapshot(videos=[video]),
+    )
+    monkeypatch.setattr(
+        pipeline.collections, "detect_new_videos", lambda current, previous: []
+    )
+    monkeypatch.setattr(pipeline, "load_processed", lambda data_dir: set())
+    monkeypatch.setattr(
+        pipeline.review, "deleted_bvids", lambda data_dir=None: set()
+    )
+    monkeypatch.setattr(
+        pipeline.review,
+        "list_comments",
+        lambda data_dir=None, status=None: (
+            [{"bvid": "BV1Rejected"}] if status == "rejected" else []
+        ),
+    )
+    monkeypatch.setattr(
+        pipeline.config, "in_codex_scope", lambda *args, **kwargs: True
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "process_video",
+        lambda *args, **kwargs: pytest.fail("rejected video was processed"),
+    )
+
+    record = pipeline.run_pipeline(mode="incremental", dry_run=True)
+
+    assert record.total == 0
+
+
 @pytest.mark.parametrize("review_status", ["deleted", "pending"])
 def test_recheck_video_is_processed_without_auto_repost(
     tmp_path, monkeypatch, review_status

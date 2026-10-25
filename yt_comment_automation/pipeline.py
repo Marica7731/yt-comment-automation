@@ -889,6 +889,10 @@ def run_pipeline(
         str(item.get("bvid") or "")
         for item in review.list_comments(data_dir=data_dir, status="pending")
     }
+    review_rejected_bvids = {
+        str(item.get("bvid") or "")
+        for item in review.list_comments(data_dir=data_dir, status="rejected")
+    }
     recheck_bvids = review.deleted_bvids(data_dir) | review_pending_bvids
     posted = load_processed(data_dir) - recheck_bvids
 
@@ -920,6 +924,12 @@ def run_pipeline(
         candidates = deduped
     else:  # full
         candidates = [v for v in videos if v.bvid not in posted]
+
+    # rejected 是内容终态；只有显式 --bvid 重审才允许绕过。
+    if mode != "specific":
+        candidates = [
+            v for v in candidates if v.bvid not in review_rejected_bvids
+        ]
 
     # 历史存量不属于本次接手范围；显式 --bvid / CODEX_SCOPE_BVIDS 仍可越过日期边界。
     if not (mode == "specific" and specific_bvids):

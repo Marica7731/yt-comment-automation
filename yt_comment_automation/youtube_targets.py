@@ -24,6 +24,10 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
         str(item.get("bvid") or "")
         for item in review.list_comments(data_dir=data_dir, status="pending")
     }
+    rejected_bvids = {
+        str(item.get("bvid") or "")
+        for item in review.list_comments(data_dir=data_dir, status="rejected")
+    }
     recheck_bvids = review.deleted_bvids(data_dir) | pending_bvids
     posted = pipeline.load_processed(data_dir) - recheck_bvids
     ignored = config.ignore_bvids()
@@ -34,6 +38,7 @@ def due_targets(data_dir: Path, refresh: bool = False) -> list[str]:
         if (
             not video.yt_id
             or video.bvid in posted
+            or video.bvid in rejected_bvids
             or video.bvid in ignored
             or not config.in_codex_scope(video.bvid, part_date=video.part_date)
         ):
