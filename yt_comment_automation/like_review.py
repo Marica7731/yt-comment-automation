@@ -205,18 +205,67 @@ def reject(
     path: Path | str | None = None,
     reviewer: str = "codex",
     note: str = "",
+    user_approval: str = "",
 ) -> dict[str, Any]:
     target = Path(path) if path else review_path()
     payload = load_review(target)
     selected = _select(payload, rpids)
+    approval = user_approval.strip()
+    if not approval:
+        raise RuntimeError("未经用户明确同意，禁止拒绝点赞候选")
+    now = _now()
     for item in selected:
         if item.get("status") == "applied":
             raise RuntimeError(f"rpid={item['rpid']} 已执行，不能拒绝")
         item["status"] = "rejected"
         item["reviewer"] = reviewer
         item["note"] = note
-        item["reviewed_at"] = _now()
+        item["user_approval"] = approval
+        item["user_approved_at"] = now
+        item["reviewed_at"] = now
         item.pop("error", None)
+    _write(target, payload)
+    return payload
+
+
+def reopen_rejected(
+    rpids: Iterable[str | int],
+    reason: str,
+    path: Path | str | None = None,
+    reviewer: str = "codex",
+) -> dict[str, Any]:
+    """Reopen rejected like candidates that have no explicit user approval."""
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("恢复拒绝项必须提供具体原因")
+    target = Path(path) if path else review_path()
+    payload = load_review(target)
+    selected = _select(payload, rpids)
+    now = _now()
+    for item in selected:
+        if item.get("status") != "rejected":
+            raise RuntimeError(f"rpid={item['rpid']} 当前状态 {item.get('status')} 不是 rejected")
+        if str(item.get("user_approval") or "").strip():
+            raise RuntimeError(f"rpid={item['rpid']} 的拒绝记录包含用户明确同意，禁止自动恢复")
+        history = list(item.get("rejection_history") or [])
+        history.append(
+            {
+                "reviewer": item.get("reviewer"),
+                "note": item.get("note"),
+                "reviewed_at": item.get("reviewed_at"),
+            }
+        )
+        item.update(
+            {
+                "status": "pending",
+                "reopen_reason": reason,
+                "reopened_at": now,
+                "reopened_by": reviewer,
+                "rejection_history": history,
+            }
+        )
+        for key in ("reviewer", "note", "reviewed_at", "user_approval", "user_approved_at"):
+            item.pop(key, None)
     _write(target, payload)
     return payload
 

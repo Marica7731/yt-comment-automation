@@ -45,6 +45,92 @@ def test_like_review_mutations_refresh_updated_at(tmp_path: Path):
     )
 
 
+def test_like_review_reject_requires_user_approval(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.merge_candidates([{"oid": 1, "rpid": 10, "content": "hello"}], path)
+
+    with pytest.raises(RuntimeError, match="未经用户明确同意"):
+        like_review.reject(["10"], path, reviewer="codex", note="looks irrelevant")
+
+    assert like_review.load_review(path)["candidates"][0]["status"] == "pending"
+
+
+def test_like_review_reject_records_user_approval(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.merge_candidates([{"oid": 1, "rpid": 10, "content": "hello"}], path)
+
+    like_review.reject(
+        ["10"],
+        path,
+        reviewer="user",
+        note="用户确认忽略",
+        user_approval="这条不用点赞",
+    )
+
+    item = like_review.load_review(path)["candidates"][0]
+    assert item["status"] == "rejected"
+    assert item["user_approval"] == "这条不用点赞"
+    assert item["user_approved_at"]
+
+
+def test_like_review_reopen_rejected_restores_unapproved_item(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.save_review(
+        {
+            "candidates": [
+                {
+                    "oid": 117370903335259,
+                    "rpid": 316357126465,
+                    "content": "全集动态自娶",
+                    "status": "rejected",
+                    "reviewer": "codex",
+                    "note": "明显垃圾/无明确语义的自娶类内容，非可识别粉丝互动",
+                    "reviewed_at": "2026-10-07T09:58:16+0000",
+                }
+            ]
+        },
+        path,
+    )
+
+    like_review.reopen_rejected(
+        ["316357126465"],
+        "旧拒绝没有用户明确同意",
+        path,
+    )
+
+    item = like_review.load_review(path)["candidates"][0]
+    assert item["status"] == "pending"
+    assert item["reopen_reason"] == "旧拒绝没有用户明确同意"
+    assert "reviewer" not in item
+    assert item["rejection_history"][-1] == {
+        "reviewer": "codex",
+        "note": "明显垃圾/无明确语义的自娶类内容，非可识别粉丝互动",
+        "reviewed_at": "2026-10-07T09:58:16+0000",
+    }
+
+
+def test_like_review_reopen_rejected_refuses_user_approved_item(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.save_review(
+        {
+            "candidates": [
+                {
+                    "oid": 1,
+                    "rpid": 10,
+                    "status": "rejected",
+                    "user_approval": "用户确认忽略这条",
+                }
+            ]
+        },
+        path,
+    )
+
+    with pytest.raises(RuntimeError, match="包含用户明确同意"):
+        like_review.reopen_rejected(["10"], "尝试恢复", path)
+
+    assert like_review.load_review(path)["candidates"][0]["status"] == "rejected"
+
+
 def test_like_review_apply_checks_state_before_action(tmp_path: Path):
     path = tmp_path / "like_review.json"
     liked: set[str] = set()

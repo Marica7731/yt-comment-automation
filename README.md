@@ -80,9 +80,12 @@ python -m yt_comment_automation.review_cli reconcile-published --bvid BV1xxx --r
 python -m yt_comment_automation.review_cli mark-user-owned --bvid BV1xxx --reason "用户确认忽略" --user-approval "用户原话"
 python -m yt_comment_automation.review_cli reopen-rejected --bvid BV1xxx --reason "恢复未经用户确认的拒绝"
 python3 like_auto.py --max-count 10 --rounds 8
+python -m yt_comment_automation.like_review_cli reopen-rejected --rpid 123 --reason "恢复未经用户确认的拒绝"
 ```
 
 `rejected` is a user-authorized terminal state. The CLI requires the user's explicit approval text and refuses to reject without it; automated heartbeats must leave unresolved candidates `pending` instead.
+
+The same terminal-state gate applies to the like review queue: `like_review_cli reject` requires `--user-approval`, and `reopen-rejected` restores old unapproved rejections without starting a like action.
 
 `record-check` records bounded WDC/song_serch_lyrics source checks without changing a pending item's state. Pending refreshes preserve the latest check and its bounded history, so a missing structured list is visible as reviewed evidence instead of an untracked stale item.
 

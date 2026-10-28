@@ -4,7 +4,8 @@
   python -m yt_comment_automation.like_review_cli list
   python -m yt_comment_automation.like_review_cli show --rpid 123
   python -m yt_comment_automation.like_review_cli approve --rpid 123 --max-count 5
-  python -m yt_comment_automation.like_review_cli reject --rpid 123
+  python -m yt_comment_automation.like_review_cli reject --rpid 123 --user-approval "用户原话"
+  python -m yt_comment_automation.like_review_cli reopen-rejected --rpid 123 --reason "恢复未经用户确认的拒绝"
 
 真实 action 由 `python like_fans.py --apply data/like_review.json` 执行，
 执行前会重新复核服务器点赞状态，避免 toggle 误取消。
@@ -46,6 +47,18 @@ def main(argv: list[str] | None = None) -> int:
     p_reject.add_argument("--rpid", action="append", required=True)
     p_reject.add_argument("--reviewer", default="codex")
     p_reject.add_argument("--note", default="")
+    p_reject.add_argument(
+        "--user-approval",
+        required=True,
+        help="用户明确同意拒绝的原话；禁止自动心跳自行填写",
+    )
+
+    p_reopen = sub.add_parser(
+        "reopen-rejected", help="撤销未经用户确认的拒绝并恢复待审"
+    )
+    p_reopen.add_argument("--rpid", action="append", required=True)
+    p_reopen.add_argument("--reason", required=True)
+    p_reopen.add_argument("--reviewer", default="codex")
 
     args = parser.parse_args(argv)
     path = Path(config.data_dir()) / "like_review.json"
@@ -85,8 +98,26 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "reject":
-        payload = like_review.reject(_rpids(args.rpid), path, reviewer=args.reviewer, note=args.note)
+        payload = like_review.reject(
+            _rpids(args.rpid),
+            path,
+            reviewer=args.reviewer,
+            note=args.note,
+            user_approval=args.user_approval,
+        )
         print(json.dumps({"rejected": _rpids(args.rpid), "counts": like_review.summarize(payload)}, ensure_ascii=False))
+        return 0
+
+    if args.command == "reopen-rejected":
+        payload = like_review.reopen_rejected(
+            _rpids(args.rpid), args.reason, path, reviewer=args.reviewer
+        )
+        print(
+            json.dumps(
+                {"reopened": _rpids(args.rpid), "counts": like_review.summarize(payload)},
+                ensure_ascii=False,
+            )
+        )
         return 0
 
     return 2
