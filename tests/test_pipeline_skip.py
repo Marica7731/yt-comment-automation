@@ -71,6 +71,8 @@ def test_songlist_comment_vs_scattered_chat():
     # 零散感想（夹 1 个时间戳的聊天）→ False，不喂 DS
     chat = "おつかささまでしたー！！\n1:30:53 つかさくんの『悪ノ召使』めっっちゃ良いー\n最後のお焚き上げも面白かったwww"
     assert _is_songlist_comment(chat) is False
+    genuine_titles = "29:39 可愛いあの娘\n31:12 唐突な夜"
+    assert _is_songlist_comment(genuine_titles) is True
 
     # BV1NV3g6eEpF 真实小歌单（2 首，时间戳行密集）→ True
     small = "3:49 開始~start~\n12:11 Tokimeki / Vaundy\n30:41 メランコリック / Junky feat. 鏡音リン"
@@ -79,6 +81,20 @@ def test_songlist_comment_vs_scattered_chat():
     # BV1vLuY6yEXo 歌名+时间戳 无分隔符格式 → True
     nodelim = "ライラック 11:10\n私は最強 18:46\nサウダージ 23:23\n世界は恋に落ちている 31:01"
     assert _is_songlist_comment(nodelim) is True
+
+
+def test_timestamped_viewer_reaction_sentences_not_songlist():
+    """PStJiYrAOQ8：多条时间戳观后感不能被本地兜底当成 6 首歌。"""
+    from yt_comment_automation.pipeline import _is_songlist_comment
+    chat = """アーカイブで見たけど楽しかった〜！
+平成最高！
+29:39 ここの私の恋だ〜好き
+31:12 唐突のスギちゃん
+1:07:03 なんか可愛いのが通り過ぎた🦆
+2:01:09 焦りで早口すぎて可愛いおもろい
+2:01:47 歌詞とリンクするごめんね(笑っちゃってるの好き)
+2:52:03 2:52:32 2:53:08 🍒好き集"""
+    assert _is_songlist_comment(chat) is False
 
 
 def test_upgrade_logic_count():

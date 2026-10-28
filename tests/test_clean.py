@@ -209,8 +209,27 @@ def test_live_segment_bare_titles_filtered():
         ]
     )
     assert clean.extract_plain_songs_from_source_timeline(source) == []
+    genuine_titles = "29:39 可愛いあの娘\n31:12 唐突な夜"
+    assert [item.song for item in clean.extract_plain_songs_from_source_timeline(genuine_titles)] == [
+        "可愛いあの娘",
+        "唐突な夜",
+    ]
+
     for title in ("スパチャ読み", "じゃんけん", ":_おつりんね::_りんね:"):
         assert clean.is_obviously_non_song_text(title) is True
+
+
+def test_timestamped_viewer_reaction_sentences_are_not_bare_songs():
+    """PStJiYrAOQ8：带多个时间戳的观后感句子仍不是歌单。"""
+    source = """アーカイブで見たけど楽しかった〜！
+平成最高！
+29:39 ここの私の恋だ〜好き
+31:12 唐突のスギちゃん
+1:07:03 なんか可愛いのが通り過ぎた🦆
+2:01:09 焦りで早口すぎて可愛いおもろい
+2:01:47 歌詞とリンクするごめんね(笑っちゃってるの好き)
+2:52:03 2:52:32 2:53:08 🍒好き集"""
+    assert clean.extract_plain_songs_from_source_timeline(source) == []
 
 
 def test_no_artist_viewer_reaction_timestamps_filtered():
@@ -223,6 +242,8 @@ def test_no_artist_viewer_reaction_timestamps_filtered():
         ]
     )
     assert clean.extract_plain_songs_from_source_timeline(source) == []
+
+
 def test_original_numbered_format_kept():
 
 
