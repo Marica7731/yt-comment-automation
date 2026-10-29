@@ -140,6 +140,40 @@ def test_import_draft_missing(archive_root: Path) -> None:
     assert songlist_archive.import_draft(archive_root, "zzzzzzzzzzz") is None
 
 
+def test_import_draft_keeps_artistless_rows_and_each_rows_timestamp(tmp_path: Path) -> None:
+    root = tmp_path / "song_serch_lyrics"
+    songlists = root / "songlists" / "2026-10-30"
+    songlists.mkdir(parents=True)
+    (songlists / "artistless.md").write_text(
+        "文件名：artistless.md [artistless-video]\n\n"
+        "### 开始时间版索引\n\n"
+        "```text\n"
+        "0:01:00 01. 有歌手的歌 / 歌手甲\n"
+        "0:02:00 02. 只有开始时间的歌\n"
+        "0:03:00 03. 有区间的歌 / 歌手乙\n"
+        "0:04:00 04. 区间版无歌手的歌\n"
+        "```\n\n"
+        "### 起止时间版索引\n\n"
+        "```text\n"
+        "0:01:00 ~ 0:01:20 01. 有歌手的歌 / 歌手甲\n"
+        "0:03:00 ~ 0:03:20 03. 有区间的歌 / 歌手乙\n"
+        "0:04:00 ~ 0:04:30 04. 区间版无歌手的歌\n"
+        "```\n",
+        encoding="utf-8",
+    )
+
+    draft = songlist_archive.import_draft(root, "artistless-video")
+
+    assert draft is not None
+    assert draft.song_count == 4
+    assert draft.messages == [
+        "0:01:00-0:01:20 01. 有歌手的歌 - 歌手甲\n"
+        "0:02:00 02. 只有开始时间的歌\n"
+        "0:03:00-0:03:20 03. 有区间的歌 - 歌手乙\n"
+        "0:04:00-0:04:30 04. 区间版无歌手的歌"
+    ]
+
+
 def test_refresh_skips_non_git_dir(archive_root: Path) -> None:
     assert songlist_archive.refresh(archive_root) is False
 

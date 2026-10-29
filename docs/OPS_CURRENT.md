@@ -14,6 +14,14 @@ WDC runs `dev/wdc_incremental_cycle.sh` every 20 minutes. The cycle:
 5. Runs the cache-only pipeline so deterministic cleaning creates review
    candidates without making a second YouTube request.
 
+An Action can finish successfully while an individual video appears in the
+payload's `failures` list. Treat those per-video failures separately from the
+overall Action status. If the failed YouTube ID has an exact match in the
+configured `song_serch_lyrics` clone, queue its structured archive index as a
+Codex review draft and include the Action error in `source_text`. If there is
+no archive match, keep the existing retry/alert behavior. A dry run never
+queues an archive draft.
+
 GitHub's own schedule is not used because its start times are not precise enough
 for a 20-minute loop. WDC is the scheduler and the sole dispatcher.
 
@@ -32,8 +40,9 @@ Codex checks the WDC result every 20 minutes. It does not create a
 new review just because a cycle ran.
 
 A candidate is reviewed when a video increment is paired with a timestamped
-song-list increment. For an already known video, the explicit re-review triggers
-are:
+song-list increment, or when an exact YouTube ID match provides a structured
+`song_serch_lyrics` archive index. For an already known video, the explicit
+re-review triggers are:
 
 - a new comment containing timestamps;
 - a near-total replacement of the previous comment section;
@@ -44,8 +53,10 @@ are:
 The reviewer must inspect the Action's actual `latest.json` and
 `previous.json`, not only hashes, counts, or pipeline summaries. Only a
 structured song list may be published. A structured SETLIST is sufficient
-context to identify its rows as songs; missing artist is not a blocker. Publish
-those rows without an artist rather than holding the whole item in `pending`.
+context to identify its rows as songs; missing artist is not a blocker. Apply
+timestamp rules per song: retain a start/end range when both are present and
+retain only the start when that is all the source provides. Omit an uncertain
+individual row and continue with the confirmed rows.
 
 Publication still uses `review_cli approve --messages-file` followed by
 `review_cli apply`; success requires `verification.ok=true` and a live Bilibili
