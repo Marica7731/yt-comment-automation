@@ -123,7 +123,12 @@ def test_import_draft_end_to_end(archive_root: Path) -> None:
     assert draft is not None
     assert draft.source == "song_serch_lyrics"
     assert draft.song_count == 3
-    assert draft.messages[0] == "0:09:17-0:15:02 01. 名もなき詩 - Mr.Children"
+    # 单条多行消息（与既有 draft_messages 一致），超长切分由发布层负责
+    assert draft.messages == [
+        "0:09:17-0:15:02 01. 名もなき詩 - Mr.Children\n"
+        "0:21:37-0:25:42 02. 時の流れに身をまかせ - テレサ・テン\n"
+        "0:29:40 03. からくりピエロ - 40mP feat.初音ミク"
+    ]
     assert "起止时间版索引" not in draft.index_text
     assert draft.index_text.splitlines()[0].startswith("0:09:17 ~ 0:15:02")
     addendum = draft.review_addendum(prefix_empty=True)

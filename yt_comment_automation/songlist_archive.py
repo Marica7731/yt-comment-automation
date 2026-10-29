@@ -42,11 +42,8 @@ class ArchiveDraft:
     source: str  # 审核队列 payload 的 source 字段，固定 song_serch_lyrics
     label: str  # 归档位置，如 songlists/2026-10-28至2026-10-29/歌单_xxx.md
     index_text: str  # 命中的原始索引行，随审核材料一并交给审核方
-    messages: list[str]  # 发布格式草稿
-
-    @property
-    def song_count(self) -> int:
-        return len(self.messages)
+    messages: list[str]  # 发布格式草稿：单条多行消息，超长切分由发布层负责
+    song_count: int  # 歌曲行数（≠ messages 条数）
 
     def review_addendum(self, prefix_empty: bool) -> str:
         header = f"[song_serch_lyrics 归档 {self.label}]\n{self.index_text}"
@@ -226,5 +223,6 @@ def import_draft(root: str | Path, yt_id: str) -> ArchiveDraft | None:
         source="song_serch_lyrics",
         label=label,
         index_text="\n".join(index[1]),
-        messages=messages,
+        messages=["\n".join(messages)],
+        song_count=len(messages),
     )
