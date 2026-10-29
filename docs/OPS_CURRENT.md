@@ -36,8 +36,9 @@ accumulate as an unbounded Git history.
 
 ## Comment review windows
 
-Codex checks the WDC result every 20 minutes. It does not create a
-new review just because a cycle ran.
+The Codex++ heartbeat has been cleared and is currently inactive. When it is
+configured again, use a 20-minute cadence to review completed WDC cycles and
+process only new queue items; do not create a review just because a cycle ran.
 
 A candidate is reviewed when a video increment is paired with a timestamped
 song-list increment, or when an exact YouTube ID match provides a structured
@@ -50,9 +51,12 @@ re-review triggers are:
 - an existing comment becoming timestamped;
 - an equivalent timestamp change in the description.
 
-The reviewer must inspect the Action's actual `latest.json` and
-`previous.json`, not only hashes, counts, or pipeline summaries. Only a
-structured song list may be published. A structured SETLIST is sufficient
+For candidates backed by Action data, the Codex++ harness must inspect the
+matching video in the actual `latest.json` and `previous.json`, not only hashes,
+counts, or summaries. If a per-video Action failure creates an archive-only
+candidate, inspect that failure and the exact YouTube-ID-matched archive section;
+do not claim same-round JSON is available. Only a verified structured song list
+is publishable. A structured SETLIST is sufficient
 context to identify its rows as songs; missing artist is not a blocker. Apply
 timestamp rules per song: retain a start/end range when both are present and
 retain only the start when that is all the source provides. Omit an uncertain
