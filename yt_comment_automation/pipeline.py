@@ -23,7 +23,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from . import bili_comment, clean, collections, config, notify, youtube_cache_sync, yt_fetch
+from . import (
+    bili_comment,
+    clean,
+    collections,
+    config,
+    notify,
+    songlist_archive,
+    youtube_cache_sync,
+    yt_fetch,
+)
 
 logger = logging.getLogger("yt_comment_automation")
 
@@ -455,7 +464,9 @@ def _queue_codex_review(
     upgrade_mode: bool,
     existing_rpid: str,
     data_dir: Path,
+    song_count: Optional[int] = None,
 ) -> VideoResult:
+    count = len(items) if song_count is None else song_count
     payload = {
         "bvid": result.bvid,
         "yt_id": result.yt_id,
@@ -466,11 +477,11 @@ def _queue_codex_review(
         "source_lines": result.source_lines,
         "source_text": source_text,
         "draft_messages": messages,
-        "draft_song_count": len(items),
+        "draft_song_count": count,
         "source": source or "local",
         "upgrade_mode": upgrade_mode,
         "existing_rpid": existing_rpid,
-        "song_count": len(items),
+        "song_count": count,
     }
     path = review.queue_comment(payload, data_dir)
     try:
@@ -484,11 +495,24 @@ def _queue_codex_review(
         return result
     result.status = "needs_codex_review"
     result.source = source or "codex_review"
-    result.song_count = len(items)
+    result.song_count = count
     result.message = "\n---\n".join(messages)
     result.detail = f"已写入 Codex 审核队列: {path.name}"
     logger.info("[%s] %s", result.bvid, result.detail)
     return result
+
+
+def _archive_draft_or_none(yt_id: str) -> Optional[songlist_archive.ArchiveDraft]:
+    """song_serch_lyrics 归档检测：仅当配置了归档根目录时生效，任何失败不阻塞主管线。"""
+    root = config.song_serch_lyrics_root()
+    if not root:
+        return None
+    try:
+        songlist_archive.ensure_fresh(root)
+        return songlist_archive.import_draft(root, yt_id)
+    except Exception as err:  # noqa: BLE001
+        logger.warning("[%s] song_serch_lyrics 归档检测失败: %s", yt_id, err)
+        return None
 
 
 def _notify_yt_fetch_failure_once(
@@ -742,6 +766,27 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if not songlist_comments:
             desc_ts_seconds = len(re.findall(r"\d{1,2}:\d{2}:\d{2}", local_source_text or ""))
             if desc_ts_seconds < 2:
+                if not dry_run:
+                    # song_serch_lyrics 归档检测：评论区与简介都没有结构化来源时，
+                    # 用户归档歌单（按 yt_id 命中）可以作为审核草稿来源。
+                    archive = _archive_draft_or_none(result.yt_id)
+                    if archive:
+                        source_text = archive.review_addendum(not review_source_text.strip())
+                        logger.info(
+                            "[%s] 命中 song_serch_lyrics 归档草稿（%d 首, %s）",
+                            video.bvid, archive.song_count, archive.label,
+                        )
+                        return _queue_codex_review(
+                            result,
+                            archive.messages,
+                            [],
+                            source_text,
+                            archive.source,
+                            upgrade_mode,
+                            existing_rpid,
+                            cache_dir.parent,
+                            song_count=archive.song_count,
+                        )
                 if not dry_run and review_source_text.strip():
                     return _queue_codex_review(
                         result,
@@ -783,6 +828,26 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
     result.source = source
 
     # 6b. 无歌曲
+    if not dry_run and not items:
+        # 本地清洗全失败时同样先查 song_serch_lyrics 归档，再退回空草稿入队。
+        archive = _archive_draft_or_none(result.yt_id)
+        if archive:
+            source_text = archive.review_addendum(not review_source_text.strip())
+            logger.info(
+                "[%s] 命中 song_serch_lyrics 归档草稿（%d 首, %s）",
+                video.bvid, archive.song_count, archive.label,
+            )
+            return _queue_codex_review(
+                result,
+                archive.messages,
+                [],
+                source_text,
+                archive.source,
+                upgrade_mode,
+                existing_rpid,
+                cache_dir.parent,
+                song_count=archive.song_count,
+            )
     if not dry_run and not items and review_source_text.strip():
         return _queue_codex_review(
             result,
