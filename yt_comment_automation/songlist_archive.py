@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
@@ -88,9 +89,11 @@ def refresh(root: str | Path, timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
         if token_file.is_file():
             token = token_file.read_text(encoding="utf-8").strip()
             if token:
+                # github.com 的 git 端点只认 Basic（Bearer 仅 REST API 可用，实测 401）
+                basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
                 env["GIT_CONFIG_COUNT"] = "1"
                 env["GIT_CONFIG_KEY_0"] = "http.extraHeader"
-                env["GIT_CONFIG_VALUE_0"] = f"Authorization: Bearer {token}"
+                env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {basic}"
         subprocess.run(
             ["git", "fetch", "--depth", "1", "origin", branch or "HEAD"],
             cwd=root_path,
