@@ -31,8 +31,10 @@
 ## 评论状态和发布
 
 - 发布评论必须先运行 `review_cli approve --messages-file`，再运行 `review_cli apply`。
-- 只有命令报告 `verification.ok=true)，并且从真实页面读回内容一致，才算发布成功。
-- 找不到歌曲、歌手不明、来源不清或暂时写不出时，保持 `pending`，继续检索或等用户决定。不能把它偷偷标成已解决。
+- 只有命令报告 `verification.ok=true`，并且从真实页面读回内容一致，才算发布成功。
+- 按 `RULES.md` 逐首判断时间戳：一首有开始和结束时间就保留区间；只有开始时间就只保留开始时间。
+- 结构化歌单里的歌曲没有歌手也可以发布。个别行无法确认时只省略那一行；只有来源不是结构化歌单，或主要歌曲本身无法确认时，整条才保持 `pending` 并继续检索。
+- `song_serch_lyrics` 按精确 YouTube ID 自动提供归档歌单。若本轮 Action 抓取失败但归档命中，仍把归档内容加入审核队列，并明确标出没有同轮原始 JSON；没有归档时保持现有重试和告警流程。
 - `rejected` 表示用户同意忽略。只有拿到用户这次明确同意的原话，才能运行 `review_cli reject`。
 - 旧的拒绝项若没有用户同意的原话，用 `reopen-rejected` 恢复。
 - `user_owned` 表示用户同意把内容归用户所有。运行 `review_cli mark-user-owned` 时要记录用户明确同意的原话。

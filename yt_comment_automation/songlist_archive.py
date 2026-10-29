@@ -5,7 +5,8 @@
 每节带 主歌单 / 开始时间版索引 / 起止时间版索引 三个 text 代码块。
 
 发布格式遵循 RULES.md 通用原则 #2：有起止时间戳输出 `开始-结束`，只有开始时间输出开始。
-本模块不做任何猜测性补全；解析不出索引或行时返回 None / 跳过该行，绝不阻塞主管线。
+本模块不做猜测性补全；解析不出索引或行时返回 None / 跳过该行。
+结构化 SETLIST 中没有歌手的编号歌曲仍是有效条目，按 R17 保留无歌手格式。
 """
 from __future__ import annotations
 
@@ -30,6 +31,15 @@ _RANGE_LINE_RE = re.compile(
 _START_LINE_RE = re.compile(
     r"^(?P<start>\d{1,2}:\d{2}(?::\d{2})?)\s+(?P<num>\d{1,3})[.．]\s*"
     r"(?P<title>.+?)\s*(?<![／/])[/／](?![/／])\s*(?P<artist>.+)$"
+)
+_RANGE_TITLE_ONLY_RE = re.compile(
+    r"^(?P<start>\d{1,2}:\d{2}(?::\d{2})?)\s*[~～〜]\s*"
+    r"(?P<end>\d{1,2}:\d{2}(?::\d{2})?)\s+(?P<num>\d{1,3})[.．]\s*"
+    r"(?P<title>.+?)\s*$"
+)
+_START_TITLE_ONLY_RE = re.compile(
+    r"^(?P<start>\d{1,2}:\d{2}(?::\d{2})?)\s+(?P<num>\d{1,3})[.．]\s*"
+    r"(?P<title>.+?)\s*$"
 )
 # 顺序即优先级：起止时间版 > 开始时间版（RULES.md 通用原则 #2）
 _INDEX_HEADINGS = ("起止时间版索引", "开始时间版索引")
@@ -183,12 +193,50 @@ def _heading_block(section: list[str], heading: str) -> list[str]:
 
 
 def extract_index(section: list[str]) -> tuple[str, list[str]] | None:
-    """返回 (kind, 原始行)；kind 为 range / start。起止时间版优先，缺失退回开始时间版。"""
-    for kind, heading in (("range", _INDEX_HEADINGS[0]), ("start", _INDEX_HEADINGS[1])):
+    """返回 (kind, 原始行)；按编号优先使用区间时间，缺失行从开始时间版补齐。"""
+    patterns = (
+        _RANGE_LINE_RE,
+        _START_LINE_RE,
+        _RANGE_TITLE_ONLY_RE,
+        _START_TITLE_ONLY_RE,
+    )
+
+    def parse_block(heading: str) -> list[str]:
         block = _heading_block(section, heading)
-        parsed = [ln for ln in block if _RANGE_LINE_RE.match(ln.strip()) or _START_LINE_RE.match(ln.strip())]
-        if parsed:
-            return kind, parsed
+        return [ln for ln in block if any(pattern.match(ln.strip()) for pattern in patterns)]
+
+    def numbered(lines: list[str]) -> list[tuple[tuple[int, int], str]]:
+        occurrences: dict[int, int] = {}
+        output: list[tuple[tuple[int, int], str]] = []
+        for line in lines:
+            text = line.strip()
+            match = None
+            for pattern in patterns:
+                match = pattern.match(text)
+                if match:
+                    break
+            if not match:
+                continue
+            number = int(match["num"])
+            occurrence = occurrences.get(number, 0)
+            occurrences[number] = occurrence + 1
+            output.append(((number, occurrence), line))
+        return output
+
+    start_lines = parse_block(_INDEX_HEADINGS[1])
+    range_lines = parse_block(_INDEX_HEADINGS[0])
+    if range_lines:
+        start_rows = numbered(start_lines)
+        range_rows = numbered(range_lines)
+        start_by_key = dict(start_rows)
+        range_by_key = dict(range_rows)
+        order = sorted(start_by_key.keys() | range_by_key.keys())
+        return "range", [
+            range_by_key[key] if key in range_by_key else start_by_key[key]
+            for key in order
+        ]
+    if start_lines:
+        return "start", start_lines
     return None
 
 
@@ -205,6 +253,14 @@ def build_messages(index_lines: list[str]) -> list[str]:
         m = _START_LINE_RE.match(text)
         if m:
             out.append(f"{m['start']} {m['num']}. {m['title']} - {m['artist']}")
+            continue
+        m = _RANGE_TITLE_ONLY_RE.match(text)
+        if m:
+            out.append(f"{m['start']}-{m['end']} {m['num']}. {m['title'].strip()}")
+            continue
+        m = _START_TITLE_ONLY_RE.match(text)
+        if m:
+            out.append(f"{m['start']} {m['num']}. {m['title'].strip()}")
     return out
 
 

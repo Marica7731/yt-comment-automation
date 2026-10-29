@@ -8,7 +8,7 @@ B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视
 
 1. **检测合集更新**：读取 B 站 UGC 合集（ugc_season）全部视频，对比上次快照找出新增
 2. **抓取油管评论区**：无 cookie，纯 urllib 拉取评论 + 简介 + 章节
-3. **增量判定与审核队列**：GitHub Action 返回同轮原始 JSON，WDC 清洗并写入 `data/codex_review/*.json`
+3. **增量判定与审核队列**：GitHub Action 返回同轮原始 JSON，WDC 清洗并写入 `data/codex_review/*.json`；单视频抓取失败时按精确 YouTube ID 检查远端归档歌单，有匹配就进入审核队列
 4. **本地规则生成草稿**：结构化来源先由本地规则生成候选，无法确定的原始时间戳交给 Codex 复核
 5. **审核后发布 + 飞书通知**：Codex 批准后由 WDC 发布；超长评论自动切分主评论 + 楼中楼续写
    （B 站链接 / 油管链接 / 评论时间 / 歌曲数量）
@@ -18,6 +18,8 @@ YouTube 内容证据来自 WDC 触发的 GitHub Action 同轮原始返回；`dev
 负责 dispatch、等待 payload、同步和 cache-only 清洗。`latest.json` / `previous.json` 保留前后两份
 原始审核材料；每次内容处理结束后仍清空
 `data/yt_raw/*.info.json`、`history/`、`fetch_times.json` 和 `yt_comment_ids.json`，下一轮没有旧内容可读。
+单个 Action 视频失败会出现在同轮 payload 的 `failures` 中，即使整个 Action 显示成功。
+此时 WDC 仍会按 YouTube ID 检查已配置的 `song_serch_lyrics` 只读归档；命中后创建带失败说明的审核草稿，发布仍走现有 `review_cli approve` / `apply` 和真实回读门禁。
 官方 YouTube Data API 是另一条已验证主路径：`YOUTUBE_FETCH_BACKEND=official`
 显式启用，key 只存 WDC `private.env`。2026-10-02 已在 WDC 实测
 `videos.list` 与 `commentThreads.list` 均返回 HTTP 200；不使用未配置的 GitHub secret。
@@ -105,6 +107,7 @@ The same terminal-state gate applies to the like review queue: `like_review_cli 
 | `YOUTUBE_API_KEY` | 已在 WDC 实测通过的 YouTube Data API v3 key；只存 WDC `private.env`，不写入 Git 或 GitHub Actions secret |
 | `YOUTUBE_FETCH_BACKEND` | `official`（显式启用已验证 API 主路径）、`auto`（Innertube，429 且有 key 时恢复） |
 | `YOUTUBE_FETCH_MODE` | WDC 管线固定 `cache_only`；内容来自同轮 Action payload |
+| `SONG_SERCH_LYRICS_ROOT` | WDC 上 `song_serch_lyrics` 只读克隆路径；按精确 YouTube ID 提供归档歌单备用来源 |
 | `YOUTUBE_REQUEST_MIN_GAP_SECONDS` | YouTube 相邻请求最小间隔；GitHub Action workflow 使用 3 秒 |
 | `DRY_RUN` | 默认 1 只干跑（CLI run 命令读取） |
 

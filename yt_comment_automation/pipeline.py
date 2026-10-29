@@ -663,16 +663,40 @@ def process_video(video: collections.CollectionVideo, cache_dir: Path, dry_run: 
         if isinstance(err, yt_fetch.YtCacheMissError):
             action_error = youtube_cache_sync.action_failure_for(cache_dir.parent, yt_id)
             if action_error:
-                result.status = "skipped_action_fetch_failed"
-                result.error = f"YouTube Action 抓取失败: {action_error}"
-                result.detail = "本轮 Action 未返回该目标，已跳过并等待下轮重试"
-                logger.warning("[%s] %s", video.bvid, result.error)
+                error_message = f"YouTube Action 抓取失败: {action_error}"
+                logger.warning("[%s] %s", video.bvid, error_message)
                 _notify_yt_fetch_failure_once(
                     result,
-                    result.error,
+                    error_message,
                     f"Action fetch_youtube_raw({yt_id}) failed: {action_error}",
                     rate_limited=yt_fetch.is_rate_limited_error(Exception(action_error)),
                 )
+                # Action 的单视频失败写在成功同步的同轮 payload 里。它不代表
+                # 远端歌单仓库没有这首歌的结构化歌单；命中精确 yt_id 时，仍把
+                # 归档内容交给 Codex++ 审核。干跑仍不写审核队列。
+                archive = _archive_draft_or_none(yt_id) if not dry_run else None
+                if archive:
+                    source_text = (
+                        f"[本轮 YouTube Action 抓取失败，未取得同轮原始 JSON：{action_error}]\n\n"
+                        + archive.review_addendum(prefix_empty=True)
+                    )
+                    queued = _queue_codex_review(
+                        result,
+                        archive.messages,
+                        [],
+                        source_text,
+                        archive.source,
+                        upgrade_mode,
+                        existing_rpid,
+                        cache_dir.parent,
+                        song_count=archive.song_count,
+                    )
+                    if queued.status == "needs_codex_review":
+                        queued.detail += "；本轮抓取失败，待按归档来源复核"
+                    return queued
+                result.status = "skipped_action_fetch_failed"
+                result.error = error_message
+                result.detail = "本轮 Action 未返回该目标且无匹配归档，等待下轮重试"
                 return result
             result.status = "error_cache_miss"
             result.error = str(err)

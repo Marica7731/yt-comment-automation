@@ -343,6 +343,7 @@ def test_action_429_cache_miss_is_skipped_with_one_rate_limit_notification(
         encoding="utf-8",
     )
     _prepare_cache_miss_process(monkeypatch)
+    monkeypatch.setattr(pipeline, "_archive_draft_or_none", lambda yt_id: None)
     sent = []
     monkeypatch.setattr(pipeline.notify, "git_summary", lambda: "abc1234")
     monkeypatch.setattr(
@@ -371,6 +372,75 @@ def test_action_429_cache_miss_is_skipped_with_one_rate_limit_notification(
     ]
     assert all("429" in result.error for result in results)
     assert sent == ["rate-limit-brief"]
+
+
+def test_action_failure_queues_exact_archive_draft_and_keeps_alert(
+    tmp_path, monkeypatch
+):
+    data_dir = tmp_path / "data"
+    audit_dir = data_dir / "incremental_audit"
+    audit_dir.mkdir(parents=True)
+    video_id = "archiveMatch01"
+    bvid = "BV1Archive429"
+    (audit_dir / "latest.json").write_text(
+        json.dumps(
+            {
+                "results": {},
+                "failures": [
+                    {
+                        "video_id": video_id,
+                        "error": "HTTPError: HTTP Error 429: Too Many Requests",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _prepare_cache_miss_process(monkeypatch)
+    monkeypatch.setattr(pipeline.config, "song_serch_lyrics_root", lambda: str(tmp_path))
+    monkeypatch.setattr(pipeline.songlist_archive, "ensure_fresh", lambda root: False)
+    monkeypatch.setattr(
+        pipeline.songlist_archive,
+        "import_draft",
+        lambda root, yt_id: pipeline.songlist_archive.ArchiveDraft(
+            source="song_serch_lyrics",
+            label="songlists/2026-10-30/matched.md",
+            index_text="0:01:00 ~ 0:01:30 01. 歌曲 - 歌手",
+            messages=["0:01:00-0:01:30 01. 歌曲 - 歌手"],
+            song_count=1,
+        ) if yt_id == video_id else None,
+    )
+    sent = []
+    monkeypatch.setattr(pipeline.notify, "git_summary", lambda: "abc1234")
+    monkeypatch.setattr(
+        pipeline.notify,
+        "build_yt_rate_limit_brief",
+        lambda *args, **kwargs: "rate-limit-brief",
+    )
+    monkeypatch.setattr(
+        pipeline.notify,
+        "send_feishu_message",
+        lambda brief: sent.append(brief) or (True, "ok"),
+    )
+
+    result = pipeline.process_video(
+        _cache_miss_video(video_id, bvid),
+        data_dir / "yt_raw",
+        dry_run=False,
+    )
+
+    assert result.status == "needs_codex_review"
+    assert result.source == "song_serch_lyrics"
+    assert result.song_count == 1
+    assert result.message == "0:01:00-0:01:30 01. 歌曲 - 歌手"
+    assert sent == ["rate-limit-brief"]
+    queued = json.loads(
+        (data_dir / "codex_review" / f"{bvid}.json").read_text(encoding="utf-8")
+    )
+    assert queued["status"] == "pending"
+    assert queued["source"] == "song_serch_lyrics"
+    assert "HTTPError: HTTP Error 429" in queued["source_text"]
+    assert "songlists/2026-10-30/matched.md" in queued["source_text"]
 
 
 def test_unexplained_cache_miss_remains_production_error(tmp_path, monkeypatch):
