@@ -136,7 +136,9 @@ def test_run_like_auto_does_not_apply_after_scan_failure(tmp_path: Path, monkeyp
     assert len(calls) == 1
 
 
-def test_run_like_auto_fails_instead_of_hiding_unresolved_candidate(tmp_path: Path, monkeypatch):
+def test_run_like_auto_fails_instead_of_hiding_unresolved_candidate(
+    tmp_path: Path, monkeypatch, capsys
+):
     review_path = tmp_path / "like_review.json"
     like_review.save_review(
         {
@@ -174,6 +176,7 @@ def test_run_like_auto_fails_instead_of_hiding_unresolved_candidate(tmp_path: Pa
 
     assert code == 1
     assert len(calls) == 2
+    assert "留待下次扫描" in capsys.readouterr().out
     assert like_review.load_review(review_path)["candidates"][0]["result"] == "verify_unavailable"
 
 

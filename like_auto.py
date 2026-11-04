@@ -169,7 +169,14 @@ def run_like_auto(
         ]
         remaining_count = len(open_work) + len(verification_unavailable_this_run)
         if not retryable and not open_work:
-            return 1 if verification_unavailable_this_run else apply.returncode
+            if verification_unavailable_this_run:
+                print(
+                    "点赞直跑: "
+                    f"{len(verification_unavailable_this_run)} 条实时状态无法复核，留待下次扫描",
+                    flush=True,
+                )
+                return 1
+            return apply.returncode
         if batch_index + 1 < max_rounds:
             if open_work:
                 print(f"点赞直跑: 本批后仍有 {len(open_work)} 条待处理，继续下一批", flush=True)
