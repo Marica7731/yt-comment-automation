@@ -3,7 +3,8 @@
 Scan once, then process the resulting queue in bounded batches. Every action
 rechecks the live like state; the 8-second action pacing applies across batch
 boundaries too. Transient failures are retried from the ledger without another
-full feed and comment scan.
+full feed and comment scan. Unavailable live-state checks are attempted once
+per run and remain visible for the next scheduled scan.
 """
 from __future__ import annotations
 
@@ -26,14 +27,22 @@ DEFAULT_APPLY_TIMEOUT = 600
 DEFAULT_PAUSE_SECONDS = 8.0
 
 
-def select_work(payload: dict, max_count: int) -> list[dict]:
+def select_work(
+    payload: dict,
+    max_count: int,
+    *,
+    exclude_rpids: set[str] | None = None,
+) -> list[dict]:
     """Select pending work plus retryable failures, including old candidates.
 
     apply_approved revalidates the live like state before acting, so age alone
     should not strand a candidate or force another full scan.
     """
     selected: list[dict] = []
+    excluded = exclude_rpids or set()
     for item in payload.get("candidates") or []:
+        if str(item.get("rpid")) in excluded:
+            continue
         status = str(item.get("status") or "pending")
         result = str(item.get("result") or "")
         eligible = status in {"pending", "approved"} or (
@@ -76,23 +85,38 @@ def run_like_auto(
 
     retryable_count = 0
     remaining_count = 0
+    verification_unavailable_this_run: set[str] = set()
 
     for batch_index in range(max_rounds):
         payload = like_review.load_review(review_path)
-        selected = select_work(payload, max_count)
+        selected = select_work(
+            payload,
+            max_count,
+            exclude_rpids=verification_unavailable_this_run,
+        )
         if not selected:
             open_work = [
                 item
                 for item in payload.get("candidates") or []
-                if item.get("status") in {"pending", "approved"}
-                or (
-                    item.get("status") == "failed"
-                    and str(item.get("result") or "") in RETRYABLE_RESULTS
+                if (
+                    item.get("status") in {"pending", "approved"}
+                    or (
+                        item.get("status") == "failed"
+                        and str(item.get("result") or "") in RETRYABLE_RESULTS
+                    )
                 )
+                and str(item.get("rpid")) not in verification_unavailable_this_run
             ]
             if open_work:
                 print(
                     f"点赞直跑: 有 {len(open_work)} 条待处理，但无法组批；本轮失败退出",
+                    flush=True,
+                )
+                return 1
+            if verification_unavailable_this_run:
+                print(
+                    "点赞直跑: "
+                    f"{len(verification_unavailable_this_run)} 条实时状态无法复核，留待下次扫描；本轮失败退出",
                     flush=True,
                 )
                 return 1
@@ -117,25 +141,35 @@ def run_like_auto(
 
         payload = like_review.load_review(review_path)
         by_key = {str(item.get("rpid")): item for item in payload.get("candidates") or []}
+        verification_unavailable_this_run.update(
+            str(rpid)
+            for rpid in rpids
+            if by_key.get(str(rpid), {}).get("status") == "failed"
+            and str(by_key.get(str(rpid), {}).get("result") or "") == "verify_unavailable"
+        )
         retryable = [
             by_key.get(str(rpid), {})
             for rpid in rpids
             if by_key.get(str(rpid), {}).get("status") == "failed"
             and str(by_key.get(str(rpid), {}).get("result") or "") in RETRYABLE_RESULTS
+            and str(rpid) not in verification_unavailable_this_run
         ]
         retryable_count = len(retryable)
         open_work = [
             item
             for item in payload.get("candidates") or []
-            if item.get("status") in {"pending", "approved"}
-            or (
-                item.get("status") == "failed"
-                and str(item.get("result") or "") in RETRYABLE_RESULTS
+            if (
+                item.get("status") in {"pending", "approved"}
+                or (
+                    item.get("status") == "failed"
+                    and str(item.get("result") or "") in RETRYABLE_RESULTS
+                )
             )
+            and str(item.get("rpid")) not in verification_unavailable_this_run
         ]
-        remaining_count = len(open_work)
+        remaining_count = len(open_work) + len(verification_unavailable_this_run)
         if not retryable and not open_work:
-            return apply.returncode
+            return 1 if verification_unavailable_this_run else apply.returncode
         if batch_index + 1 < max_rounds:
             if open_work:
                 print(f"点赞直跑: 本批后仍有 {len(open_work)} 条待处理，继续下一批", flush=True)

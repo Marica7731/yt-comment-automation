@@ -99,7 +99,7 @@
 - `collections_snapshot.json` 当前实际格式是顶层 list，不是 `{"videos": [...]}`；加载器同时兼容两种结构。消息列表中未登记的 BVID 还会通过 view.owner.mid 核实归属后决定是否补扫。
 - 每个点赞批次必须亲自读取原始 msgfeed 与评论区 JSON，逐项对比原始条目、队列、`liked_rpids.json` 和真实 `action/result`；禁止只信 `like_fans.py` 的候选数或通知汇总。
 - 每个点赞 action 前都读取 B 站当前状态：已赞则落账跳过，未赞才执行 toggle；读不到状态就失败退出，不盲发。实时确认未赞会刷新候选的 `fetched_at`，旧候选可安全继续处理。
-- 真实点赞 action 之间保持 8 秒间隔，跨批次也适用；点赞成功即写 `liked_rpids.json`。批次复用本轮扫描结果，瞬时失败从 ledger 重试，不重复跑完整 msgfeed/评论区扫描。
+- 真实点赞 action 之间保持 8 秒间隔，跨批次也适用；点赞成功即写 `liked_rpids.json`。批次复用本轮扫描结果，action 瞬时失败从 ledger 重试，不重复跑完整 msgfeed/评论区扫描；状态不可读的候选本轮只查一次，留待下次运行。
 - 批次上限由 `--max-count` 控制；超出上限的已批准候选保留在队列，后续批次继续处理。无法实时复核的候选保持失败状态并可见，不报告为无事可做。
 - 飞书通知只有标题一个 👍，明细纯文本不折叠，仅有点赞动作才发；跳过明细只进 stdout 日志。
 
