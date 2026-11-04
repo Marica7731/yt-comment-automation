@@ -134,7 +134,10 @@ def merge_candidates(
         # 审核中的候选只补充内容，不降级状态。
         candidate.setdefault("status", existing.get("status", "pending"))
         candidate.setdefault("queued_at", existing.get("queued_at") or _now())
-        if existing.get("status") == "failed" and existing.get("result") == "stale_list":
+        if existing.get("status") == "failed" and existing.get("result") in {
+            "stale_list",
+            "verify_unavailable",
+        }:
             candidate["status"] = "pending"
             candidate.pop("error", None)
             candidate.pop("result", None)

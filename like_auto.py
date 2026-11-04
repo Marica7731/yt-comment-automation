@@ -3,8 +3,8 @@
 Scan once, then process the resulting queue in bounded batches. Every action
 rechecks the live like state; the 8-second action pacing applies across batch
 boundaries too. Transient failures are retried from the ledger without another
-full feed and comment scan. Unavailable live-state checks are attempted once
-per run and remain visible for the next scheduled scan.
+full feed and comment scan. A stale or unavailable candidate stays visible in
+the ledger, but is retried only when a later scan sees it again.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 
 from yt_comment_automation import like_review  # noqa: E402
 
-RETRYABLE_RESULTS = {"stale_list", "verify_unavailable", "api_error", "exception"}
+RETRYABLE_RESULTS = {"api_error", "exception"}
 DEFAULT_ROUNDS = 8
 DEFAULT_SCAN_TIMEOUT = 240
 DEFAULT_APPLY_TIMEOUT = 600
@@ -33,10 +33,10 @@ def select_work(
     *,
     exclude_rpids: set[str] | None = None,
 ) -> list[dict]:
-    """Select pending work plus retryable failures, including old candidates.
+    """Select actionable work and action failures safe to retry.
 
-    apply_approved revalidates the live like state before acting, so age alone
-    should not strand a candidate or force another full scan.
+    Old-list and unavailable-state failures are reopened only if a later fresh
+    scan sees the candidate again.
     """
     selected: list[dict] = []
     excluded = exclude_rpids or set()

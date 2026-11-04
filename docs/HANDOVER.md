@@ -47,7 +47,7 @@
 
 - WDC 每 20 分钟 dispatch GitHub Action，等待原始 payload，再由 `cron_job.sh` 以 cache-only 方式清洗并写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时不发布。
 - 评论候选、YouTube Action 目标和 `pending` 列表默认只覆盖 `CODEX_SCOPE_START_DATE`（默认 `2026-10-02`）及之后的视频；历史存量不进入每轮扫描。手工指定 `--bvid` 或 `CODEX_SCOPE_BVIDS` 可绕过日期边界。
-- 点赞由 WDC `like_auto.py` 每 20 分钟独立处理：每次运行先扫描一次，再按最多 10 条分批处理本轮队列，批次之间不重扫；瞬时失败从 ledger 重试，最多 8 批。Codex 只做健康和成功率审计。
+- 点赞由 WDC `like_auto.py` 每 20 分钟独立处理：每次运行先扫描一次，再按最多 10 条分批处理本轮队列，批次之间不重扫；action 瞬时失败从 ledger 重试，最多 8 批。状态不可读或列表过期的候选只在后续扫描再次发现时重排队，避免空队列每 20 分钟重复失败通知。Codex 只做健康和成功率审计。
 - 审核文件是审计账本：`queue/merge` 不覆盖 `approved/applied/rejected`；执行前重新读取服务器真实点赞状态，状态不可确认宁可跳过。
 - 云端不配置任何外部模型凭据；生产链不存在外部模型调用。
 - 评论审核入口：`review_cli list/show/approve/apply`；点赞入口仅限 `like_auto.py` 与既有 `like_fans.py --apply` 动作路径。
@@ -99,7 +99,7 @@
 - `collections_snapshot.json` 当前实际格式是顶层 list，不是 `{"videos": [...]}`；加载器同时兼容两种结构。消息列表中未登记的 BVID 还会通过 view.owner.mid 核实归属后决定是否补扫。
 - 每个点赞批次必须亲自读取原始 msgfeed 与评论区 JSON，逐项对比原始条目、队列、`liked_rpids.json` 和真实 `action/result`；禁止只信 `like_fans.py` 的候选数或通知汇总。
 - 每个点赞 action 前都读取 B 站当前状态：已赞则落账跳过，未赞才执行 toggle；读不到状态就失败退出，不盲发。实时确认未赞会刷新候选的 `fetched_at`，旧候选可安全继续处理。
-- 真实点赞 action 之间保持 8 秒间隔，跨批次也适用；点赞成功即写 `liked_rpids.json`。批次复用本轮扫描结果，action 瞬时失败从 ledger 重试，不重复跑完整 msgfeed/评论区扫描；状态不可读的候选本轮只查一次，留待下次运行。
+- 真实点赞 action 之间保持 8 秒间隔，跨批次也适用；点赞成功即写 `liked_rpids.json`。批次复用本轮扫描结果，action 瞬时失败从 ledger 重试，不重复跑完整 msgfeed/评论区扫描；状态不可读或列表过期的失败项只有被新扫描再次发现时才恢复。
 - 批次上限由 `--max-count` 控制；超出上限的已批准候选保留在队列，后续批次继续处理。无法实时复核的候选保持失败状态并可见，不报告为无事可做。
 - 飞书通知只有标题一个 👍，明细纯文本不折叠，仅有点赞动作才发；跳过明细只进 stdout 日志。
 

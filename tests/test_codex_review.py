@@ -26,6 +26,37 @@ def test_like_review_merge_preserves_approval(tmp_path: Path):
     assert by_rpid["12"]["status"] == "pending"
 
 
+def test_like_review_requeues_unavailable_candidate_when_fresh_scan_sees_it(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.save_review(
+        {
+            "candidates": [
+                {
+                    "oid": 7,
+                    "rpid": 79,
+                    "content": "old reply",
+                    "status": "failed",
+                    "result": "verify_unavailable",
+                    "error": "reply not found in live sources",
+                    "queued_at": "2026-10-07T09:55:59+0000",
+                }
+            ]
+        },
+        path,
+    )
+
+    like_review.merge_candidates(
+        [{"oid": 7, "rpid": 79, "content": "reply observed again"}],
+        path,
+    )
+
+    item = like_review.load_review(path)["candidates"][0]
+    assert item["status"] == "pending"
+    assert "result" not in item
+    assert "error" not in item
+    assert item["content"] == "reply observed again"
+
+
 def test_like_review_mutations_refresh_updated_at(tmp_path: Path):
     path = tmp_path / "like_review.json"
     like_review.save_review(

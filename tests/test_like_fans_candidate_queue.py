@@ -136,14 +136,19 @@ def test_stale_list_candidate_can_requeue_on_fresh_msgfeed():
         {
             "candidates": [
                 {"rpid": 90, "status": "failed", "result": "stale_list"},
+                {"rpid": 89, "status": "failed", "result": "verify_unavailable"},
                 {"rpid": 91, "status": "applied"},
             ]
         }
     )
     assert "90" not in statuses
+    assert "89" not in statuses
     assert statuses["91"] == "applied"
     assert add_candidate(
         1, 90, "fresh", "msgfeed", bvid="BV1test", uri="", root_id=""
+    ) is True
+    assert add_candidate(
+        1, 89, "fresh again", "msgfeed", bvid="BV1test", uri="", root_id=""
     ) is True
 
 

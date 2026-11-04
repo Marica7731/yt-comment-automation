@@ -46,7 +46,7 @@ review_statuses = {
     for item in existing_review.get("candidates") or []
     if not (
         str(item.get("status") or "") == "failed"
-        and str(item.get("result") or "") == "stale_list"
+        and str(item.get("result") or "") in {"stale_list", "verify_unavailable"}
     )
 }
 root_id_by_rpid = {

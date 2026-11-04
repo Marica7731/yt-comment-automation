@@ -43,6 +43,8 @@ def test_select_work_includes_retryable_failures_only():
             {"rpid": 2, "status": "failed", "result": "verify_unavailable"},
             {"rpid": 3, "status": "failed", "result": "permanent"},
             {"rpid": 4, "status": "applied"},
+            {"rpid": 5, "status": "failed", "result": "api_error"},
+            {"rpid": 6, "status": "failed", "result": "exception"},
         ]
     }
     fresh_at = like_review._now()
@@ -51,10 +53,10 @@ def test_select_work_includes_retryable_failures_only():
 
     selected = like_auto.select_work(payload, 10)
 
-    assert [item["rpid"] for item in selected] == [1, 2]
+    assert [item["rpid"] for item in selected] == [5, 6]
 
 
-def test_select_work_can_defer_unavailable_state_until_next_run():
+def test_select_work_defers_unavailable_state_until_fresh_scan_requeues_it():
     payload = {
         "candidates": [
             {"rpid": 1, "status": "failed", "result": "verify_unavailable"},
@@ -65,7 +67,7 @@ def test_select_work_can_defer_unavailable_state_until_next_run():
     for item in payload["candidates"]:
         item["fetched_at"] = fresh_at
 
-    selected = like_auto.select_work(payload, 10, exclude_rpids={"1"})
+    selected = like_auto.select_work(payload, 10)
 
     assert [item["rpid"] for item in selected] == [2]
 
@@ -178,6 +180,38 @@ def test_run_like_auto_fails_instead_of_hiding_unresolved_candidate(
     assert len(calls) == 2
     assert "留待下次扫描" in capsys.readouterr().out
     assert like_review.load_review(review_path)["candidates"][0]["result"] == "verify_unavailable"
+
+
+def test_run_like_auto_does_not_apply_deferred_failure_without_fresh_candidate(
+    tmp_path: Path, monkeypatch
+):
+    review_path = tmp_path / "like_review.json"
+    like_review.save_review(
+        {
+            "candidates": [
+                {
+                    "oid": 1,
+                    "rpid": 76,
+                    "status": "failed",
+                    "result": "verify_unavailable",
+                    "fetched_at": "2000-01-01T00:00:00+0000",
+                }
+            ]
+        },
+        review_path,
+    )
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append([str(part) for part in command])
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(like_auto.subprocess, "run", fake_run)
+    code = like_auto.run_like_auto(10, review_path)
+
+    assert code == 0
+    assert len(calls) == 1
+    assert "--apply" not in calls[0]
 
 
 def test_run_like_auto_does_not_repeat_unavailable_state_in_same_run(tmp_path: Path, monkeypatch):

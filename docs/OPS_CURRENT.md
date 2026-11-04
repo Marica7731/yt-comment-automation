@@ -88,7 +88,7 @@ WDC runs `like_auto.py` every 20 minutes. It is a direct unattended wrapper:
    still exists and is unliked; an unavailable state never triggers an action.
 4. Keep 8 seconds between actual like actions, including across batch
    boundaries. Retry action failures from the ledger within the 8-batch cap;
-   defer unavailable live-state checks to the next scheduled run.
+   retry stale or unavailable candidates only when a fresh scan sees them again.
 
 Codex does not approve individual likes. Its heartbeat checks scheduling,
 freshness, queue state, success accounting, and unrecoverable failures.
