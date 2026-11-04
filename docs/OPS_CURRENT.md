@@ -80,11 +80,14 @@ The CLI requires the user's approval text; Codex cannot self-assign this state.
 
 WDC runs `like_auto.py` every 20 minutes. It is a direct unattended wrapper:
 
-1. Rescan fresh msgfeed and eligible own-video comments.
-2. Approve at most 10 fresh candidates.
-3. Apply through the existing real-state, ledger, 180-second freshness, and
-   8-second pacing gates.
-4. Rescan the list and retry transient failures for up to 8 bounded rounds.
+1. Scan msgfeed and eligible own-video comments once for the run.
+2. Process the resulting queue in batches of at most 10 without rescanning
+   between batches.
+3. Before every toggle action, read the current Bilibili like state. A stale
+   queue timestamp is refreshed only after that live read confirms the reply
+   still exists and is unliked; an unavailable state never triggers an action.
+4. Keep 8 seconds between actual like actions, including across batch
+   boundaries. Retry transient failures from the ledger within the 8-batch cap.
 
 Codex does not approve individual likes. Its heartbeat checks scheduling,
 freshness, queue state, success accounting, and unrecoverable failures.

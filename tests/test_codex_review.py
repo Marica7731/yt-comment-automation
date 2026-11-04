@@ -131,6 +131,58 @@ def test_like_review_reopen_rejected_refuses_user_approved_item(tmp_path: Path):
     assert like_review.load_review(path)["candidates"][0]["status"] == "rejected"
 
 
+def test_like_review_reopen_applied_unliked_keeps_reconciliation_history(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.save_review(
+        {
+            "candidates": [
+                {
+                    "oid": 7,
+                    "rpid": 71,
+                    "status": "applied",
+                    "result": "liked",
+                    "executed_at": "2026-11-01T01:02:03+0000",
+                    "executor": "auto",
+                    "content": "reply",
+                }
+            ]
+        },
+        path,
+    )
+
+    like_review.reopen_applied_unliked([71], "实时复核确认未赞", path)
+
+    item = like_review.load_review(path)["candidates"][0]
+    assert item["status"] == "pending"
+    assert item["result"] == "reopened_unliked"
+    assert item["revalidated_like_state"] == "not_liked"
+    assert item["reconciliation_history"][-1]["result"] == "liked"
+    assert item["reconciliation_history"][-1]["executed_at"] == "2026-11-01T01:02:03+0000"
+
+
+def test_like_review_reopen_applied_unliked_refuses_rejected_item(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.save_review(
+        {
+            "candidates": [
+                {
+                    "oid": 7,
+                    "rpid": 72,
+                    "status": "rejected",
+                    "result": "user_rejected",
+                    "user_approval": "这条不用点赞",
+                }
+            ]
+        },
+        path,
+    )
+
+    with pytest.raises(RuntimeError, match="不是 applied"):
+        like_review.reopen_applied_unliked([72], "实时复核确认未赞", path)
+
+    assert like_review.load_review(path)["candidates"][0]["status"] == "rejected"
+
+
 def test_like_review_apply_checks_state_before_action(tmp_path: Path):
     path = tmp_path / "like_review.json"
     liked: set[str] = set()
@@ -175,7 +227,7 @@ def test_like_review_unavailable_state_never_posts(tmp_path: Path):
     assert like_review.load_review(path)["candidates"][0]["status"] == "failed"
 
 
-def test_like_apply_rejects_stale_list_without_action(tmp_path: Path):
+def test_like_apply_revalidates_stale_list_before_action(tmp_path: Path):
     path = tmp_path / "like_review.json"
     stale_at = (datetime.now(timezone.utc) - timedelta(seconds=181)).strftime("%Y-%m-%dT%H:%M:%S%z")
     like_review.merge_candidates(
@@ -192,15 +244,41 @@ def test_like_apply_rejects_stale_list_without_action(tmp_path: Path):
         sleep=lambda _: None,
     )
 
-    assert result["liked"] == 0
+    assert result["liked"] == 1
+    assert result["failed"] == 0
+    assert result["stale"] == []
+    assert resolved == [90]
+    assert sent == [90]
+    item = like_review.load_review(path)["candidates"][0]
+    assert item["status"] == "applied"
+    assert item["result"] == "liked"
+    assert item["revalidated_like_state"] == "not_liked"
+
+
+def test_like_apply_does_not_post_when_stale_live_state_is_unavailable(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    stale_at = (datetime.now(timezone.utc) - timedelta(seconds=181)).strftime("%Y-%m-%dT%H:%M:%S%z")
+    like_review.merge_candidates(
+        [{"oid": 9, "rpid": 91, "content": "unknown", "queued_at": stale_at}], path
+    )
+    like_review.approve(["91"], path)
+    sent = []
+
+    result = like_review.apply_approved(
+        lambda oid, rpid: None,
+        lambda oid, rpid: (sent.append(rpid) or {"code": 0}),
+        path,
+        sleep=lambda _: None,
+    )
+
     assert result["failed"] == 1
-    assert result["stale"] == ["90"]
-    assert resolved == []
+    assert result["stale"] == ["91"]
     assert sent == []
     item = like_review.load_review(path)["candidates"][0]
     assert item["status"] == "failed"
-    assert item["result"] == "stale_list"
-    assert "列表已过期" in item["error"]
+    assert item["result"] == "verify_unavailable"
+    assert "实时复核不可用" not in item["error"]
+    assert "复核不到当前真实点赞状态" in item["error"]
 
 
 def test_like_apply_rechecks_freshness_between_actions(tmp_path: Path):
@@ -234,14 +312,14 @@ def test_like_apply_rechecks_freshness_between_actions(tmp_path: Path):
         now=lambda: clock[0],
     )
 
-    assert result["liked"] == 1
-    assert result["failed"] == 1
-    assert result["stale"] == ["92"]
-    assert sent == [91]
+    assert result["liked"] == 2
+    assert result["failed"] == 0
+    assert result["stale"] == []
+    assert sent == [91, 92]
     items = {str(item["rpid"]): item for item in like_review.load_review(path)["candidates"]}
     assert items["91"]["status"] == "applied"
-    assert items["92"]["status"] == "failed"
-    assert items["92"]["result"] == "stale_list"
+    assert items["92"]["status"] == "applied"
+    assert items["92"]["result"] == "liked"
 
 
 def test_like_apply_rechecks_freshness_immediately_before_action(tmp_path: Path):
@@ -268,11 +346,11 @@ def test_like_apply_rechecks_freshness_immediately_before_action(tmp_path: Path)
         now=lambda: clock[0],
     )
 
-    assert result["liked"] == 0
-    assert result["failed"] == 1
-    assert result["stale"] == ["93"]
-    assert sent == []
-    assert like_review.load_review(path)["candidates"][0]["result"] == "stale_list"
+    assert result["liked"] == 1
+    assert result["failed"] == 0
+    assert result["stale"] == []
+    assert sent == [93]
+    assert like_review.load_review(path)["candidates"][0]["result"] == "liked"
 
 
 def test_like_approval_refreshes_batch_cap(tmp_path: Path):
@@ -291,6 +369,34 @@ def test_like_approval_refreshes_batch_cap(tmp_path: Path):
     )
     assert result["liked"] == 2
     assert result["failed"] == 0
+
+
+def test_like_apply_caps_approved_batch_and_leaves_rest_queued(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.merge_candidates(
+        [
+            {"oid": 1, "rpid": 111, "content": "first"},
+            {"oid": 2, "rpid": 112, "content": "second"},
+        ],
+        path,
+    )
+    like_review.approve(["111", "112"], path, max_count=1)
+    sent = []
+
+    result = like_review.apply_approved(
+        lambda oid, rpid: False,
+        lambda oid, rpid: (sent.append(rpid) or {"code": 0}),
+        path,
+        sleep=lambda _: None,
+    )
+
+    statuses = {
+        str(item["rpid"]): item["status"]
+        for item in like_review.load_review(path)["candidates"]
+    }
+    assert result["liked"] == 1
+    assert sent == [111]
+    assert statuses == {"111": "applied", "112": "approved"}
 
 
 def _review_payload() -> dict:
@@ -1412,7 +1518,7 @@ def test_like_apply_sleeps_only_after_real_action(tmp_path: Path):
     sleeps: list[float] = []
 
     result = like_review.apply_approved(
-        lambda oid, rpid: False,
+        lambda oid, rpid: rpid == 201,
         lambda oid, rpid: {"code": 0},
         path,
         sleep=sleeps.append,
@@ -1438,7 +1544,7 @@ def test_like_apply_does_not_sleep_when_already_liked(tmp_path: Path):
     sleeps: list[float] = []
 
     result = like_review.apply_approved(
-        lambda oid, rpid: False,
+        lambda oid, rpid: rpid == 201,
         lambda oid, rpid: {"code": 0},
         path,
         sleep=sleeps.append,
@@ -1448,6 +1554,27 @@ def test_like_apply_does_not_sleep_when_already_liked(tmp_path: Path):
     assert result["skipped"] == 1
     assert result["liked"] == 1
     assert sleeps == []
+
+
+def test_like_apply_live_state_overrides_stale_liked_set(tmp_path: Path):
+    path = tmp_path / "like_review.json"
+    like_review.merge_candidates([{"oid": 5, "rpid": 205, "content": "missed"}], path)
+    like_review.approve(["205"], path)
+    sent = []
+    liked = {"205"}
+
+    result = like_review.apply_approved(
+        lambda oid, rpid: False,
+        lambda oid, rpid: (sent.append(rpid) or {"code": 0}),
+        path,
+        liked_set=liked,
+        save_liked_set=lambda: None,
+        sleep=lambda _: None,
+    )
+
+    assert result["liked"] == 1
+    assert sent == [205]
+    assert liked == {"205"}
 
 
 def test_republish_corrected_allows_consecutive_explicit_corrections(tmp_path: Path, monkeypatch):

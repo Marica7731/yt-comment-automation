@@ -1,7 +1,7 @@
-"""Codex 点赞审核队列。
+"""点赞候选账本与执行状态。
 
-cron 只合并候选；Codex 显式批准后才执行 action。执行过程逐条落盘，
-避免下一轮扫描覆盖批准状态，也避免中断后重复点赞。
+执行前必须读取真实点赞状态；只有确认当前未赞才会调用 toggle action。
+执行过程逐条落盘，避免中断后重复点赞。
 """
 from __future__ import annotations
 
@@ -140,6 +140,16 @@ def merge_candidates(
             candidate.pop("result", None)
         candidate["fetched_at"] = _now()
         candidate["reviewed_at"] = existing.get("reviewed_at", "")
+        for audit_key in (
+            "reconciliation_history",
+            "reopen_reason",
+            "reopened_at",
+            "reopened_by",
+            "revalidated_at",
+            "revalidated_like_state",
+        ):
+            if audit_key in existing:
+                candidate[audit_key] = existing[audit_key]
         by_key[key] = candidate
     # 即使没有新候选，也刷新 approved 候选的 fetched_at
     # 这样执行时不会因为 fetched_at 过期而被拦
@@ -270,6 +280,54 @@ def reopen_rejected(
     return payload
 
 
+def reopen_applied_unliked(
+    rpids: Iterable[str | int],
+    reason: str,
+    path: Path | str | None = None,
+    reviewer: str = "like_fans",
+) -> dict[str, Any]:
+    """Requeue an applied candidate only after live state confirmed it unliked."""
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("恢复已执行但当前未赞的候选必须提供原因")
+    target = Path(path) if path else review_path()
+    payload = load_review(target)
+    selected = _select(payload, rpids)
+    now = _now()
+    for item in selected:
+        if item.get("status") != "applied":
+            raise RuntimeError(f"rpid={item['rpid']} 当前状态 {item.get('status')} 不是 applied")
+        if str(item.get("result") or "") not in {"liked", "already_liked"}:
+            raise RuntimeError(f"rpid={item['rpid']} 的执行结果不可自动恢复")
+        history = list(item.get("reconciliation_history") or [])
+        history.append(
+            {
+                "status": item.get("status"),
+                "result": item.get("result"),
+                "executed_at": item.get("executed_at", ""),
+                "executor": item.get("executor", ""),
+                "revalidated_at": now,
+                "revalidated_like_state": "not_liked",
+            }
+        )
+        item.update(
+            {
+                "status": "pending",
+                "result": "reopened_unliked",
+                "reopen_reason": reason,
+                "reopened_at": now,
+                "reopened_by": reviewer,
+                "fetched_at": now,
+                "revalidated_at": now,
+                "revalidated_like_state": "not_liked",
+                "reconciliation_history": history,
+            }
+        )
+        item.pop("error", None)
+    _write(target, payload)
+    return payload
+
+
 def summarize(payload: dict[str, Any]) -> dict[str, int]:
     counts = {"pending": 0, "approved": 0, "applied": 0, "rejected": 0, "failed": 0}
     for item in payload.get("candidates") or []:
@@ -297,19 +355,8 @@ def apply_approved(
     all_approved = [item for item in payload.get("candidates") or [] if item.get("status") == "approved"]
     liked = liked_set if liked_set is not None else set()
     liked_count = skipped_count = failed_count = 0
-    fresh: list[dict[str, Any]] = []
+    approved = all_approved
     stale: list[str] = []
-    for item in all_approved:
-        freshness_error = _list_freshness_error(item, now=clock())
-        if freshness_error:
-            item.update({"status": "failed", "result": "stale_list", "error": freshness_error})
-            stale.append(str(item.get("rpid")))
-            failed_count += 1
-        else:
-            fresh.append(item)
-    approved = fresh
-    if stale:
-        _write(target, payload)
     if not approved:
         payload["last_applied_at"] = _now()
         _write(target, payload)
@@ -317,26 +364,28 @@ def apply_approved(
         result.update({"liked": 0, "skipped": 0, "failed": failed_count, "executed": [], "stale": stale})
         return result
     max_count = payload.get("max_count")
-    if max_count is not None and len(approved) > int(max_count):
-        raise ValueError(f"审核通过 {len(approved)} 条，超过 max_count={max_count}")
+    if max_count is not None:
+        limit = int(max_count)
+        if limit < 1:
+            raise ValueError("max_count 必须大于 0")
+        approved = approved[:limit]
     for index, item in enumerate(approved):
         oid, rpid = item.get("oid"), item.get("rpid")
         key = str(rpid)
         freshness_error = _list_freshness_error(item, now=clock())
-        if freshness_error:
-            item.update({"status": "failed", "result": "stale_list", "error": freshness_error})
-            stale.append(str(item.get("rpid")))
+        if oid is None or rpid is None or not str(oid).strip() or not str(rpid).strip():
+            item.update(
+                {
+                    "status": "failed",
+                    "result": "invalid_candidate",
+                    "error": "候选缺少 oid 或 rpid，未执行点赞",
+                }
+            )
             failed_count += 1
             _write(target, payload)
             continue
         item["attempted_at"] = _now()
         item["executor"] = reviewer
-        if key in liked:
-            item.update({"status": "applied", "result": "already_liked", "executed_at": _now()})
-            item.pop("error", None)
-            skipped_count += 1
-            _write(target, payload)
-            continue
         try:
             real = resolve_real_liked(oid, rpid)
         except Exception as err:  # noqa: BLE001
@@ -352,14 +401,45 @@ def apply_approved(
             _write(target, payload)
             continue
         if real is None:
-            item.update({"status": "failed", "result": "verify_unavailable"})
-            item.setdefault("error", "复核不到真实状态，宁漏勿撤")
+            item.update(
+                {
+                    "status": "failed",
+                    "result": "verify_unavailable",
+                    "error": (
+                        "复核不到当前真实点赞状态，未执行点赞"
+                        + (f"；{freshness_error}" if freshness_error else "")
+                    ),
+                }
+            )
+            if freshness_error:
+                stale.append(str(rpid))
             failed_count += 1
             _write(target, payload)
             continue
+        # A live false result refreshes an old queue entry. The same live read
+        # that protects the toggle also prevents stale candidates being stranded.
+        observed_at = clock()
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=timezone.utc)
+        observed_text = observed_at.strftime("%Y-%m-%dT%H:%M:%S%z")
+        item["fetched_at"] = observed_text
+        item["revalidated_at"] = observed_text
+        item["revalidated_like_state"] = "not_liked"
+        if key in liked:
+            liked.discard(key)
+            if save_liked_set:
+                save_liked_set()
+        item.pop("error", None)
+        _write(target, payload)
         freshness_error = _list_freshness_error(item, now=clock())
         if freshness_error:
-            item.update({"status": "failed", "result": "stale_list", "error": freshness_error})
+            item.update(
+                {
+                    "status": "failed",
+                    "result": "verify_unavailable",
+                    "error": f"实时复核后候选仍过期，未执行点赞；{freshness_error}",
+                }
+            )
             stale.append(str(item.get("rpid")))
             failed_count += 1
             _write(target, payload)

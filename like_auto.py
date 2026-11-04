@@ -1,12 +1,9 @@
 """Run the fan-reply liker without per-item Codex review.
 
-The collection and action paths stay in ``like_fans.py``. This wrapper turns
-fresh candidates into bounded approved batches and retries transient failures
-by rescanning the list before each round. A successful batch does not end the
-run while fresh pending candidates remain; later rounds process the remaining
-batches until the queue is empty or the round budget is exhausted. Every action
-still passes through the
-same freshness, real-state verification, ledger, and pacing gates.
+Scan once, then process the resulting queue in bounded batches. Every action
+rechecks the live like state; the 8-second action pacing applies across batch
+boundaries too. Transient failures are retried from the ledger without another
+full feed and comment scan.
 """
 from __future__ import annotations
 
@@ -26,11 +23,15 @@ RETRYABLE_RESULTS = {"stale_list", "verify_unavailable", "api_error", "exception
 DEFAULT_ROUNDS = 8
 DEFAULT_SCAN_TIMEOUT = 240
 DEFAULT_APPLY_TIMEOUT = 600
-DEFAULT_PAUSE_SECONDS = 2.0
+DEFAULT_PAUSE_SECONDS = 8.0
 
 
 def select_work(payload: dict, max_count: int) -> list[dict]:
-    """Select pending work plus retryable failures from the previous round."""
+    """Select pending work plus retryable failures, including old candidates.
+
+    apply_approved revalidates the live like state before acting, so age alone
+    should not strand a candidate or force another full scan.
+    """
     selected: list[dict] = []
     for item in payload.get("candidates") or []:
         status = str(item.get("status") or "pending")
@@ -38,7 +39,7 @@ def select_work(payload: dict, max_count: int) -> list[dict]:
         eligible = status in {"pending", "approved"} or (
             status == "failed" and result in RETRYABLE_RESULTS
         )
-        if eligible and like_review._list_freshness_error(item) is None:
+        if eligible:
             selected.append(item)
         if len(selected) >= max_count:
             break
@@ -69,26 +70,41 @@ def run_like_auto(
         "--apply",
         str(review_path),
     ]
+    scan = _run(scan_command, scan_timeout)
+    if scan.returncode != 0:
+        return scan.returncode
+
     retryable_count = 0
     remaining_count = 0
 
-    for round_index in range(max_rounds):
-        scan = _run(scan_command, scan_timeout)
-        if scan.returncode != 0:
-            return scan.returncode
-
+    for batch_index in range(max_rounds):
         payload = like_review.load_review(review_path)
         selected = select_work(payload, max_count)
         if not selected:
-            if round_index == 0:
+            open_work = [
+                item
+                for item in payload.get("candidates") or []
+                if item.get("status") in {"pending", "approved"}
+                or (
+                    item.get("status") == "failed"
+                    and str(item.get("result") or "") in RETRYABLE_RESULTS
+                )
+            ]
+            if open_work:
+                print(
+                    f"点赞直跑: 有 {len(open_work)} 条待处理，但无法组批；本轮失败退出",
+                    flush=True,
+                )
+                return 1
+            if batch_index == 0:
                 print("点赞直跑: 无待处理候选", flush=True)
             else:
-                print(f"点赞直跑: 第 {round_index + 1} 轮无待处理候选", flush=True)
+                print(f"点赞直跑: 第 {batch_index + 1} 批后队列已清空", flush=True)
             return 0
 
         rpids = [item["rpid"] for item in selected]
-        if round_index:
-            print(f"点赞直跑: 第 {round_index + 1} 轮重试 {len(rpids)} 条", flush=True)
+        if batch_index:
+            print(f"点赞直跑: 第 {batch_index + 1} 批处理 {len(rpids)} 条", flush=True)
         like_review.approve(
             rpids,
             review_path,
@@ -120,16 +136,16 @@ def run_like_auto(
         remaining_count = len(open_work)
         if not retryable and not open_work:
             return apply.returncode
-        if round_index + 1 < max_rounds:
+        if batch_index + 1 < max_rounds:
             if open_work:
-                print(f"点赞直跑: 本轮后仍有 {len(open_work)} 条待处理，继续下一批", flush=True)
+                print(f"点赞直跑: 本批后仍有 {len(open_work)} 条待处理，继续下一批", flush=True)
             if pause_seconds:
                 time.sleep(pause_seconds)
             continue
         break
 
     print(
-        f"点赞直跑: {max_rounds} 轮后仍有 {remaining_count} 条待处理、{retryable_count} 条可重试失败",
+        f"点赞直跑: {max_rounds} 批后仍有 {remaining_count} 条待处理、{retryable_count} 条可重试失败",
         flush=True,
     )
     return 1
@@ -141,13 +157,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-count",
         type=int,
         default=10,
-        help="单轮自动批准上限（默认 10，防止执行超过列表新鲜期）",
+        help="单批自动批准上限（默认 10）",
     )
     parser.add_argument(
         "--rounds",
         type=int,
         default=DEFAULT_ROUNDS,
-        help=f"最多扫描/执行轮数（默认 {DEFAULT_ROUNDS}）",
+        help=f"最多处理批次数（默认 {DEFAULT_ROUNDS}）",
     )
     parser.add_argument(
         "--scan-timeout",
@@ -165,7 +181,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--pause-seconds",
         type=float,
         default=DEFAULT_PAUSE_SECONDS,
-        help=f"重试前等待秒数（默认 {DEFAULT_PAUSE_SECONDS:g}）",
+        help=f"批次之间等待秒数（默认 {DEFAULT_PAUSE_SECONDS:g}）",
     )
     args = parser.parse_args(argv)
     if not 1 <= args.max_count <= 20:

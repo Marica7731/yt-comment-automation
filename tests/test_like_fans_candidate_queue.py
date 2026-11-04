@@ -6,6 +6,7 @@ import ast
 import contextlib
 import io
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +37,12 @@ def _load_candidate_gate(existing_review: dict) -> tuple[dict, object]:
     return namespace["review_statuses"], namespace["add_review_candidate"]
 
 
-def _load_process_items(add_result: bool, review_statuses: dict | None = None):
+def _load_process_items(
+    add_result: bool,
+    review_statuses: dict | None = None,
+    liked_set: set[str] | None = None,
+    real_state: bool | None = False,
+):
     tree = ast.parse((ROOT / "like_fans.py").read_text(encoding="utf-8"))
     function = next(
         node
@@ -49,15 +55,23 @@ def _load_process_items(add_result: bool, review_statuses: dict | None = None):
     def add_review_candidate(*args, **kwargs):
         return add_result
 
+    reopened = []
+
+    def reopen_applied_unliked(rpids, reason, path):
+        reopened.extend(str(rpid) for rpid in rpids)
+
     namespace = {
         "OWNER_MID": "owner",
         "skipped_self": [],
-        "liked_set": set(),
+        "liked_set": set(liked_set or set()),
         "review_statuses": review_statuses or {},
-        "resolve_real_liked": lambda oid, rpid: False,
+        "resolve_real_liked": lambda oid, rpid, root_id=None: real_state,
         "save_liked_set": lambda: None,
         "add_review_candidate": add_review_candidate,
         "_bvid_from_uri": lambda uri: "",
+        "like_review": SimpleNamespace(reopen_applied_unliked=reopen_applied_unliked),
+        "REVIEW_PATH": Path("/tmp/like_review.json"),
+        "reopened": reopened,
     }
     exec(compile(module, str(ROOT / "like_fans.py"), "exec"), namespace)
     return namespace["process_items"], namespace
@@ -80,6 +94,24 @@ def _feed(add_result: bool, review_statuses: dict | None = None) -> tuple[int, s
     with contextlib.redirect_stdout(output):
         count = process_items([item])
     assert namespace["skipped_self"] == []
+    return count, output.getvalue()
+
+
+def _feed_with_process(process_items) -> tuple[int, str]:
+    item = {
+        "user": {"mid": "fan"},
+        "item": {
+            "source_content": "spam",
+            "source_id": 123,
+            "subject_id": 456,
+            "like_state": 0,
+            "uri": "",
+            "root_id": "",
+        },
+    }
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        count = process_items([item])
     return count, output.getvalue()
 
 
@@ -113,6 +145,22 @@ def test_stale_list_candidate_can_requeue_on_fresh_msgfeed():
     assert add_candidate(
         1, 90, "fresh", "msgfeed", bvid="BV1test", uri="", root_id=""
     ) is True
+
+
+def test_applied_candidate_is_reopened_when_live_state_is_unliked():
+    process_items, namespace = _load_process_items(
+        add_result=True,
+        review_statuses={"123": "applied"},
+        liked_set={"123"},
+        real_state=False,
+    )
+    count, output = _feed_with_process(process_items)
+
+    assert count == 1
+    assert namespace["liked_set"] == set()
+    assert namespace["review_statuses"]["123"] == "pending"
+    assert namespace["reopened"] == ["123"]
+    assert "复核确认未赞，补赞" in output
 
 def _load_candidate_namespace(existing_review: dict) -> dict:
     tree = ast.parse((ROOT / "like_fans.py").read_text(encoding="utf-8"))

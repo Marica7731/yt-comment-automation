@@ -85,7 +85,11 @@ headers = {
     "Cookie": bili_comment.cookie_header(cookies),
 }
 our_root_rpid_cache = {}  # oid → 我们主评论 rpid（查楼中楼真实状态的 root）
-item_uri = {}  # oid → 视频页 uri（楼中楼兜底时反查 bvid 用）
+item_uri = {
+    item.get("oid"): str(item.get("uri") or "")
+    for item in existing_review.get("candidates") or []
+    if item.get("oid") is not None and item.get("uri")
+}  # oid → 视频页 uri（楼中楼兜底时反查 bvid 用）
 
 # 自家视频集合：自动发布记录 ∪ 合集快照作为已确认 BVID；msgfeed 出现的
 # 未登记视频须先核对 view.owner.mid == OWNER_MID，再纳入评论区补扫。
@@ -410,9 +414,14 @@ def process_items(items):
                 save_liked_set()
             print(f"  =已赞跳过 rpid={rpid} {content[:30]!r}", flush=True)
             continue
-        if str(rpid) in liked_set:
+        key = str(rpid)
+        existing_status = review_statuses.get(key)
+        if key in liked_set or existing_status == "applied":
             real = resolve_real_liked(oid, rpid, root_id=item.get("root_id", ""))
             if real is True:
+                if key not in liked_set:
+                    liked_set.add(key)
+                    save_liked_set()
                 skipped_liked.append(content)
                 print(f"  =已赞跳过 rpid={rpid} {content[:30]!r}", flush=True)
                 continue
@@ -420,6 +429,20 @@ def process_items(items):
                 skipped_liked.append(content)
                 print(f"  ?复核不到按跳过(宁漏勿撤) rpid={rpid} {content[:30]!r}", flush=True)
                 continue
+            if key in liked_set:
+                liked_set.discard(key)
+                save_liked_set()
+            if existing_status == "applied":
+                try:
+                    like_review.reopen_applied_unliked(
+                        [rpid],
+                        "消息中心显示未赞且实时复核确认未赞",
+                        REVIEW_PATH,
+                    )
+                except (KeyError, RuntimeError, ValueError) as err:
+                    print(f"  ⚠️已执行候选恢复失败 rpid={rpid}: {err}", flush=True)
+                    continue
+                review_statuses[key] = "pending"
             print(f"  ↻复核确认未赞，补赞 rpid={rpid} {content[:30]!r}", flush=True)
 
         created = add_review_candidate(

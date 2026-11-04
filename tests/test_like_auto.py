@@ -26,14 +26,14 @@ def test_select_pending_caps_batch_and_skips_terminal_states():
     assert [item["rpid"] for item in selected] == [2, 3]
 
 
-def test_select_work_skips_stale_candidates():
+def test_select_work_keeps_stale_candidates_for_live_revalidation():
     payload = {
         "candidates": [
             {"rpid": 1, "status": "pending", "fetched_at": "2000-01-01T00:00:00+0000"},
         ]
     }
 
-    assert like_auto.select_work(payload, 10) == []
+    assert [item["rpid"] for item in like_auto.select_work(payload, 10)] == [1]
 
 
 def test_select_work_includes_retryable_failures_only():
@@ -92,7 +92,6 @@ def test_run_like_auto_processes_remaining_pending_batches(tmp_path: Path, monke
             "--apply",
             str(review_path),
         ],
-        [str(like_auto.sys.executable), str(like_auto.ROOT / "like_fans.py")],
         [
             str(like_auto.sys.executable),
             str(like_auto.ROOT / "like_fans.py"),
@@ -119,6 +118,47 @@ def test_run_like_auto_does_not_apply_after_scan_failure(tmp_path: Path, monkeyp
 
     assert code == 1
     assert len(calls) == 1
+
+
+def test_run_like_auto_fails_instead_of_hiding_unresolved_candidate(tmp_path: Path, monkeypatch):
+    review_path = tmp_path / "like_review.json"
+    like_review.save_review(
+        {
+            "candidates": [
+                {
+                    "oid": 1,
+                    "rpid": 77,
+                    "status": "pending",
+                    "fetched_at": "2000-01-01T00:00:00+0000",
+                }
+            ]
+        },
+        review_path,
+    )
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append([str(part) for part in command])
+        if "--apply" not in command:
+            return subprocess.CompletedProcess(command, 0)
+        payload = like_review.load_review(review_path)
+        payload["candidates"][0].update(
+            {"status": "failed", "result": "verify_unavailable"}
+        )
+        like_review.save_review(payload, review_path)
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(like_auto.subprocess, "run", fake_run)
+    code = like_auto.run_like_auto(
+        10,
+        review_path,
+        max_rounds=1,
+        pause_seconds=0,
+    )
+
+    assert code == 1
+    assert len(calls) == 2
+    assert like_review.load_review(review_path)["candidates"][0]["result"] == "verify_unavailable"
 
 
 def test_run_like_auto_retries_transient_failure_and_finishes(tmp_path: Path, monkeypatch):
@@ -153,6 +193,6 @@ def test_run_like_auto_retries_transient_failure_and_finishes(tmp_path: Path, mo
 
     assert code == 0
     assert apply_rounds == 2
-    assert len(calls) == 4
+    assert len(calls) == 3
     payload = like_review.load_review(review_path)
     assert payload["candidates"][0]["status"] == "applied"
