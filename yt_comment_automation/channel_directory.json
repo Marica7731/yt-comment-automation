@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "note": "名称(主播行) → YouTube handle 兜底。仅当 B 站简介的「主播」行没有可解析的 ASCII handle 时使用；不发起任何 YouTube 请求。新增频道直接加一条到 channels。",
+  "channels": {
+    "稀羽すう": "suu"
+  }
+}

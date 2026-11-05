@@ -712,3 +712,102 @@ def test_send_feishu_file_rejects_empty_and_oversize_before_network(monkeypatch,
 
     assert not ok_empty and "空文件" in receipt_empty
     assert not ok_large and "30 MB" in receipt_large
+
+
+def test_channel_label_parses_name_and_handle_from_desc_profile():
+    from yt_comment_automation import notify
+
+    desc = "主播：なつかしちゃん@natsume_ikune\n原标题：めざせ高評価100"
+    assert notify.channel_label(desc) == "なつかしちゃん @natsume_ikune"
+
+    desc2 = "主播：花鹿 める / Kajica Mel@mel_samui\n原标题：ハロウィン"
+    assert notify.channel_label(desc2) == "花鹿 める / Kajica Mel @mel_samui"
+
+    desc3 = "主播：音羽ララ (Otohane Lara) / シアーミュージックV@lara_songs\n原标题：x"
+    assert notify.channel_label(desc3) == "音羽ララ (Otohane Lara) / シアーミュージックV @lara_songs"
+
+
+def test_channel_label_falls_back_to_directory_for_name_without_handle(tmp_path):
+    from yt_comment_automation import notify
+
+    directory = tmp_path / "channel_directory.json"
+    directory.write_text(
+        '{"channels": {"稀羽すう": "suu"}}', encoding="utf-8"
+    )
+    desc = "主播：稀羽すう\n原标题：テスト"
+    assert notify.channel_label(desc, directory_path=directory) == "稀羽すう @suu"
+
+
+def test_channel_label_no_handle_and_no_directory_returns_name_only():
+    from yt_comment_automation import notify
+
+    # 中日文混排的「handle」（sumica-澄花）无法解析成干净 ASCII handle
+    desc = "主播：-sumica-澄花@sumica-澄花\n原标题：x"
+    label = notify.channel_label(desc)
+    assert "@" not in label
+    assert label == "-sumica-澄花"
+
+
+def test_channel_label_empty_when_no_profile():
+    from yt_comment_automation import notify
+
+    assert notify.channel_label("") == ""
+    assert notify.channel_label("原标题：x") == ""
+
+
+def test_success_brief_contains_channel_line():
+    from yt_comment_automation import notify
+
+    brief = notify.build_success_brief(
+        "BV1Wq846oE3E",
+        "https://youtu.be/2uzi8bOkU9Y",
+        posted_at="2026-08-23 07:43:00",
+        song_count=14,
+        profile="主播：なつかしちゃん@natsume_ikune",
+        channel="なつかしちゃん @natsume_ikune",
+    )
+    assert "频道：なつかしちゃん @natsume_ikune" in brief
+
+
+def test_terminal_success_brief_contains_channel_line():
+    from yt_comment_automation import notify
+
+    brief = notify.build_comment_success_terminal_brief(
+        bvid="BV1hjHT6cEsU",
+        yt_link="https://youtu.be/4l2ISltSdvs",
+        approved_messages=["0:03:45 01. ブルーバード - いきものがかり"],
+        rpids=["318082733937"],
+        reported_at="2026-10-25 03:47:11",
+        channel="なつかしちゃん @natsume_ikune",
+    )
+    assert "频道：なつかしちゃん @natsume_ikune" in brief
+
+
+def test_failure_brief_contains_yt_link_and_channel():
+    from yt_comment_automation import notify
+
+    brief = notify.build_failure_brief(
+        "BV19hxdzfEkb",
+        "YouTube Action 抓取失败: YtFetchError: empty comment snapshot ...",
+        title="SHONEN MANGA",
+        collection="凛々咲",
+        yt_link="https://youtu.be/WVGFpUyvxgo",
+        channel="なつかしちゃん @natsume_ikune",
+        status="skipped_action_fetch_failed",
+    )
+    assert "https://youtu.be/WVGFpUyvxgo" in brief
+    assert "频道：なつかしちゃん @natsume_ikune" in brief
+
+
+def test_yt_rate_limit_brief_contains_yt_link_and_channel():
+    from yt_comment_automation import notify
+
+    brief = notify.build_yt_rate_limit_brief(
+        "BV1Wq846oE3E",
+        "HTTP Error 429",
+        yt_link="https://youtu.be/abc123",
+        channel="なつかしちゃん @natsume_ikune",
+    )
+    assert "https://youtu.be/abc123" in brief
+    assert "频道：なつかしちゃん @natsume_ikune" in brief
+    assert "⚠️YouTube 限流(429)" in brief

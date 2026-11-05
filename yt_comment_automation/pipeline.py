@@ -540,6 +540,8 @@ def _notify_yt_fetch_failure_once(
                 tests=[test_line],
                 commit=notify.git_summary(),
                 failures=[error],
+                yt_link=f"https://youtu.be/{video.yt_id}" if video.yt_id else "",
+                channel=notify.channel_label(video.desc_profile),
             )
         else:
             brief = notify.build_failure_brief(
@@ -550,6 +552,8 @@ def _notify_yt_fetch_failure_once(
                 commit=notify.git_summary(),
                 failures=[error],
                 status="skipped_action_fetch_failed",
+                yt_link=f"https://youtu.be/{video.yt_id}" if video.yt_id else "",
+                channel=notify.channel_label(video.desc_profile),
             )
         ok, note = notify.send_feishu_message(brief)
         logger.info("[%s] 飞书 YouTube 抓取失败通知: %s %s", video.bvid, ok, note)
@@ -1072,6 +1076,7 @@ def run_pipeline(
                     posted_at=notify.beijing_now(),
                     song_count=result.song_count,
                     profile=result.desc_profile,
+                    channel=notify.channel_label(result.desc_profile),
                     source_lines=result.source_lines,
                     final_message=result.message,
                 )
@@ -1083,6 +1088,7 @@ def run_pipeline(
                             bvid=result.bvid,
                             yt_link=f"https://youtu.be/{result.yt_id}" if result.yt_id else "",
                             approved_messages=result.message,
+                            channel=notify.channel_label(result.desc_profile),
                         )
                         terminal_sent, terminal_note = (
                             notify.send_terminal_success_message(terminal_brief)
@@ -1106,6 +1112,7 @@ def run_pipeline(
                 title=result.title,
                 collection=result.collection,
                 yt_link=f"https://youtu.be/{result.yt_id}" if result.yt_id else "",
+                channel=notify.channel_label(result.desc_profile),
             )
             try:
                 notify.send_feishu_message(brief)

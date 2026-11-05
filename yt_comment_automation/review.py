@@ -153,6 +153,7 @@ def notify_apply_failure(
         title=str(item.get("title") or ""),
         collection=str(item.get("collection") or ""),
         yt_link=f"https://youtu.be/{item.get('yt_id', '')}" if item.get("yt_id") else "",
+        channel=notify.channel_label(item.get("desc_profile", "")),
         source_text=str(item.get("source_text") or ""),
         source_lines=str(item.get("source_lines") or ""),
         draft_messages=item.get("draft_messages", []),
@@ -497,6 +498,7 @@ def _send_apply_feishu_notification(
             ),
             approved_messages=item.get("approved_messages") or [],
             rpids=item.get("rpids") or [],
+            channel=notify.channel_label(item.get("desc_profile", "")),
         )
         _send_terminal_success_feishu_notification(
             item, data_path, terminal_brief
@@ -1101,6 +1103,7 @@ def apply_comment(
                 commit=commit,
                 title=item.get("title", ""),
                 collection=item.get("collection", ""),
+                channel=notify.channel_label(item.get("desc_profile", "")),
             )
         else:
             brief = notify.build_failure_brief(
@@ -1108,6 +1111,7 @@ def apply_comment(
                 reason=f"评论已发布但回读验收失败：{stored_verify_detail}",
                 title=item.get("title", ""),
                 collection=item.get("collection", ""),
+                channel=notify.channel_label(item.get("desc_profile", "")),
                 files=[
                     "yt_comment_automation/review.py",
                     "yt_comment_automation/bili_comment.py",

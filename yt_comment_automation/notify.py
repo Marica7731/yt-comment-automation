@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 from uuid import uuid4
 
+from . import channels
 from . import config
 
 TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
@@ -472,12 +473,18 @@ def build_like_success_brief(results: Iterable[dict[str, Any]]) -> str:
     )
 
 
+def channel_label(desc_profile: str = "", directory_path=None) -> str:
+    """Re-export so callers can resolve `名称 @handle` without importing channels."""
+    return channels.channel_label(desc_profile, directory_path=directory_path)
+
+
 def build_comment_success_terminal_brief(
     bvid: str,
     yt_link: str,
     approved_messages: Any = None,
     rpids: Iterable[str] | str = (),
     reported_at: str = "",
+    channel: str = "",
 ) -> str:
     """Build the exact compact payload for the dedicated comment-success bot."""
     if isinstance(approved_messages, str):
@@ -502,6 +509,9 @@ def build_comment_success_terminal_brief(
     clean_yt_link = str(yt_link or "").strip()
     if clean_yt_link:
         lines.append(clean_yt_link)
+    clean_channel = str(channel or "").strip()
+    if clean_channel:
+        lines.append(f"频道：{clean_channel}")
     if message_text:
         lines.append(message_text)
     lines.extend(
@@ -553,6 +563,7 @@ def build_success_brief(
     commit: str = "",
     title: str = "",
     collection: str = "",
+    channel: str = "",
     files: Iterable[str] | str = (),
     tests: Iterable[str] | str = (),
 ) -> str:
@@ -572,6 +583,9 @@ def build_success_brief(
         lines.append(f"标题：{title}")
     if collection:
         lines.append(f"合集：{collection}")
+    clean_channel = str(channel or "").strip()
+    if clean_channel:
+        lines.append(f"频道：{clean_channel}")
     cleanup_summary, source_excerpt, _ = build_cleanup_report(
         source_text=source_text,
         source_lines=source_lines,
@@ -604,6 +618,7 @@ def build_failure_brief(
     title: str = "",
     collection: str = "",
     yt_link: str = "",
+    channel: str = "",
     source_text: str = "",
     source_lines: str = "",
     draft_messages: Any = None,
@@ -628,6 +643,9 @@ def build_failure_brief(
         lines.append(f"合集：{collection}")
     if yt_link:
         lines.append(yt_link)
+    clean_channel = str(channel or "").strip()
+    if clean_channel:
+        lines.append(f"频道：{clean_channel}")
     if status:
         lines.append(f"状态：{status}")
     lines.append(f"commit：{commit or git_summary()}")
@@ -663,6 +681,8 @@ def build_yt_rate_limit_brief(
     rpids: Iterable[str] | str = (),
     segments: int | str = 0,
     failures: Iterable[str] | str = (),
+    yt_link: str = "",
+    channel: str = "",
 ) -> str:
     """YouTube 页面抓取限流（429）通知：提醒及时关注抓取频率/IP 风控。"""
     bili_link = f"https://www.bilibili.com/video/{bvid}"
@@ -670,10 +690,18 @@ def build_yt_rate_limit_brief(
     failure_text = "; ".join(str(x) for x in failures) if not isinstance(failures, str) else failures
     file_text = _as_multiline(files)
     test_text = _as_multiline(tests)
-    return "\n".join(
+    lines = [
+        "⚠️YouTube 限流(429)",
+        bili_link,
+    ]
+    clean_yt_link = str(yt_link or "").strip()
+    if clean_yt_link:
+        lines.append(clean_yt_link)
+    clean_channel = str(channel or "").strip()
+    if clean_channel:
+        lines.append(f"频道：{clean_channel}")
+    lines.extend(
         [
-            "⚠️YouTube 限流(429)",
-            bili_link,
             f"原因：{reason}",
             "——原始来源——",
             "N/A（抓取失败，无发布内容）",
@@ -695,6 +723,7 @@ def build_yt_rate_limit_brief(
             f"时间：{beijing_now()}",
         ]
     )
+    return "\n".join(lines)
 
 
 def summarize_action_failures(data_dir: Any = "/opt/yt-comment-automation/data", limit: int = 3) -> list[str]:
