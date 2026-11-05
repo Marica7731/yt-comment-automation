@@ -727,18 +727,15 @@ def test_channel_label_parses_name_and_handle_from_desc_profile():
     assert notify.channel_label(desc3) == "音羽ララ (Otohane Lara) / シアーミュージックV @lara_songs"
 
 
-def test_channel_label_falls_back_to_directory_for_name_without_handle(tmp_path):
+def test_channel_label_name_only_when_no_handle():
     from yt_comment_automation import notify
 
-    directory = tmp_path / "channel_directory.json"
-    directory.write_text(
-        '{"channels": {"稀羽すう": "suu"}}', encoding="utf-8"
-    )
+    # 主播行没有干净 ASCII handle（如纯名称），只返回名称，不依赖任何配置。
     desc = "主播：稀羽すう\n原标题：テスト"
-    assert notify.channel_label(desc, directory_path=directory) == "稀羽すう @suu"
+    assert notify.channel_label(desc) == "稀羽すう"
 
 
-def test_channel_label_no_handle_and_no_directory_returns_name_only():
+def test_channel_label_no_handle_returns_name_only():
     from yt_comment_automation import notify
 
     # 中日文混排的「handle」（sumica-澄花）无法解析成干净 ASCII handle

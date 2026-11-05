@@ -473,9 +473,12 @@ def build_like_success_brief(results: Iterable[dict[str, Any]]) -> str:
     )
 
 
-def channel_label(desc_profile: str = "", directory_path=None) -> str:
-    """Re-export so callers can resolve `名称 @handle` without importing channels."""
-    return channels.channel_label(desc_profile, directory_path=directory_path)
+def channel_label(desc_profile: str = "") -> str:
+    """Re-export so callers can resolve `名称 @handle` without importing channels.
+
+    只从 B 站简介的「主播」行解析，不发起 YouTube 请求，也不依赖任何本地配置。
+    """
+    return channels.channel_label(desc_profile)
 
 
 def build_comment_success_terminal_brief(
