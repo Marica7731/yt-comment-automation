@@ -25,6 +25,7 @@
 - GitHub 仓库是 `Marica7731/yt-comment-automation`；WDC 工作目录是 `/opt/yt-comment-automation`。
 - GitHub token 只从 WDC 的 `/root/.secrets/github-token` 读取并交给现有脚本。不要复制、打印或提交 token。
 - 不要用手写的 `curl`、直接请求外部接口、改 crontab 或借用未授权的凭据来绕过项目工具。
+- **YouTube 抓取只能由 GitHub Action 定时任务（`fetch-youtube.yml`，推送 `youtube_targets.txt` 或 `workflow_dispatch` 触发）执行。绝不在本地或任何非 Action 上下文手动直连 YouTube（含手动跑 `yt_fetch` / `youtube_action`、手写请求等）。** 手动直连会从本机 IP 直接打到 YouTube，既绕开定时的节奏与风控，又可能拿到截断/异常的响应，影响账号与后续抓取。任何需要 YouTube 原始数据的排查，只能读取 GitHub Action 已产出的缓存（仓库 `youtube-action-cache` 分支的 `youtube-action-payload.json` / `youtube-action-state.json`），不得重新发起线上请求。
 - 不要删除或改名配置、workflow、`RULES.md`、原始数据或项目目录。只改完成当前任务需要的文件。
 - 命令要有超时，不要无限等待。
 
