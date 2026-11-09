@@ -6,8 +6,11 @@
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import html
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -351,16 +354,39 @@ def mark_user_owned(
     return item
 
 
+@contextlib.contextmanager
+def _processed_write_lock(data_dir: Path):
+    """跨进程独占锁：与 pipeline.save_processed 共用同一锁文件，串行化 processed.json 改写。"""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = data_dir / ".processed.lock"
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            fh.close()
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def _mark_processed(data_dir: Path, bvid: str) -> None:
     path = data_dir / "processed.json"
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        payload = {}
-    posted = set(payload.get("posted") or [])
-    posted.add(bvid)
-    payload = {"updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "posted": sorted(posted)}
-    _write_json(path, payload)
+    with _processed_write_lock(data_dir):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = {}
+        posted = set(payload.get("posted") or [])
+        posted.add(bvid)
+        payload = {"updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "posted": sorted(posted)}
+        _atomic_write_json(path, payload)
 
 
 def _fetch_video_pages(bvid: str, cookies: dict[str, str]) -> list[dict[str, Any]]:

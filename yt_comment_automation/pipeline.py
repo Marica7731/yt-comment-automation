@@ -13,8 +13,11 @@
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import logging
+import os
 import re
 import shutil
 from . import review
@@ -89,25 +92,52 @@ def load_processed(data_dir: Path) -> set[str]:
         return set()
 
 
+@contextlib.contextmanager
+def _processed_write_lock(data_dir: Path):
+    """跨进程独占锁：串行化 processed.json 的所有改写，避免并发 apply/cycle 丢更新。"""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = data_dir / ".processed.lock"
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        finally:
+            fh.close()
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def save_processed(
     data_dir: Path, posted: set[str], recheck: set[str] | None = None
 ) -> None:
     """Persist the posted ledger.
 
-    Read-modify-write: any entry already on disk (e.g. added by a concurrent
-    ``review_cli apply`` between this cycle's start and this save) is preserved.
-    Entries named in ``recheck`` are still dropped so they can be re-processed.
+    Read-modify-write under an exclusive lock so a concurrent ``review_cli apply``
+    write cannot be lost. A recheck bvid is only dropped from the ledger when THIS
+    cycle is actually re-posting it (``recheck & posted``): a ``pending`` bvid that
+    Codex just published via ``apply`` is never in ``posted``, so it is preserved
+    instead of being stripped merely because the cycle snapshotted it as pending
+    before the publish. This keeps the dedup guard intact for exactly the videos
+    being actively published.
     """
     path = data_dir / "processed.json"
-    existing = load_processed(data_dir)
-    if recheck:
-        existing -= set(recheck)
-    merged = existing | set(posted)
-    payload = {
-        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "posted": sorted(merged),
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _processed_write_lock(data_dir):
+        existing = load_processed(data_dir)
+        if recheck:
+            existing -= set(recheck) & set(posted)
+        merged = existing | set(posted)
+        payload = {
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "posted": sorted(merged),
+        }
+        _atomic_write_json(path, payload)
 
 
 def _remove_content_caches(results: list[VideoResult], cache_dir: Path, dry_run: bool) -> None:
