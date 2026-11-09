@@ -89,9 +89,24 @@ def load_processed(data_dir: Path) -> set[str]:
         return set()
 
 
-def save_processed(data_dir: Path, posted: set[str]) -> None:
+def save_processed(
+    data_dir: Path, posted: set[str], recheck: set[str] | None = None
+) -> None:
+    """Persist the posted ledger.
+
+    Read-modify-write: any entry already on disk (e.g. added by a concurrent
+    ``review_cli apply`` between this cycle's start and this save) is preserved.
+    Entries named in ``recheck`` are still dropped so they can be re-processed.
+    """
     path = data_dir / "processed.json"
-    payload = {"updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "posted": sorted(posted)}
+    existing = load_processed(data_dir)
+    if recheck:
+        existing -= set(recheck)
+    merged = existing | set(posted)
+    payload = {
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "posted": sorted(merged),
+    }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -1058,7 +1073,8 @@ def run_pipeline(
             posted.add(result.bvid)
             # 立即落盘：防止本轮后续处理崩溃（如 YouTube/B站接口异常）导致
             # save_processed 不执行，下轮 cron 重新发布同一视频（重复评论事故）
-            save_processed(data_dir, posted)
+            # recheck 传入以确保重审视频仍按预期从账本移除（合并写入保留并发新增项）
+            save_processed(data_dir, posted, recheck_bvids)
             if result.status == "posted":
                 # 飞书通知（仅新投稿发布时；无新增/缺歌单不播报）
                 brief = notify.build_success_brief(
@@ -1126,7 +1142,7 @@ def run_pipeline(
     # 保存快照与处理记录
     if not dry_run:
         collections.save_snapshot(videos)
-        save_processed(data_dir, posted)
+        save_processed(data_dir, posted, recheck_bvids)
     run_record = RunRecord(
         run_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         total=len(candidates),
