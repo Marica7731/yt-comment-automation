@@ -254,6 +254,12 @@ def strip_transliteration_parens_from_line(line: str) -> str:
     def repl(match: re.Match) -> str:
         inner = match.group("content")
         content = (inner or "").strip()
+        # R09：括号若属于受保护正式名（如 `ryo(supercell)`），整行清洗时也不能剥离。
+        # 只看括号紧邻的字段尾部，避免因为行内别处出现受保护名而误留真正的罗马字括号。
+        owner = line[: match.start()].rstrip()
+        owner_tail = re.split(r"[\s/／|｜]+", owner)[-1] if owner else ""
+        if rules_has_protected_title(f"{owner_tail}{match.group(0).strip()}"):
+            return match.group(0)
         if looks_like_romanization_or_translation(content):
             return ""
         return match.group(0)  # 保留音乐信息括号与正式名称括号

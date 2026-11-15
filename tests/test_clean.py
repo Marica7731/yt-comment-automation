@@ -648,3 +648,19 @@ def test_angle_bracket_transliteration_is_removed_from_song_titles():
         (2257, "ルージュの伝言", "松任谷由実"),
     ]
     assert all("〈" not in item.song and "〉" not in item.song for item in items)
+
+
+def test_protected_artist_parenthesis_survives_timeline_cleaning():
+    """BV1jqsH69Ems：R09 保护名 `ryo(supercell)` 不能在整行时间轴清洗时被当罗马字删掉。"""
+    source = (
+        "‐‐✦✧ SETLIST ✧✦\n"
+        "02:35  花の塔 / さユり\n"
+        "25:33  君の知らない物語 / ryo(supercell)\n"
+        "0:00:00  sssSTART"
+    )
+    items = clean.build_comment_songlist([source])
+    assert [(item.timestamp_seconds, item.song, item.artist) for item in items] == [
+        (155, "花の塔", "さユり"),
+        (1533, "君の知らない物語", "ryo(supercell)"),
+    ]
+    assert clean.extract_plain_songs_from_source_timeline(source)[-1].artist == "ryo(supercell)"
