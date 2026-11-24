@@ -107,6 +107,15 @@ def test_rule_remix_protected():
     assert "DECO*27" in parsed
 
 
+def test_rule_version_spelled_out_protected():
+    """R06：Version 全拼与 ver 缩写一样是版本标注，保留（与 clean.py 版本词表一致）。"""
+    parsed = rules.apply_song_cleanup("草創のスレシア (Jazz Version) / ネモ・テルミナス")
+    assert "草創のスレシア (Jazz Version)" in parsed
+    assert "ネモ・テルミナス" in parsed
+    # 真正含空格的译文/罗马字括号仍要删除
+    assert rules.apply_song_cleanup("絶頂讃歌 (Zetchou Sanka | Orgasm Anthem) / 和ぬか").startswith("絶頂讃歌 /")
+
+
 def test_rule_performance_notes():
     """R07：表演备注括号删除（含新 short. 变体）。"""
     parsed = rules.apply_song_cleanup("メルティランドナイトメア(short.) // 初音ミク／はるまきごはん")
