@@ -1,22 +1,22 @@
 # yt-comment-automation 交接文档
 
-> 最后更新：2026-10-25。本文档面向接手本项目的维护者（人或代理），覆盖架构、部署、数据、机制、坑与验证纪律。接手前必读；当前调度以 `docs/OPS_CURRENT.md` 和 `docs/AUTOMATION_BACKGROUND.md` 为准。
+> 最后更新：2026-11-25。本文档面向接手本项目的维护者（人或代理），覆盖架构、部署、数据、机制、坑与验证纪律。接手前必读；当前调度以 `docs/OPS_CURRENT.md` 和 `docs/AUTOMATION_BACKGROUND.md` 为准。
 
 ## 1. 项目是什么
 
 自动监控 B 站 5 个合集（直播/直播2/直播3/凛々咲/合集4，2026-10-25 快照为 660 个自家视频）里的 VTuber 歌枠投稿，抓取对应 YouTube 直播的评论区/简介中的时间戳歌单，清洗成规范格式后作为 B 站评论发布到视频下方，并附带源/发布双时间轴的飞书通知。附带两个附属任务：粉丝回复自动点赞、每日清洗复盘。
 
 - 仓库：`https://github.com/Marica7731/yt-comment-automation`（public，master，无密钥；private.env 被 gitignore）
-- 生产：WDC VPS `/opt/yt-comment-automation`；WDC 每 20 分钟 dispatch GitHub Action 并跑 cache-only 清洗，Codex 每 20 分钟检查增量并推进待审、运维和修复，点赞由 WDC 独立自动执行，每日 22:00/04:00 做双链路审计。
+- 生产：WDC VPS `/opt/yt-comment-automation`；WDC 每小时 dispatch GitHub Action 并跑 cache-only 清洗，Codex 增量心跳当前未启用，点赞由 WDC 独立自动执行（每 20 分钟），每日 22:00/04:00 做双链路审计。
 - 下游消费：`G:\codex-work\plugin` 的油猴插件 + `RULES.md` 共享确定性清洗规则。
 
 ## 2. 部署与调度全景（WDC）
 
 | 任务 | cron | 命令 | 日志 |
 |---|---|---|---|
-| YouTube 增量 | `*/20 * * * *`（WDC） | `dev/wdc_incremental_cycle.sh` -> `dev/wdc_run_youtube_action.py` -> `cron_job.sh` | `logs/incremental_*.log`、`logs/run_*.log` |
+| YouTube 增量 | `0 * * * *`（WDC） | `dev/wdc_incremental_cycle.sh` -> `dev/wdc_run_youtube_action.py` -> `cron_job.sh` | `logs/incremental_*.log`、`logs/run_*.log` |
 | 粉丝点赞 | `*/20 * * * *`（WDC） | `like_auto.py --max-count 10 --rounds 8` | `logs/like_auto.log` |
-| Codex 增量检查 | 每 20 分钟 | 审计 WDC Action 结果、全部非终态队列、日志和部署状态，并审核、发布或修复 | 当前会话 |
+| Codex 增量检查 | 当前未启用；恢复时每小时 | 审计 WDC Action 结果、全部非终态队列、日志和部署状态，并审核、发布或修复 | 当前会话 |
 | 双链路审计 | 每日北京 22:00/04:00 | `dev/incremental_audit.py` + `dev/like_success_audit.py` | 对应日志与飞书 |
 
 - 运行时数据：`/opt/yt-comment-automation/data/`；飞书凭据：仅从 WDC `/opt/yt-comment-automation/private.env` 或进程环境读取 `FEISHU_APP_ID/FEISHU_APP_SECRET/MY_FEISHU_OPEN_ID`，常规通知使用 `yt-comment-automation`；验证通过的评论成功与实际点赞成功明细额外使用 `FEISHU_SUCCESS_APP_ID/FEISHU_SUCCESS_APP_SECRET/FEISHU_SUCCESS_UNION_ID` 发送给成功终态机器人；B 站 cookie：`private.env` 的 `BILI_COOKIE_FILE` 指向 `/opt/feishupy-vps-wdc-canary/runtime/biliup_cookies.json`；生产链只走 Codex 审核，不配置任何外部模型凭据，禁止读取旧 bridge。
@@ -45,7 +45,7 @@
 
 ## 4. Codex 审核与执行链路
 
-- WDC 每 20 分钟 dispatch GitHub Action，等待原始 payload，再由 `cron_job.sh` 以 cache-only 方式清洗并写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时不发布。
+- WDC 每小时 dispatch GitHub Action，等待原始 payload，再由 `cron_job.sh` 以 cache-only 方式清洗并写入 `data/codex_review/<bvid>.json`；状态为 `pending` 时不发布。Action payload 未同步时跳过评论清洗并记录一次失败通知，避免拿旧缓存制造整轮缓存缺失错误。
 - 评论候选、YouTube Action 目标和 `pending` 列表默认只覆盖 `CODEX_SCOPE_START_DATE`（默认 `2026-10-02`）及之后的视频；历史存量不进入每轮扫描。手工指定 `--bvid` 或 `CODEX_SCOPE_BVIDS` 可绕过日期边界。
 - 点赞由 WDC `like_auto.py` 每 20 分钟独立处理：每次运行先扫描一次，再按最多 10 条分批处理本轮队列，批次之间不重扫；action 瞬时失败从 ledger 重试，最多 8 批。状态不可读或列表过期的候选只在后续扫描再次发现时重排队，避免空队列每 20 分钟重复失败通知。Codex 只做健康和成功率审计。
 - 审核文件是审计账本：`queue/merge` 不覆盖 `approved/applied/rejected`；执行前重新读取服务器真实点赞状态，状态不可确认宁可跳过。
@@ -64,7 +64,7 @@
 - 已验证主路径之一：`YOUTUBE_FETCH_BACKEND=official` 显式使用 YouTube Data API v3；key 只存 WDC
   `private.env`，不进 Git、不写 GitHub secret、不从本机请求 YouTube。2026-10-02 在 WDC 实测
   `videos.list`、`commentThreads.list` 均返回 HTTP 200、各 1 条数据；无 key 时明确报错，不做隐式降级。
-- YouTube 抓取主链路：WDC 每 20 分钟运行 `dev/wdc_incremental_cycle.sh`。
+- YouTube 抓取主链路：WDC 每小时运行 `dev/wdc_incremental_cycle.sh`。
   该脚本用 `/root/.secrets/github-token` 调 GitHub API dispatch `repository_dispatch`，
   轮询 `youtube-action-cache` 的单提交 payload，再经 `youtube_cache_sync` 写入 WDC。
   Action 按 3 秒最小间隔抓取并生成 `latest.json` / `previous.json` / `incremental_state.json`；

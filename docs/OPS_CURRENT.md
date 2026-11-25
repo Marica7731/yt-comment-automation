@@ -1,10 +1,10 @@
 # Current operations
 
-This file records the user-approved operational split as of 2026-10-25.
+This file records the user-approved operational split as of 2026-11-25.
 
 ## YouTube incremental fetch
 
-WDC runs `dev/wdc_incremental_cycle.sh` every 20 minutes. The cycle:
+WDC runs `dev/wdc_incremental_cycle.sh` hourly. The cycle:
 
 1. Computes due YouTube IDs from the current Bilibili collection snapshot.
 2. Dispatches the `youtube-fetch` GitHub Action with `repository_dispatch`.
@@ -22,8 +22,9 @@ Codex review draft and include the Action error in `source_text`. If there is
 no archive match, keep the existing retry/alert behavior. A dry run never
 queues an archive draft.
 
-GitHub's own schedule is not used because its start times are not precise enough
-for a 20-minute loop. WDC is the scheduler and the sole dispatcher.
+GitHub's own schedule is not used because WDC is the scheduler and sole
+dispatcher. The hourly cadence leaves enough time for the multi-video fetch job
+to finish and publish its same-round payload.
 
 The Action keeps:
 
@@ -36,9 +37,9 @@ accumulate as an unbounded Git history.
 
 ## Comment review windows
 
-The Codex++ heartbeat has been cleared and is currently inactive. When it is
-configured again, use a 20-minute cadence to review completed WDC cycles and
-process only new queue items; do not create a review just because a cycle ran.
+The Codex++ heartbeat is currently inactive. If it is configured again, use an
+hourly cadence to review completed WDC cycles and process only new queue items;
+do not create a review just because a cycle ran.
 
 A candidate is reviewed when a video increment is paired with a timestamped
 song-list increment, or when an exact YouTube ID match provides a structured

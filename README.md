@@ -2,7 +2,7 @@
 
 给 B 站合集视频的评论区自动发布「YouTube 时间戳歌轴」评论的工具。
 
-> WDC 每 20 分钟触发 GitHub Action 抓取视频与评论区原始 JSON；Codex 心跳每 20 分钟检查增量并推进待审、运维与修复。只有“视频增量 + 时间戳歌单增量/四类重审条件”同时成立时才进入内容审核。点赞由 WDC 独立脚本每 20 分钟自动执行。
+> WDC 每小时触发 GitHub Action 抓取视频与评论区原始 JSON；Codex 增量心跳当前未启用，恢复时按每小时检查增量并推进待审、运维与修复。只有“视频增量 + 时间戳歌单增量/四类重审条件”同时成立时才进入内容审核。点赞由 WDC 独立脚本每 20 分钟自动执行。
 
 B 站投稿简介第一行通常是 `https://youtu.be/<id>`（对应油管原视频）。本项目自动：
 
@@ -39,7 +39,7 @@ send_feishu_file.py  通过本项目飞书机器人发送本地文件
   incremental.py   原始评论/简介哈希与四类重审触发
   config.py        配置（环境变量 + private.env）
 dev/
-  wdc_incremental_cycle.sh  WDC 20 分钟 Action 周期
+  wdc_incremental_cycle.sh  WDC 每小时 Action 周期
   incremental_audit.py      原始前后 JSON 一致性审计
   like_success_audit.py     点赞队列/成功率审计
 tests/

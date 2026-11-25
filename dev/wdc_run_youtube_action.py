@@ -160,7 +160,7 @@ def run(timeout_seconds: float, poll_seconds: float, refresh: bool) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--timeout", type=float, default=900.0)
+    parser.add_argument("--timeout", type=float, default=1740.0)
     parser.add_argument("--poll-interval", type=float, default=5.0)
     parser.add_argument("--no-refresh", action="store_true")
     args = parser.parse_args(argv)
