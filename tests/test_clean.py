@@ -650,6 +650,14 @@ def test_angle_bracket_transliteration_is_removed_from_song_titles():
     assert all("〈" not in item.song and "〉" not in item.song for item in items)
 
 
+def test_latin_artist_name_with_tight_suffix_parenthesis_is_preserved():
+    """BV1Acyyz4EyA：`emon(Tes.)` 是正式制作人署名，不是罗马字/译文括号。"""
+    assert clean.clean_song_or_artist_part("emon(Tes.)") == "emon(Tes.)"
+    parsed = clean.parse_song_line_after_timestamp("1:00:58 shake it! / emon(Tes.)")
+    assert parsed is not None
+    assert (parsed.song, parsed.artist) == ("shake it!", "emon(Tes.)")
+
+
 def test_protected_artist_parenthesis_survives_timeline_cleaning():
     """BV1jqsH69Ems：R09 保护名 `ryo(supercell)` 不能在整行时间轴清洗时被当罗马字删掉。"""
     source = (

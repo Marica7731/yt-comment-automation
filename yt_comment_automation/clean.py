@@ -260,6 +260,10 @@ def strip_transliteration_parens_from_line(line: str) -> str:
         owner_tail = re.split(r"[\s/／|｜]+", owner)[-1] if owner else ""
         if rules_has_protected_title(f"{owner_tail}{match.group(0).strip()}"):
             return match.group(0)
+        # R06 的罗马字/译文括号是跟在名称后的注释：只有所有者字段含日文时才成立。
+        # 纯拉丁正式名后的紧邻括号（如 `emon(Tes.)`）是署名本体，不当译文剥离。
+        if not contains_japanese(owner_tail):
+            return match.group(0)
         if looks_like_romanization_or_translation(content):
             return ""
         return match.group(0)  # 保留音乐信息括号与正式名称括号
